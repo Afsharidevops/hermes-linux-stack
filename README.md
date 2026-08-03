@@ -360,37 +360,6 @@ Telegram. Do not run two Hermes gateways with the same bot token.
 If Open WebUI does not show models, verify the 9router combo exists and confirm
 the API URL and key in Open WebUI Admin Panel → Settings → Connections.
 
-## Publishing to your public GitHub
-
-Review the repository first:
-
-```bash
-git status --short
-git check-ignore .env data/hermes/.env
-```
-
-Initialize and publish with GitHub CLI:
-
-```bash
-git init
-git add .
-git commit -m "Initial public release"
-gh repo create hermes-linux-stack --public --source=. --remote=origin --push
-```
-
-Or create an empty public repository on GitHub, then:
-
-```bash
-git init
-git add .
-git commit -m "Initial public release"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/hermes-linux-stack.git
-git push -u origin main
-```
-
-Never force-add ignored secret or data files.
-
 ## Upstream documentation
 
 - [9router Docker deployment](https://github.com/decolua/9router/blob/master/DOCKER.md)
