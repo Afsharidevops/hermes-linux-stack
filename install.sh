@@ -225,6 +225,19 @@ existing_hermes_env_value() {
   printf '%s' "$value"
 }
 
+replace_env_value() {
+  local file="$1" key="$2" value="$3" tmp
+  tmp="$(mktemp "$file.tmp.XXXXXX")"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { changed=0 }
+    index($0, key "=") == 1 { print key "=" value; changed=1; next }
+    { print }
+    END { if (!changed) print key "=" value }
+  ' "$file" > "$tmp"
+  chmod --reference="$file" "$tmp"
+  mv "$tmp" "$file"
+}
+
 profile_enabled() {
   local profile="$1" configured
   configured="$(existing_env_value COMPOSE_PROFILES)"
@@ -435,14 +448,8 @@ if [[ "$configure_webui" == true ]]; then
 
   if [[ "$install_nine" == true ]]; then
     openwebui_api_url="http://nine-router:20128/v1"
-    if [[ "$install_hermes" == true ]]; then
-      openwebui_api_key="$provider_key"
-    elif [[ "$nine_require_key" == true ]]; then
-      openwebui_api_key="$(prompt_secret "9router API key for Open WebUI")"
-    else
-      entered_webui_key="$(prompt_secret "9router API key for Open WebUI (Enter for local-no-auth)" true)"
-      openwebui_api_key="${entered_webui_key:-local-no-auth}"
-    fi
+    openwebui_api_key="auto-generated-after-9router-starts"
+    info "A dedicated 9router API key and OpenCode-Free model will be configured automatically."
     info "Open WebUI will reach 9router through the private Docker network."
   else
     openwebui_api_url="$(prompt "OpenAI-compatible API base URL for Open WebUI" "http://host.docker.internal:20128/v1")"
@@ -614,18 +621,79 @@ detect_docker
 ok "Docker Compose configuration is valid."
 
 if [[ "$NO_START" == true ]]; then
+  if [[ "$install_nine" == true && "$install_webui" == true ]]; then
+    warn "Automatic Open WebUI key/model provisioning requires a normal installer run when services are started."
+  fi
   ok "Configuration complete. Start later with ./manage.sh start"
   exit 0
 fi
 
 info "Pulling official container images..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" pull
+
+openwebui_key_status=""
+opencode_combo_status=""
+opencode_free_model_count="0"
+if [[ "$install_nine" == true && "$install_webui" == true ]]; then
+  openwebui_db_preexisting=false
+  [[ -f "$OPENWEBUI_DIR/webui.db" ]] && openwebui_db_preexisting=true
+
+  info "Starting 9router to provision Open WebUI access..."
+  "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --no-deps nine-router
+  nine_ready=false
+  for _ in {1..60}; do
+    if "${DOCKER[@]}" exec nine-router node -e \
+      'fetch("http://127.0.0.1:20128/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' \
+      >/dev/null 2>&1; then
+      nine_ready=true
+      break
+    fi
+    sleep 2
+  done
+  [[ "$nine_ready" == true ]] || die "9router did not become ready for Open WebUI provisioning."
+
+  info "Generating/reusing the Open WebUI key and configuring OpenCode-Free..."
+  bootstrap_output="$("${DOCKER[@]}" exec -i nine-router node --input-type=module < "$ROOT_DIR/scripts/bootstrap-openwebui.mjs")"
+  openwebui_api_key="$(sed -n 's/^OPENWEBUI_API_KEY=//p' <<< "$bootstrap_output" | tail -n1)"
+  openwebui_key_status="$(sed -n 's/^OPENWEBUI_KEY_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
+  opencode_combo_status="$(sed -n 's/^OPENCODE_COMBO_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
+  opencode_free_model_count="$(sed -n 's/^OPENCODE_FREE_MODEL_COUNT=//p' <<< "$bootstrap_output" | tail -n1)"
+  [[ -n "$openwebui_api_key" ]] || die "9router did not return the generated Open WebUI API key."
+  replace_env_value "$ENV_FILE" OPENWEBUI_OPENAI_API_KEY "$(dotenv_quote "$openwebui_api_key")"
+fi
+
 if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
   info "Validating generated Caddy configuration..."
   "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
 fi
 info "Starting selected services..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --remove-orphans
+
+if [[ "$install_nine" == true && "$install_webui" == true ]]; then
+  if [[ "$openwebui_db_preexisting" == true ]]; then
+    info "Updating the existing Open WebUI connection without deleting its data..."
+    webui_db_ready=false
+    for _ in {1..60}; do
+      if "${DOCKER[@]}" exec open-webui python -c \
+        'import sqlite3; db=sqlite3.connect("/app/backend/data/webui.db"); db.execute("select 1 from config limit 1").fetchone(); db.close()' \
+        >/dev/null 2>&1; then
+        webui_db_ready=true
+        break
+      fi
+      sleep 2
+    done
+    [[ "$webui_db_ready" == true ]] || die "Open WebUI database did not become ready for connection migration."
+    "${DOCKER[@]}" exec -i open-webui python < "$ROOT_DIR/scripts/sync-openwebui-config.py"
+    "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" restart open-webui
+  fi
+
+  if [[ "$opencode_combo_status" != unavailable ]]; then
+    info "Verifying Open WebUI can authenticate to 9router and discover OpenCode-Free..."
+    "${DOCKER[@]}" exec -i open-webui python < "$ROOT_DIR/scripts/verify-openwebui-backend.py"
+  else
+    warn "The 9router key is configured, but OpenCode-Free could not be refreshed from the upstream catalog."
+  fi
+fi
 
 printf '\n'
 ok "Installation complete."
@@ -637,6 +705,10 @@ fi
 [[ "$configure_hermes" == true && "$api_enabled" == true ]] && printf 'Hermes API key (save now): %s\n' "$api_key"
 if [[ "$install_webui" == true ]]; then
   printf 'Open WebUI: %s\n' "$openwebui_url"
+  if [[ -n "$openwebui_key_status" ]]; then
+    printf 'Open WebUI 9router key: %s (stored securely; not printed)\n' "$openwebui_key_status"
+    printf 'OpenCode-Free model: %s (%s free upstream models)\n' "$opencode_combo_status" "$opencode_free_model_count"
+  fi
   [[ "$openwebui_signup" == true ]] && printf '%s\n' 'Open WebUI: the first registered account becomes administrator; disable signup afterward.'
 fi
 if [[ "$install_caddy" == true ]]; then

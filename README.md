@@ -23,6 +23,8 @@ selection, or install Open WebUI by itself.
 - Localhost-only published ports by default
 - Optional Hermes dashboard and API
 - Optional Open WebUI connected to 9router or another OpenAI-compatible API
+- Dedicated auto-generated 9router key for Open WebUI
+- Installer-managed `OpenCode-Free` model with current free OpenCode fallbacks
 - Optional Caddy profile with wizard-generated domains and automatic HTTPS
 - Secure generated JWT, signing, machine-ID, WebUI, and API secrets
 - Reconfiguration backups
@@ -100,7 +102,7 @@ The installer asks:
 7. Telegram BotFather token and allowed numeric IDs
 8. Optional Telegram home channel
 9. Optional Hermes dashboard and API
-10. Open WebUI endpoint, API key, URL, and signup policy
+10. Open WebUI endpoint (or automatic 9router connection), URL, and signup policy
 11. Caddy bind address and optional HTTPS domains for each installed web service
 
 Application ports default to `127.0.0.1`. The bind prompts accept a specific
@@ -134,8 +136,24 @@ name must match the model name entered in the installer.
 
 ### 2. Configure endpoint authentication
 
-For a fresh private installation, leaving `REQUIRE_API_KEY=false` allows Hermes
-and Open WebUI to connect immediately over the private Docker network.
+When 9router and Open WebUI are selected together, the installer automatically:
+
+1. Generates or reuses a dedicated 9router endpoint key named
+   `Open WebUI (hermes-linux-stack)`.
+2. Fetches the current no-cost model list from OpenCode.
+3. Creates or updates a 9router combo named `OpenCode-Free` with those `oc/*`
+   models as fallbacks.
+4. Stores the endpoint key in `.env`, synchronizes an existing Open WebUI
+   database when upgrading, and verifies authenticated model discovery from the
+   Open WebUI container.
+
+The key is intentionally not printed. You can inspect, rotate, or revoke it in
+the 9router dashboard. OpenCode's free catalog is dynamic, so rerunning the
+installer refreshes the combo.
+
+For a fresh private installation, leaving `REQUIRE_API_KEY=false` still allows
+Hermes to use its configured local key behavior. Open WebUI always receives its
+own generated key.
 
 For stronger protection:
 
@@ -148,9 +166,8 @@ For stronger protection:
 ./manage.sh restart
 ```
 
-For Open WebUI, update the key in Admin Panel → Settings → Connections. Open
-WebUI persists connection settings in its database after first launch, so a
-later `.env` change does not override the saved UI setting.
+For an external OpenAI-compatible endpoint (when 9router is not selected), the
+wizard asks for that endpoint's API key normally.
 
 Do not use provider master/management keys when a scoped endpoint key is
 available.
@@ -397,7 +414,8 @@ If Telegram does not connect:
 Verify the BotFather token, numeric allowlist, outbound DNS, and HTTPS access to
 Telegram. Do not run two Hermes gateways with the same bot token.
 
-If Open WebUI does not show models, verify the 9router combo exists and confirm
+If Open WebUI does not show models, verify the `OpenCode-Free` combo and the
+`Open WebUI (hermes-linux-stack)` endpoint key exist in 9router. Then confirm
 the API URL and key in Open WebUI Admin Panel → Settings → Connections.
 
 ## Upstream documentation

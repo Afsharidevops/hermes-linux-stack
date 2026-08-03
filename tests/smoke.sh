@@ -21,6 +21,7 @@ grep -q '^COMPOSE_PROFILES=9router,hermes,open-webui,caddy$' "$TEST_DIR/stack/.e
 grep -q '^NINEROUTER_AUTH_COOKIE_SECURE=true$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_PUBLIC_BASE_URL="https://router.example.com"$' "$TEST_DIR/stack/.env"
 grep -q '^OPENWEBUI_URL="https://chat.example.com"$' "$TEST_DIR/stack/.env"
+grep -q '^OPENWEBUI_OPENAI_API_KEY="auto-generated-after-9router-starts"$' "$TEST_DIR/stack/.env"
 grep -q '^router.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
 grep -q '^[[:space:]]*reverse_proxy nine-router:20128$' "$TEST_DIR/stack/data/caddy/Caddyfile"
 grep -q '^chat.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
