@@ -330,9 +330,15 @@ Valid profile names are:
 - `open-webui`
 - `caddy`
 
-Rerun `./install.sh` or `./manage.sh configure` to change the selection. Existing
-configuration files receive timestamped backups before replacement.
-Generated signing secrets are preserved during reconfiguration. The 9router
+Rerun the same curl command, `./install.sh`, or `./manage.sh configure` at any
+time. When an installation already exists, the wizard shows its active
+components and asks separately whether to reconfigure each installed component
+or add each missing component. For example, you can install 9router first and
+later add Hermes Agent, Open WebUI, or Caddy without reinstalling the stack.
+
+Components you do not select for reconfiguration keep their settings, secrets,
+data, and Compose profile. Configuration files receive timestamped backups
+before replacement, and generated signing secrets are preserved. The 9router
 `INITIAL_PASSWORD` is used only when its database has no saved password, so
 rerunning the installer does not reset an existing dashboard account password.
 

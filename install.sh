@@ -193,24 +193,77 @@ existing_env_value() {
   printf '%s' "$value"
 }
 
+existing_hermes_env_value() {
+  local key="$1" value=""
+  if [[ -f "$HERMES_DIR/.env" ]]; then
+    value="$(sed -n "s/^${key}=//p" "$HERMES_DIR/.env" | head -n1)"
+    value="${value#\"}"
+    value="${value%\"}"
+  fi
+  printf '%s' "$value"
+}
+
+profile_enabled() {
+  local profile="$1" configured
+  configured="$(existing_env_value COMPOSE_PROFILES)"
+  [[ ",$configured," == *",$profile,"* ]]
+}
+
 printf '\nHermes + 9router Linux Installer\n'
 printf '%s\n' '================================'
-printf '%s\n' '1) Install both 9router and Hermes Agent (recommended)'
-printf '%s\n' '2) Install 9router only'
-printf '%s\n' '3) Install Hermes Agent only'
-printf '%s\n' '4) Install Open WebUI only'
-selection="$(prompt "Choose installation" "1")"
+configure_nine=false
+configure_hermes=false
+configure_webui=false
+configure_caddy=false
+existing_install=false
 
-case "$selection" in
-  1) install_nine=true; install_hermes=true; install_webui=false ;;
-  2) install_nine=true; install_hermes=false; install_webui=false ;;
-  3) install_nine=false; install_hermes=true; install_webui=false ;;
-  4) install_nine=false; install_hermes=false; install_webui=true ;;
-  *) die "Choose 1, 2, 3, or 4." ;;
-esac
+if [[ -f "$ENV_FILE" ]]; then
+  existing_install=true
+  install_nine=false; profile_enabled 9router && install_nine=true
+  install_hermes=false; profile_enabled hermes && install_hermes=true
+  install_webui=false; profile_enabled open-webui && install_webui=true
+  install_caddy=false; profile_enabled caddy && install_caddy=true
 
-if [[ "$selection" != 4 ]] && confirm "Also install Open WebUI?" n; then
-  install_webui=true
+  printf 'Existing components: %s\n' "$(existing_env_value COMPOSE_PROFILES)"
+  printf '%s\n' 'The wizard keeps existing components, secrets, and data by default.'
+
+  if [[ "$install_nine" == true ]]; then
+    confirm "Reconfigure existing 9router settings?" n && configure_nine=true
+  elif confirm "Add 9router?" n; then
+    install_nine=true; configure_nine=true
+  fi
+  if [[ "$install_hermes" == true ]]; then
+    confirm "Reconfigure existing Hermes Agent settings?" n && configure_hermes=true
+  elif confirm "Add Hermes Agent?" n; then
+    install_hermes=true; configure_hermes=true
+  fi
+  if [[ "$install_webui" == true ]]; then
+    confirm "Reconfigure existing Open WebUI settings?" n && configure_webui=true
+  elif confirm "Add Open WebUI?" n; then
+    install_webui=true; configure_webui=true
+  fi
+else
+  printf '%s\n' '1) Install both 9router and Hermes Agent (recommended)'
+  printf '%s\n' '2) Install 9router only'
+  printf '%s\n' '3) Install Hermes Agent only'
+  printf '%s\n' '4) Install Open WebUI only'
+  selection="$(prompt "Choose installation" "1")"
+
+  case "$selection" in
+    1) install_nine=true; install_hermes=true; install_webui=false ;;
+    2) install_nine=true; install_hermes=false; install_webui=false ;;
+    3) install_nine=false; install_hermes=true; install_webui=false ;;
+    4) install_nine=false; install_hermes=false; install_webui=true ;;
+    *) die "Choose 1, 2, 3, or 4." ;;
+  esac
+
+  if [[ "$selection" != 4 ]] && confirm "Also install Open WebUI?" n; then
+    install_webui=true
+  fi
+  configure_nine="$install_nine"
+  configure_hermes="$install_hermes"
+  configure_webui="$install_webui"
+  install_caddy=false
 fi
 
 profiles=""
@@ -218,20 +271,15 @@ profiles=""
 [[ "$install_hermes" == true ]] && profiles="${profiles:+$profiles,}hermes"
 [[ "$install_webui" == true ]] && profiles="${profiles:+$profiles,}open-webui"
 
-if [[ -f "$ENV_FILE" ]]; then
-  confirm "An existing installation was found. Reconfigure it (backups will be created)?" n \
-    || { info "Nothing changed."; exit 0; }
-fi
-
 mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$CADDY_DIR"
 backup_existing
 
-nine_bind="127.0.0.1"
-nine_port="20128"
-nine_password="not-installed"
-nine_require_key="false"
-nine_cookie_secure="false"
-nine_public_url="http://localhost:20128"
+nine_bind="$(existing_env_value NINEROUTER_BIND_IP)"; nine_bind="${nine_bind:-127.0.0.1}"
+nine_port="$(existing_env_value NINEROUTER_PORT)"; nine_port="${nine_port:-20128}"
+nine_password="$(existing_env_value NINEROUTER_INITIAL_PASSWORD)"; nine_password="${nine_password:-not-installed}"
+nine_require_key="$(existing_env_value NINEROUTER_REQUIRE_API_KEY)"; nine_require_key="${nine_require_key:-false}"
+nine_cookie_secure="$(existing_env_value NINEROUTER_AUTH_COOKIE_SECURE)"; nine_cookie_secure="${nine_cookie_secure:-false}"
+nine_public_url="$(existing_env_value NINEROUTER_PUBLIC_BASE_URL)"; nine_public_url="${nine_public_url:-http://localhost:20128}"
 existing_nine_jwt="$(existing_env_value NINEROUTER_JWT_SECRET)"
 existing_nine_key_secret="$(existing_env_value NINEROUTER_API_KEY_SECRET)"
 existing_nine_salt="$(existing_env_value NINEROUTER_MACHINE_ID_SALT)"
@@ -239,7 +287,7 @@ nine_jwt="${existing_nine_jwt:-$(random_hex 32)}"
 nine_key_secret="${existing_nine_key_secret:-$(random_hex 32)}"
 nine_salt="${existing_nine_salt:-$(random_hex 32)}"
 
-if [[ "$install_nine" == true ]]; then
+if [[ "$configure_nine" == true ]]; then
   printf '\n9router settings\n'
   printf '%s\n' '----------------'
   nine_bind="$(prompt "Host bind address (127.0.0.1 is safest)" "127.0.0.1")"
@@ -253,30 +301,30 @@ if [[ "$install_nine" == true ]]; then
   fi
 fi
 
-openwebui_bind="127.0.0.1"
-openwebui_port="3000"
-openwebui_url="http://localhost:3000"
+openwebui_bind="$(existing_env_value OPENWEBUI_BIND_IP)"; openwebui_bind="${openwebui_bind:-127.0.0.1}"
+openwebui_port="$(existing_env_value OPENWEBUI_PORT)"; openwebui_port="${openwebui_port:-3000}"
+openwebui_url="$(existing_env_value OPENWEBUI_URL)"; openwebui_url="${openwebui_url:-http://localhost:3000}"
 existing_openwebui_secret="$(existing_env_value OPENWEBUI_SECRET_KEY)"
 openwebui_secret="${existing_openwebui_secret:-$(random_hex 32)}"
-openwebui_api_url="http://nine-router:20128/v1"
-openwebui_api_key="local-no-auth"
-openwebui_signup="true"
+openwebui_api_url="$(existing_env_value OPENWEBUI_OPENAI_BASE_URL)"; openwebui_api_url="${openwebui_api_url:-http://nine-router:20128/v1}"
+openwebui_api_key="$(existing_env_value OPENWEBUI_OPENAI_API_KEY)"; openwebui_api_key="${openwebui_api_key:-local-no-auth}"
+openwebui_signup="$(existing_env_value OPENWEBUI_ENABLE_SIGNUP)"; openwebui_signup="${openwebui_signup:-true}"
 
-hermes_bind="127.0.0.1"
-hermes_api_port="8642"
-hermes_dashboard_port="9119"
-hermes_dashboard="0"
+hermes_bind="$(existing_env_value HERMES_BIND_IP)"; hermes_bind="${hermes_bind:-127.0.0.1}"
+hermes_api_port="$(existing_env_value HERMES_API_PORT)"; hermes_api_port="${hermes_api_port:-8642}"
+hermes_dashboard_port="$(existing_env_value HERMES_DASHBOARD_PORT)"; hermes_dashboard_port="${hermes_dashboard_port:-9119}"
+hermes_dashboard="$(existing_env_value HERMES_DASHBOARD)"; hermes_dashboard="${hermes_dashboard:-0}"
 provider_name="9router"
 provider_url="http://nine-router:20128/v1"
 provider_key="local-no-auth"
 model_name="ai"
-telegram_token=""
-telegram_ids=""
-telegram_home=""
-api_enabled="false"
-api_key=""
+telegram_token="$(existing_hermes_env_value TELEGRAM_BOT_TOKEN)"
+telegram_ids="$(existing_hermes_env_value TELEGRAM_ALLOWED_USERS)"
+telegram_home="$(existing_hermes_env_value TELEGRAM_HOME_CHANNEL)"
+api_enabled="$(existing_hermes_env_value API_SERVER_ENABLED)"; api_enabled="${api_enabled:-false}"
+api_key="$(existing_hermes_env_value API_SERVER_KEY)"
 
-if [[ "$install_hermes" == true ]]; then
+if [[ "$configure_hermes" == true ]]; then
   printf '\nHermes Agent settings\n'
   printf '%s\n' '---------------------'
   if [[ "$install_nine" == true ]]; then
@@ -328,7 +376,7 @@ if [[ "$install_hermes" == true ]]; then
   fi
 fi
 
-if [[ "$install_webui" == true ]]; then
+if [[ "$configure_webui" == true ]]; then
   printf '\nOpen WebUI settings\n'
   printf '%s\n' '-------------------'
   openwebui_bind="$(prompt "Open WebUI host bind address (127.0.0.1 is safest)" "127.0.0.1")"
@@ -358,7 +406,6 @@ if [[ "$install_webui" == true ]]; then
   fi
 fi
 
-install_caddy=false
 caddy_email=""
 caddy_nine_domain=""
 caddy_webui_domain=""
@@ -366,7 +413,13 @@ caddy_hermes_dashboard_domain=""
 caddy_hermes_api_domain=""
 
 if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard" == 1 || "$api_enabled" == true ]]; then
-  if confirm "Configure optional domains with Caddy automatic HTTPS?" n; then
+  if [[ "$install_caddy" == true ]]; then
+    confirm "Reconfigure existing Caddy domains?" n && configure_caddy=true
+  elif confirm "Add optional Caddy domains with automatic HTTPS?" n; then
+    configure_caddy=true
+  fi
+
+  if [[ "$configure_caddy" == true ]]; then
     install_caddy=true
     printf '\nCaddy domain settings\n'
     printf '%s\n' '---------------------'
@@ -403,7 +456,6 @@ if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard"
       warn "No domains were selected; Caddy will not be installed."
       install_caddy=false
     else
-      profiles="${profiles:+$profiles,}caddy"
       warn "Caddy needs public DNS records plus inbound TCP 80/443 and UDP 443."
       if [[ -n "$caddy_nine_domain" && "$nine_require_key" != true ]]; then
         warn "9router /v1 will be public without Bearer-key enforcement. Enable REQUIRE_API_KEY after creating a 9router endpoint key."
@@ -414,6 +466,8 @@ if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard"
     fi
   fi
 fi
+
+[[ "$install_caddy" == true ]] && profiles="${profiles:+$profiles,}caddy"
 
 uid="${SUDO_UID:-$(id -u)}"
 gid="${SUDO_GID:-$(id -g)}"
@@ -452,7 +506,7 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
 chmod 600 "$tmp_env"
 mv "$tmp_env" "$ENV_FILE"
 
-if [[ "$install_hermes" == true ]]; then
+if [[ "$configure_hermes" == true ]]; then
   config="$(<"$ROOT_DIR/templates/hermes-config.yaml.template")"
   config="${config//__PROVIDER_NAME__/$(yaml_quote "$provider_name")}"
   config="${config//__PROVIDER_BASE_URL__/$(yaml_quote "$provider_url")}"
@@ -475,7 +529,7 @@ if [[ "$install_hermes" == true ]]; then
   chmod 644 "$HERMES_DIR/config.yaml"
 fi
 
-if [[ "$install_caddy" == true ]]; then
+if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
   {
     if [[ -n "$caddy_email" ]]; then
       printf '{\n\temail %s\n}\n\n' "$caddy_email"
@@ -515,7 +569,7 @@ fi
 
 info "Pulling official container images..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" pull
-if [[ "$install_caddy" == true ]]; then
+if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
   info "Validating generated Caddy configuration..."
   "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
 fi

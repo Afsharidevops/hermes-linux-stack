@@ -42,4 +42,13 @@ grep -q '^COMPOSE_PROFILES=9router$' "$TEST_DIR/no-caddy/.env"
 test ! -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
 docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
 
+# A second wizard run must preserve 9router while adding Hermes and Caddy.
+printf 'n\ny\nn\n\n\n\nn\nn\nn\ny\n\ny\nrouter-added.example.com\n' \
+  | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
+grep -q '^COMPOSE_PROFILES=9router,hermes,caddy$' "$TEST_DIR/no-caddy/.env"
+grep -q '^NINEROUTER_INITIAL_PASSWORD="second-password"$' "$TEST_DIR/no-caddy/.env"
+grep -q '^router-added.example.com {$' "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
+test -f "$TEST_DIR/no-caddy/data/hermes/config.yaml"
+docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
+
 printf 'Installer smoke test passed.\n'
