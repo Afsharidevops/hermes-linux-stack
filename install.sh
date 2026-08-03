@@ -364,7 +364,12 @@ if [[ "$change_bind_ips" == true ]]; then
   if [[ "$install_caddy" == true && "$configure_caddy" != true ]]; then
     caddy_bind="$(prompt_bind_ip "Caddy HTTP/HTTPS bind IP" "$caddy_bind")"
   fi
-  warn "0.0.0.0 publishes a service on every host interface; protect it with a firewall and authentication."
+  if [[ ( "$install_nine" == true && "$nine_bind" == 0.0.0.0 ) \
+    || ( "$install_hermes" == true && "$hermes_bind" == 0.0.0.0 ) \
+    || ( "$install_webui" == true && "$openwebui_bind" == 0.0.0.0 ) \
+    || ( "$install_caddy" == true && "$caddy_bind" == 0.0.0.0 ) ]]; then
+    warn "0.0.0.0 publishes a service on every host interface; protect it with a firewall and authentication."
+  fi
 fi
 
 if [[ "$configure_hermes" == true ]]; then
@@ -629,7 +634,7 @@ if [[ "$install_hermes" == true && -n "$telegram_token" ]]; then
   printf '%s\n' 'Telegram: open your bot and send /start'
 fi
 [[ "$hermes_dashboard" == 1 ]] && printf 'Hermes dashboard: http://%s:%s\n' "$hermes_bind" "$hermes_dashboard_port"
-[[ "$api_enabled" == true ]] && printf 'Hermes API key (save now): %s\n' "$api_key"
+[[ "$configure_hermes" == true && "$api_enabled" == true ]] && printf 'Hermes API key (save now): %s\n' "$api_key"
 if [[ "$install_webui" == true ]]; then
   printf 'Open WebUI: %s\n' "$openwebui_url"
   [[ "$openwebui_signup" == true ]] && printf '%s\n' 'Open WebUI: the first registered account becomes administrator; disable signup afterward.'
