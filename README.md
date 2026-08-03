@@ -101,7 +101,13 @@ The installer asks:
 8. Optional Telegram home channel
 9. Optional Hermes dashboard and API
 10. Open WebUI endpoint, API key, URL, and signup policy
-11. Optional Caddy HTTPS domains for each installed web service
+11. Caddy bind address and optional HTTPS domains for each installed web service
+
+Application ports default to `127.0.0.1`. The bind prompts accept a specific
+server/LAN IPv4 address or `0.0.0.0` for all interfaces. On a later wizard run,
+choose **Change published container bind IPs only** to update these addresses
+without re-entering service or Telegram secrets. Caddy defaults to `0.0.0.0`
+because public certificate validation must reach ports 80 and 443.
 
 Secrets are written to ignored files with mode `0600`:
 
@@ -335,6 +341,7 @@ time. When an installation already exists, the wizard shows its active
 components and asks separately whether to reconfigure each installed component
 or add each missing component. For example, you can install 9router first and
 later add Hermes Agent, Open WebUI, or Caddy without reinstalling the stack.
+It also offers a bind-IP-only path for changing published interfaces safely.
 
 Components you do not select for reconfiguration keep their settings, secrets,
 data, and Compose profile. Configuration files receive timestamped backups

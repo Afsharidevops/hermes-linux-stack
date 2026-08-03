@@ -119,6 +119,28 @@ valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && (( 1 <= 10#$1 && 10#$1 <= 65535 ))
 }
 
+valid_bind_ip() {
+  local ip="$1" octet
+  local -a octets
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  IFS=. read -r -a octets <<< "$ip"
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] && ((10#$octet <= 255)) || return 1
+  done
+}
+
+prompt_bind_ip() {
+  local label="$1" default="$2" value
+  while true; do
+    value="$(prompt "$label" "$default")"
+    if valid_bind_ip "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
+    warn "Enter an IPv4 address such as 127.0.0.1, 192.168.1.10, or 0.0.0.0." >&2
+  done
+}
+
 valid_ids() {
   [[ "$1" =~ ^[0-9]+(,[0-9]+)*$ ]]
 }
@@ -216,6 +238,7 @@ configure_hermes=false
 configure_webui=false
 configure_caddy=false
 existing_install=false
+change_bind_ips=false
 
 if [[ -f "$ENV_FILE" ]]; then
   existing_install=true
@@ -242,6 +265,7 @@ if [[ -f "$ENV_FILE" ]]; then
   elif confirm "Add Open WebUI?" n; then
     install_webui=true; configure_webui=true
   fi
+  confirm "Change published container bind IPs only?" n && change_bind_ips=true
 else
   printf '%s\n' '1) Install both 9router and Hermes Agent (recommended)'
   printf '%s\n' '2) Install 9router only'
@@ -290,7 +314,7 @@ nine_salt="${existing_nine_salt:-$(random_hex 32)}"
 if [[ "$configure_nine" == true ]]; then
   printf '\n9router settings\n'
   printf '%s\n' '----------------'
-  nine_bind="$(prompt "Host bind address (127.0.0.1 is safest)" "127.0.0.1")"
+  nine_bind="$(prompt_bind_ip "9router host bind address (127.0.0.1 is safest)" "$nine_bind")"
   nine_port="$(prompt "Dashboard/API port" "20128")"
   valid_port "$nine_port" || die "Invalid 9router port: $nine_port"
   nine_password="$(prompt_secret "Initial 9router dashboard password")"
@@ -323,10 +347,30 @@ telegram_ids="$(existing_hermes_env_value TELEGRAM_ALLOWED_USERS)"
 telegram_home="$(existing_hermes_env_value TELEGRAM_HOME_CHANNEL)"
 api_enabled="$(existing_hermes_env_value API_SERVER_ENABLED)"; api_enabled="${api_enabled:-false}"
 api_key="$(existing_hermes_env_value API_SERVER_KEY)"
+caddy_bind="$(existing_env_value CADDY_BIND_IP)"; caddy_bind="${caddy_bind:-0.0.0.0}"
+
+if [[ "$change_bind_ips" == true ]]; then
+  printf '\nPublished container bind IPs\n'
+  printf '%s\n' '----------------------------'
+  if [[ "$install_nine" == true && "$configure_nine" != true ]]; then
+    nine_bind="$(prompt_bind_ip "9router bind IP" "$nine_bind")"
+  fi
+  if [[ "$install_hermes" == true && "$configure_hermes" != true ]]; then
+    hermes_bind="$(prompt_bind_ip "Hermes API/dashboard bind IP" "$hermes_bind")"
+  fi
+  if [[ "$install_webui" == true && "$configure_webui" != true ]]; then
+    openwebui_bind="$(prompt_bind_ip "Open WebUI bind IP" "$openwebui_bind")"
+  fi
+  if [[ "$install_caddy" == true && "$configure_caddy" != true ]]; then
+    caddy_bind="$(prompt_bind_ip "Caddy HTTP/HTTPS bind IP" "$caddy_bind")"
+  fi
+  warn "0.0.0.0 publishes a service on every host interface; protect it with a firewall and authentication."
+fi
 
 if [[ "$configure_hermes" == true ]]; then
   printf '\nHermes Agent settings\n'
   printf '%s\n' '---------------------'
+  hermes_bind="$(prompt_bind_ip "Hermes API/dashboard host bind address (127.0.0.1 is safest)" "$hermes_bind")"
   if [[ "$install_nine" == true ]]; then
     provider_url="http://nine-router:20128/v1"
     info "Hermes will reach 9router through the private Docker network."
@@ -379,7 +423,7 @@ fi
 if [[ "$configure_webui" == true ]]; then
   printf '\nOpen WebUI settings\n'
   printf '%s\n' '-------------------'
-  openwebui_bind="$(prompt "Open WebUI host bind address (127.0.0.1 is safest)" "127.0.0.1")"
+  openwebui_bind="$(prompt_bind_ip "Open WebUI host bind address (127.0.0.1 is safest)" "$openwebui_bind")"
   openwebui_port="$(prompt "Open WebUI port" "3000")"
   valid_port "$openwebui_port" || die "Invalid Open WebUI port."
   openwebui_url="$(prompt "Open WebUI public URL (or local URL)" "http://localhost:$openwebui_port")"
@@ -423,6 +467,7 @@ if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard"
     install_caddy=true
     printf '\nCaddy domain settings\n'
     printf '%s\n' '---------------------'
+    caddy_bind="$(prompt_bind_ip "Caddy HTTP/HTTPS host bind address (public HTTPS normally needs 0.0.0.0)" "$caddy_bind")"
     caddy_email="$(prompt "Optional ACME email for certificate notices (Enter to skip)")"
     if [[ -n "$caddy_email" && ( "$caddy_email" != *@* || "$caddy_email" == *[[:space:]]* ) ]]; then
       die "The Caddy certificate email is not valid."
@@ -502,6 +547,7 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'OPENWEBUI_OPENAI_API_KEY=%s\n' "$(dotenv_quote "$openwebui_api_key")"
   printf 'OPENWEBUI_ENABLE_SIGNUP=%s\n' "$openwebui_signup"
   printf 'CADDY_IMAGE=caddy:2-alpine\n'
+  printf 'CADDY_BIND_IP=%s\n' "$caddy_bind"
 } > "$tmp_env"
 chmod 600 "$tmp_env"
 mv "$tmp_env" "$ENV_FILE"

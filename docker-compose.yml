@@ -87,9 +87,9 @@ services:
     container_name: hermes-stack-caddy
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${CADDY_BIND_IP:-0.0.0.0}:80:80"
+      - "${CADDY_BIND_IP:-0.0.0.0}:443:443"
+      - "${CADDY_BIND_IP:-0.0.0.0}:443:443/udp"
     volumes:
       - ./data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./data/caddy/data:/data

@@ -14,7 +14,7 @@ rm -f "$TEST_DIR/stack/data/caddy/Caddyfile"
 test_token='123456:'
 test_token+='abcdefghijklmnopqrstuvwxyzABCDE'
 
-printf '\ny\n\n\ntest-password\n\nn\n\n\n\ny\n%s\n946652372,7264771088\n\nn\nn\n\n\n\ny\ny\nadmin@example.com\ny\nrouter.example.com\ny\nchat.example.com\n' "$test_token" \
+printf '\ny\n\n\ntest-password\n\nn\n\n\n\n\ny\n%s\n946652372,7264771088\n\nn\nn\n\n\n\ny\ny\n\nadmin@example.com\ny\nrouter.example.com\ny\nchat.example.com\n' "$test_token" \
   | "$TEST_DIR/stack/install.sh" --dry-run >/dev/null
 
 grep -q '^COMPOSE_PROFILES=9router,hermes,open-webui,caddy$' "$TEST_DIR/stack/.env"
@@ -43,12 +43,22 @@ test ! -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
 docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
 
 # A second wizard run must preserve 9router while adding Hermes and Caddy.
-printf 'n\ny\nn\n\n\n\nn\nn\nn\ny\n\ny\nrouter-added.example.com\n' \
+printf 'n\ny\nn\nn\n\n\n\n\nn\nn\nn\ny\n\n\ny\nrouter-added.example.com\n' \
   | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
 grep -q '^COMPOSE_PROFILES=9router,hermes,caddy$' "$TEST_DIR/no-caddy/.env"
 grep -q '^NINEROUTER_INITIAL_PASSWORD="second-password"$' "$TEST_DIR/no-caddy/.env"
 grep -q '^router-added.example.com {$' "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
 test -f "$TEST_DIR/no-caddy/data/hermes/config.yaml"
+docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
+
+# Bind addresses can be changed later without reconfiguring service secrets.
+hermes_env_checksum="$(sha256sum "$TEST_DIR/no-caddy/data/hermes/.env")"
+printf 'n\nn\nn\ny\n0.0.0.0\n192.168.10.20\n192.168.10.21\nn\n' \
+  | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
+grep -q '^NINEROUTER_BIND_IP=0.0.0.0$' "$TEST_DIR/no-caddy/.env"
+grep -q '^HERMES_BIND_IP=192.168.10.20$' "$TEST_DIR/no-caddy/.env"
+grep -q '^CADDY_BIND_IP=192.168.10.21$' "$TEST_DIR/no-caddy/.env"
+test "$hermes_env_checksum" = "$(sha256sum "$TEST_DIR/no-caddy/data/hermes/.env")"
 docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
 
 printf 'Installer smoke test passed.\n'
