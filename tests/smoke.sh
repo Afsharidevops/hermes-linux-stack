@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_DIR"' EXIT
+
+cp -a "$ROOT_DIR/." "$TEST_DIR/stack"
+rm -f "$TEST_DIR/stack/.env"
+rm -f "$TEST_DIR/stack/data/hermes/.env"
+rm -f "$TEST_DIR/stack/data/hermes/config.yaml"
+rm -f "$TEST_DIR/stack/data/caddy/Caddyfile"
+
+test_token='123456:'
+test_token+='abcdefghijklmnopqrstuvwxyzABCDE'
+
+printf '\ny\n\n\ntest-password\n\nn\n\n\n\ny\n%s\n946652372,7264771088\n\nn\nn\n\n\n\ny\ny\nadmin@example.com\ny\nrouter.example.com\ny\nchat.example.com\n' "$test_token" \
+  | "$TEST_DIR/stack/install.sh" --dry-run >/dev/null
+
+grep -q '^COMPOSE_PROFILES=9router,hermes,open-webui,caddy$' "$TEST_DIR/stack/.env"
+grep -q '^NINEROUTER_AUTH_COOKIE_SECURE=true$' "$TEST_DIR/stack/.env"
+grep -q '^NINEROUTER_PUBLIC_BASE_URL="https://router.example.com"$' "$TEST_DIR/stack/.env"
+grep -q '^OPENWEBUI_URL="https://chat.example.com"$' "$TEST_DIR/stack/.env"
+grep -q '^router.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
+grep -q '^[[:space:]]*reverse_proxy nine-router:20128$' "$TEST_DIR/stack/data/caddy/Caddyfile"
+grep -q '^chat.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
+grep -q '^[[:space:]]*reverse_proxy open-webui:8080$' "$TEST_DIR/stack/data/caddy/Caddyfile"
+docker compose -f "$TEST_DIR/stack/docker-compose.yml" --env-file "$TEST_DIR/stack/.env" config --quiet
+
+if [[ "${CADDY_VALIDATE_WITH_DOCKER:-false}" == true ]]; then
+  docker run --rm \
+    -v "$TEST_DIR/stack/data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+    caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+fi
+
+cp -a "$ROOT_DIR/." "$TEST_DIR/no-caddy"
+rm -f "$TEST_DIR/no-caddy/.env"
+rm -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
+printf '2\nn\n\n\nsecond-password\n\nn\nn\n' \
+  | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
+grep -q '^COMPOSE_PROFILES=9router$' "$TEST_DIR/no-caddy/.env"
+test ! -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
+docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
+
+printf 'Installer smoke test passed.\n'

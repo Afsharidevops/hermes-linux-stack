@@ -2,8 +2,10 @@
 data/9router/*
 data/hermes/*
 data/open-webui/*
+data/caddy/*
 !data/9router/.gitkeep
 !data/hermes/.gitkeep
 !data/open-webui/.gitkeep
+!data/caddy/.gitkeep
 *.backup-*
 *.log

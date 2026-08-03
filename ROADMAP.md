@@ -4,10 +4,9 @@
 
 1. Add tested backup and restore commands with retention settings.
 2. Support an optional S3-compatible backup/artifact endpoint.
-3. Add Caddy as an optional Compose profile with generated domain configuration.
-4. Add non-interactive installer flags for automation and cloud-init.
-5. Pin images in tagged releases and automate update pull requests.
-6. Add HTTP readiness checks for every enabled service.
+3. Add non-interactive installer flags for automation and cloud-init.
+4. Pin images in tagged releases and automate update pull requests.
+5. Add HTTP readiness checks for every enabled service.
 
 ## RustFS recommendation
 
@@ -50,10 +49,9 @@ or display raw secret files. A safe design needs:
 - optional Telegram notifications when containers become unhealthy;
 - configuration export with secrets redacted;
 - UFW/firewalld guidance and automated checks;
-- Caddy or Traefik TLS templates;
+- optional authentication middleware in front of sensitive dashboards;
 - optional Prometheus metrics and a small health dashboard;
 - release checksums and signed GitHub releases;
 - documented migration between servers;
 - Renovate or Dependabot for pinned image updates;
 - an uninstall command that preserves data unless deletion is explicitly chosen.
-

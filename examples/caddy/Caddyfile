@@ -2,10 +2,16 @@
 # Replace the domains and uncomment only the services you expose.
 
 # 9router.example.com {
-#     reverse_proxy 127.0.0.1:20128
+#     encode zstd gzip
+#     reverse_proxy nine-router:20128
 # }
 
 # hermes.example.com {
-#     reverse_proxy 127.0.0.1:9119
+#     encode zstd gzip
+#     reverse_proxy hermes:9119
 # }
 
+# chat.example.com {
+#     encode zstd gzip
+#     reverse_proxy open-webui:8080
+# }

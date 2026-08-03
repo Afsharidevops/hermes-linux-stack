@@ -23,8 +23,11 @@ do not simply change every bind address to `0.0.0.0`.
 
 Telegram polling uses outbound connections and needs no inbound firewall rule.
 
+When the optional Caddy profile is enabled, expose only TCP 80/443 and UDP 443.
+Keep 9router, Open WebUI, and Hermes host ports bound to `127.0.0.1`. DNS names
+must point to the server before Caddy can obtain public certificates.
+
 ## Reporting vulnerabilities
 
 Do not open a public issue containing secrets or exploit details. Use the
 private security-reporting feature of the GitHub repository when enabled.
-

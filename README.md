@@ -5,6 +5,7 @@ Interactive, public-safe Docker deployment for:
 - [9router](https://github.com/decolua/9router) — OpenAI-compatible provider router
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) — persistent AI agent with Telegram
 - [Open WebUI](https://github.com/open-webui/open-webui) — optional browser chat interface
+- [Caddy](https://caddyserver.com/) — optional domain routing and automatic HTTPS
 
 The installer asks what to install and collects all required settings. You can
 install both 9router and Hermes, either service alone, add Open WebUI to any
@@ -22,6 +23,7 @@ selection, or install Open WebUI by itself.
 - Localhost-only published ports by default
 - Optional Hermes dashboard and API
 - Optional Open WebUI connected to 9router or another OpenAI-compatible API
+- Optional Caddy profile with wizard-generated domains and automatic HTTPS
 - Secure generated JWT, signing, machine-ID, WebUI, and API secrets
 - Reconfiguration backups
 - Simple update, logs, status, and user-management commands
@@ -37,6 +39,8 @@ Hermes Agent ──────→ 9router ──────→ configured AI p
     │                   ↑
     │                   │
     └──── shared Docker network ─── Open WebUI
+                                ↑
+Internet ── HTTPS ── optional Caddy reverse proxy
 
 Host defaults:
   9router:    127.0.0.1:20128
@@ -53,6 +57,7 @@ Host defaults:
 - `curl` if you want the wizard to install Docker
 - At least 2 GB RAM recommended for the full stack
 - Sufficient disk for container images and persistent chats
+- Public DNS records and inbound ports 80/443 only when Caddy is selected
 
 If Docker is missing, the installer asks permission before downloading and
 running Docker's official convenience installer.
@@ -96,6 +101,7 @@ The installer asks:
 8. Optional Telegram home channel
 9. Optional Hermes dashboard and API
 10. Open WebUI endpoint, API key, URL, and signup policy
+11. Optional Caddy HTTPS domains for each installed web service
 
 Secrets are written to ignored files with mode `0600`:
 
@@ -195,6 +201,7 @@ reconfiguration without exposing another web administration service.
 ./manage.sh logs hermes
 ./manage.sh logs 9router
 ./manage.sh logs webui
+./manage.sh logs caddy
 ./manage.sh configure
 ```
 
@@ -269,21 +276,40 @@ Restore by extracting `.env` and `data/` into a fresh clone, then run:
 Telegram polling requires no public route. Keep ports bound to `127.0.0.1` and
 use SSH tunnels unless public browser access is necessary.
 
-An example is available at `examples/caddy/Caddyfile`:
+The installer asks whether to configure Caddy. If selected, it asks separately
+whether to publish:
+
+- 9router
+- Open WebUI
+- the Hermes dashboard, when enabled
+- the Hermes API, when enabled
+
+Each selected service receives its own validated domain. The installer writes
+`data/caddy/Caddyfile`, adds the `caddy` Compose profile, validates the generated
+configuration with Caddy, and changes the relevant public URL to HTTPS.
+
+Example generated configuration:
 
 ```caddyfile
 9router.example.com {
-    reverse_proxy 127.0.0.1:20128
+    encode zstd gzip
+    reverse_proxy nine-router:20128
 }
 
 chat.example.com {
-    reverse_proxy 127.0.0.1:3000
+    encode zstd gzip
+    reverse_proxy open-webui:8080
 }
 ```
 
-When using HTTPS for 9router, enter the HTTPS URL during setup so secure auth
-cookies are enabled. Point DNS records to the Linux server and allow ports 80
-and 443. Keep the application ports blocked from the public internet.
+Before installation, create public DNS `A`/`AAAA` records pointing every domain
+to the Linux server. Allow inbound TCP ports 80 and 443 plus UDP 443. Caddy uses
+the domain names to obtain and renew certificates automatically. Keep the
+application ports blocked from the public internet.
+
+If ports 80 or 443 are already used by an existing reverse proxy, do not enable
+the Compose Caddy service. Use `examples/caddy/Caddyfile` as a configuration
+reference for the existing proxy instead.
 
 Before publishing Hermes's dashboard or API, review its authentication options
 and keep `API_SERVER_KEY` enabled. Do not expose unauthenticated administration
@@ -294,7 +320,7 @@ interfaces.
 The generated `COMPOSE_PROFILES` value controls active services:
 
 ```env
-COMPOSE_PROFILES=9router,hermes,open-webui
+COMPOSE_PROFILES=9router,hermes,open-webui,caddy
 ```
 
 Valid profile names are:
@@ -302,6 +328,7 @@ Valid profile names are:
 - `9router`
 - `hermes`
 - `open-webui`
+- `caddy`
 
 Rerun `./install.sh` or `./manage.sh configure` to change the selection. Existing
 configuration files receive timestamped backups before replacement.
@@ -367,6 +394,8 @@ the API URL and key in Open WebUI Admin Panel → Settings → Connections.
 - [Hermes Telegram guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/telegram.md)
 - [Open WebUI quick start](https://docs.openwebui.com/getting-started/quick-start/)
 - [Open WebUI environment reference](https://docs.openwebui.com/reference/env-configuration/)
+- [Caddy automatic HTTPS](https://caddyserver.com/docs/quick-starts/https)
+- [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 
 ## License
 

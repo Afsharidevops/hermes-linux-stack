@@ -16,7 +16,8 @@ Commands:
   restart                       Restart selected services
   update                        Pull current official images and recreate
   status                        Show container status
-  logs [hermes|9router|webui]  Follow all or one service's logs
+  logs [hermes|9router|webui|caddy]
+                                Follow all or one service's logs
   doctor                        Validate files and show diagnostics
   configure                     Run the interactive installer again
   add-telegram-user ID          Add one numeric Telegram user ID
@@ -82,7 +83,7 @@ interactive_menu() {
         [[ "$value" =~ ^[Yy]$ ]] && "$ROOT_DIR/manage.sh" update
         ;;
       7)
-        read -r -p 'Service (all/hermes/9router/webui) [all]: ' service
+        read -r -p 'Service (all/hermes/9router/webui/caddy) [all]: ' service
         if [[ -n "$service" && "$service" != all ]]; then
           "$ROOT_DIR/manage.sh" logs "$service" || true
         else
@@ -130,7 +131,8 @@ case "$command" in
       hermes) compose logs -f --tail=100 hermes ;;
       9router|nine-router) compose logs -f --tail=100 nine-router ;;
       webui|open-webui) compose logs -f --tail=100 open-webui ;;
-      *) printf 'Choose hermes, 9router, or webui.\n' >&2; exit 2 ;;
+      caddy) compose logs -f --tail=100 caddy ;;
+      *) printf 'Choose hermes, 9router, webui, or caddy.\n' >&2; exit 2 ;;
     esac
     ;;
   doctor)
@@ -141,6 +143,10 @@ case "$command" in
       mode="$(stat -c '%a' "$HERMES_ENV")"
       printf 'Hermes secret file mode: %s\n' "$mode"
       [[ "$mode" == 600 ]] || printf 'WARNING: expected data/hermes/.env mode 600\n'
+    fi
+    profiles="$(sed -n 's/^COMPOSE_PROFILES=//p' "$ENV_FILE")"
+    if [[ "$profiles" == *caddy* ]]; then
+      compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
     fi
     ;;
   configure) exec "$ROOT_DIR/install.sh" ;;

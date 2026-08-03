@@ -16,8 +16,11 @@ jobs:
         run: bash -n install.sh manage.sh
       - name: Validate Compose
         run: cp .env.example .env && docker compose config --quiet
+      - name: Test interactive installer
+        run: tests/smoke.sh
       - name: Ensure secrets are ignored
         run: |
           test "$(git check-ignore .env)" = ".env"
           test "$(git check-ignore data/hermes/.env)" = "data/hermes/.env"
           test "$(git check-ignore data/open-webui/webui.db)" = "data/open-webui/webui.db"
+          test "$(git check-ignore data/caddy/Caddyfile)" = "data/caddy/Caddyfile"

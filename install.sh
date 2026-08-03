@@ -40,6 +40,7 @@ ENV_FILE="$ROOT_DIR/.env"
 HERMES_DIR="$ROOT_DIR/data/hermes"
 NINEROUTER_DIR="$ROOT_DIR/data/9router"
 OPENWEBUI_DIR="$ROOT_DIR/data/open-webui"
+CADDY_DIR="$ROOT_DIR/data/caddy"
 DRY_RUN=false
 NO_START=false
 
@@ -122,6 +123,23 @@ valid_ids() {
   [[ "$1" =~ ^[0-9]+(,[0-9]+)*$ ]]
 }
 
+valid_domain() {
+  [[ ${#1} -le 253 && "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]]
+}
+
+prompt_domain() {
+  local label="$1" value
+  while true; do
+    value="$(prompt "$label")"
+    value="${value,,}"
+    if valid_domain "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
+    warn "Enter a domain only, such as chat.example.com, without https://, a port, or a path." >&2
+  done
+}
+
 install_docker() {
   command -v curl >/dev/null 2>&1 || die "curl is required to install Docker."
   local installer
@@ -161,6 +179,7 @@ backup_existing() {
   [[ -f "$ENV_FILE" ]] && cp -p "$ENV_FILE" "$ENV_FILE.backup-$stamp"
   [[ -f "$HERMES_DIR/.env" ]] && cp -p "$HERMES_DIR/.env" "$HERMES_DIR/.env.backup-$stamp"
   [[ -f "$HERMES_DIR/config.yaml" ]] && cp -p "$HERMES_DIR/config.yaml" "$HERMES_DIR/config.yaml.backup-$stamp"
+  [[ -f "$CADDY_DIR/Caddyfile" ]] && cp -p "$CADDY_DIR/Caddyfile" "$CADDY_DIR/Caddyfile.backup-$stamp"
   return 0
 }
 
@@ -204,7 +223,7 @@ if [[ -f "$ENV_FILE" ]]; then
     || { info "Nothing changed."; exit 0; }
 fi
 
-mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR"
+mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$CADDY_DIR"
 backup_existing
 
 nine_bind="127.0.0.1"
@@ -339,6 +358,63 @@ if [[ "$install_webui" == true ]]; then
   fi
 fi
 
+install_caddy=false
+caddy_email=""
+caddy_nine_domain=""
+caddy_webui_domain=""
+caddy_hermes_dashboard_domain=""
+caddy_hermes_api_domain=""
+
+if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard" == 1 || "$api_enabled" == true ]]; then
+  if confirm "Configure optional domains with Caddy automatic HTTPS?" n; then
+    install_caddy=true
+    printf '\nCaddy domain settings\n'
+    printf '%s\n' '---------------------'
+    caddy_email="$(prompt "Optional ACME email for certificate notices (Enter to skip)")"
+    if [[ -n "$caddy_email" && ( "$caddy_email" != *@* || "$caddy_email" == *[[:space:]]* ) ]]; then
+      die "The Caddy certificate email is not valid."
+    fi
+
+    declare -A selected_domains=()
+    if [[ "$install_nine" == true ]] && confirm "Publish 9router with a domain?" y; then
+      caddy_nine_domain="$(prompt_domain "9router domain")"
+      selected_domains["$caddy_nine_domain"]=1
+      nine_public_url="https://$caddy_nine_domain"
+      nine_cookie_secure="true"
+    fi
+    if [[ "$install_webui" == true ]] && confirm "Publish Open WebUI with a domain?" y; then
+      caddy_webui_domain="$(prompt_domain "Open WebUI domain")"
+      [[ -z "${selected_domains[$caddy_webui_domain]+x}" ]] || die "Each service needs a unique domain."
+      selected_domains["$caddy_webui_domain"]=1
+      openwebui_url="https://$caddy_webui_domain"
+    fi
+    if [[ "$hermes_dashboard" == 1 ]] && confirm "Publish the Hermes dashboard with a domain?" n; then
+      caddy_hermes_dashboard_domain="$(prompt_domain "Hermes dashboard domain")"
+      [[ -z "${selected_domains[$caddy_hermes_dashboard_domain]+x}" ]] || die "Each service needs a unique domain."
+      selected_domains["$caddy_hermes_dashboard_domain"]=1
+    fi
+    if [[ "$api_enabled" == true ]] && confirm "Publish the Hermes API with a domain?" n; then
+      caddy_hermes_api_domain="$(prompt_domain "Hermes API domain")"
+      [[ -z "${selected_domains[$caddy_hermes_api_domain]+x}" ]] || die "Each service needs a unique domain."
+      selected_domains["$caddy_hermes_api_domain"]=1
+    fi
+
+    if ((${#selected_domains[@]} == 0)); then
+      warn "No domains were selected; Caddy will not be installed."
+      install_caddy=false
+    else
+      profiles="${profiles:+$profiles,}caddy"
+      warn "Caddy needs public DNS records plus inbound TCP 80/443 and UDP 443."
+      if [[ -n "$caddy_nine_domain" && "$nine_require_key" != true ]]; then
+        warn "9router /v1 will be public without Bearer-key enforcement. Enable REQUIRE_API_KEY after creating a 9router endpoint key."
+      fi
+      if [[ -n "$caddy_webui_domain" && "$openwebui_signup" == true ]]; then
+        warn "Create the first Open WebUI administrator promptly, then disable signup in its Admin Panel."
+      fi
+    fi
+  fi
+fi
+
 uid="${SUDO_UID:-$(id -u)}"
 gid="${SUDO_GID:-$(id -g)}"
 tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
@@ -371,6 +447,7 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'OPENWEBUI_OPENAI_BASE_URL=%s\n' "$(dotenv_quote "$openwebui_api_url")"
   printf 'OPENWEBUI_OPENAI_API_KEY=%s\n' "$(dotenv_quote "$openwebui_api_key")"
   printf 'OPENWEBUI_ENABLE_SIGNUP=%s\n' "$openwebui_signup"
+  printf 'CADDY_IMAGE=caddy:2-alpine\n'
 } > "$tmp_env"
 chmod 600 "$tmp_env"
 mv "$tmp_env" "$ENV_FILE"
@@ -398,6 +475,28 @@ if [[ "$install_hermes" == true ]]; then
   chmod 644 "$HERMES_DIR/config.yaml"
 fi
 
+if [[ "$install_caddy" == true ]]; then
+  {
+    if [[ -n "$caddy_email" ]]; then
+      printf '{\n\temail %s\n}\n\n' "$caddy_email"
+    fi
+    if [[ -n "$caddy_nine_domain" ]]; then
+      printf '%s {\n\tencode zstd gzip\n\treverse_proxy nine-router:20128\n}\n\n' "$caddy_nine_domain"
+    fi
+    if [[ -n "$caddy_webui_domain" ]]; then
+      printf '%s {\n\tencode zstd gzip\n\treverse_proxy open-webui:8080\n}\n\n' "$caddy_webui_domain"
+    fi
+    if [[ -n "$caddy_hermes_dashboard_domain" ]]; then
+      printf '%s {\n\tencode zstd gzip\n\treverse_proxy hermes:9119\n}\n\n' "$caddy_hermes_dashboard_domain"
+    fi
+    if [[ -n "$caddy_hermes_api_domain" ]]; then
+      printf '%s {\n\tencode zstd gzip\n\treverse_proxy hermes:8642\n}\n\n' "$caddy_hermes_api_domain"
+    fi
+  } > "$CADDY_DIR/Caddyfile"
+  sed -i '${/^$/d;}' "$CADDY_DIR/Caddyfile"
+  chmod 644 "$CADDY_DIR/Caddyfile"
+fi
+
 ok "Configuration generated."
 
 if [[ "$DRY_RUN" == true ]]; then
@@ -416,6 +515,10 @@ fi
 
 info "Pulling official container images..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" pull
+if [[ "$install_caddy" == true ]]; then
+  info "Validating generated Caddy configuration..."
+  "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
+fi
 info "Starting selected services..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --remove-orphans
 
@@ -430,6 +533,13 @@ fi
 if [[ "$install_webui" == true ]]; then
   printf 'Open WebUI: %s\n' "$openwebui_url"
   [[ "$openwebui_signup" == true ]] && printf '%s\n' 'Open WebUI: the first registered account becomes administrator; disable signup afterward.'
+fi
+if [[ "$install_caddy" == true ]]; then
+  [[ -n "$caddy_nine_domain" ]] && printf '9router HTTPS: https://%s\n' "$caddy_nine_domain"
+  [[ -n "$caddy_webui_domain" ]] && printf 'Open WebUI HTTPS: https://%s\n' "$caddy_webui_domain"
+  [[ -n "$caddy_hermes_dashboard_domain" ]] && printf 'Hermes dashboard HTTPS: https://%s\n' "$caddy_hermes_dashboard_domain"
+  [[ -n "$caddy_hermes_api_domain" ]] && printf 'Hermes API HTTPS: https://%s\n' "$caddy_hermes_api_domain"
+  printf '%s\n' 'Caddy requires public DNS plus inbound TCP 80/443 and UDP 443.'
 fi
 printf '%s\n' 'Status: ./manage.sh status'
 printf '%s\n' 'Logs:   ./manage.sh logs'

@@ -81,6 +81,21 @@ services:
       - "host.docker.internal:host-gateway"
     networks: [agent-net]
 
+  caddy:
+    profiles: ["caddy"]
+    image: ${CADDY_IMAGE:-caddy:2-alpine}
+    container_name: hermes-stack-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    networks: [agent-net]
+
 networks:
   agent-net:
     name: hermes-9router-net
