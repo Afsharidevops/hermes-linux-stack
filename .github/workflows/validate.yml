@@ -1,0 +1,23 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax
+        run: bash -n install.sh manage.sh
+      - name: Validate Compose
+        run: cp .env.example .env && docker compose config --quiet
+      - name: Ensure secrets are ignored
+        run: |
+          test "$(git check-ignore .env)" = ".env"
+          test "$(git check-ignore data/hermes/.env)" = "data/hermes/.env"
+          test "$(git check-ignore data/open-webui/webui.db)" = "data/open-webui/webui.db"

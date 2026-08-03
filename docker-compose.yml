@@ -1,0 +1,87 @@
+name: hermes-9router-stack
+
+services:
+  nine-router:
+    profiles: ["9router"]
+    image: ${NINEROUTER_IMAGE:-decolua/9router:latest}
+    container_name: nine-router
+    restart: unless-stopped
+    ports:
+      - "${NINEROUTER_BIND_IP:-127.0.0.1}:${NINEROUTER_PORT:-20128}:20128"
+    volumes:
+      - ./data/9router:/app/data
+    environment:
+      DATA_DIR: /app/data
+      PORT: "20128"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+      JWT_SECRET: ${NINEROUTER_JWT_SECRET}
+      INITIAL_PASSWORD: ${NINEROUTER_INITIAL_PASSWORD}
+      API_KEY_SECRET: ${NINEROUTER_API_KEY_SECRET}
+      MACHINE_ID_SALT: ${NINEROUTER_MACHINE_ID_SALT}
+      REQUIRE_API_KEY: ${NINEROUTER_REQUIRE_API_KEY:-false}
+      AUTH_COOKIE_SECURE: ${NINEROUTER_AUTH_COOKIE_SECURE:-false}
+      ENABLE_REQUEST_LOGS: ${NINEROUTER_ENABLE_REQUEST_LOGS:-false}
+      OBSERVABILITY_ENABLED: ${NINEROUTER_OBSERVABILITY_ENABLED:-true}
+      BASE_URL: http://nine-router:20128
+      NEXT_PUBLIC_BASE_URL: ${NINEROUTER_PUBLIC_BASE_URL:-http://localhost:20128}
+      CLOUD_URL: ${NINEROUTER_CLOUD_URL:-https://9router.com}
+      NEXT_PUBLIC_CLOUD_URL: ${NINEROUTER_CLOUD_URL:-https://9router.com}
+    networks: [agent-net]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:20128').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  hermes:
+    profiles: ["hermes"]
+    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}
+    container_name: hermes-agent
+    restart: unless-stopped
+    command: gateway run
+    shm_size: "1gb"
+    ports:
+      - "${HERMES_BIND_IP:-127.0.0.1}:${HERMES_API_PORT:-8642}:8642"
+      - "${HERMES_BIND_IP:-127.0.0.1}:${HERMES_DASHBOARD_PORT:-9119}:9119"
+    volumes:
+      - ./data/hermes:/opt/data
+    environment:
+      HERMES_HOME: /opt/data
+      HERMES_DASHBOARD: ${HERMES_DASHBOARD:-0}
+      HERMES_UID: ${HERMES_UID:-10000}
+      HERMES_GID: ${HERMES_GID:-10000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [agent-net]
+
+  open-webui:
+    profiles: ["open-webui"]
+    image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    container_name: open-webui
+    restart: unless-stopped
+    ports:
+      - "${OPENWEBUI_BIND_IP:-127.0.0.1}:${OPENWEBUI_PORT:-3000}:8080"
+    volumes:
+      - ./data/open-webui:/app/backend/data
+    environment:
+      WEBUI_URL: ${OPENWEBUI_URL:-http://localhost:3000}
+      WEBUI_SECRET_KEY: ${OPENWEBUI_SECRET_KEY}
+      ENABLE_SIGNUP: ${OPENWEBUI_ENABLE_SIGNUP:-true}
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: ${OPENWEBUI_OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENWEBUI_OPENAI_API_KEY}
+      ENABLE_OLLAMA_API: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [agent-net]
+
+networks:
+  agent-net:
+    name: hermes-9router-net
+    driver: bridge

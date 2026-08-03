@@ -1,0 +1,29 @@
+_config_version: 33
+
+model:
+  provider: custom:__PROVIDER_NAME__
+  default: __MODEL_NAME__
+
+custom_providers:
+  - name: __PROVIDER_NAME__
+    base_url: __PROVIDER_BASE_URL__
+    key_env: NINEROUTER_API_KEY
+
+agent:
+  max_turns: 30
+
+terminal:
+  backend: local
+
+tool_loop_guardrails:
+  hard_stop_enabled: true
+  hard_stop_after:
+    exact_failure: 5
+    idempotent_no_progress: 5
+
+gateway:
+  platforms:
+    telegram:
+      extra:
+        disable_link_previews: true
+

@@ -1,0 +1,9 @@
+.env
+data/9router/*
+data/hermes/*
+data/open-webui/*
+!data/9router/.gitkeep
+!data/hermes/.gitkeep
+!data/open-webui/.gitkeep
+*.backup-*
+*.log
