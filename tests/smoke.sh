@@ -28,6 +28,10 @@ grep -q '^NINEROUTER_AUTH_COOKIE_SECURE=true$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_PUBLIC_BASE_URL="https://router.example.com"$' "$TEST_DIR/stack/.env"
 grep -q '^OPENWEBUI_URL="https://chat.example.com"$' "$TEST_DIR/stack/.env"
 grep -q '^OPENWEBUI_OPENAI_API_KEY="auto-generated-after-9router-starts"$' "$TEST_DIR/stack/.env"
+grep -q "^  provider: 'custom:9router'$" "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q "^  default: 'ai'$" "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q '^NINEROUTER_API_KEY="auto-generated-after-9router-starts"$' "$TEST_DIR/stack/data/hermes/.env"
+! grep -q "custom:'9router'" "$TEST_DIR/stack/data/hermes/config.yaml"
 grep -q '^router.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
 grep -q '^[[:space:]]*reverse_proxy nine-router:20128$' "$TEST_DIR/stack/data/caddy/Caddyfile"
 grep -q '^chat.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
@@ -52,7 +56,7 @@ test ! -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
 docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
 
 # A second wizard run must preserve 9router while adding Hermes and Caddy.
-printf 'n\ny\nn\nn\n\n\n\n\nn\nn\nn\ny\n\n\ny\nrouter-added.example.com\n' \
+printf 'n\ny\nn\nn\n\n\n\nn\nn\nn\ny\n\n\ny\nrouter-added.example.com\n' \
   | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
 grep -q '^COMPOSE_PROFILES=9router,hermes,caddy$' "$TEST_DIR/no-caddy/.env"
 grep -q '^NINEROUTER_INITIAL_PASSWORD="second-password"$' "$TEST_DIR/no-caddy/.env"

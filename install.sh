@@ -468,11 +468,11 @@ if [[ "$configure_hermes" == true ]]; then
   provider_name="$(prompt "Hermes provider name" "9router")"
   model_name="$(prompt "9router model/combo name" "ai")"
 
-  if [[ "$nine_require_key" == true || "$install_nine" == false ]]; then
-    provider_key="$(prompt_secret "9router/OpenAI-compatible API key")"
+  if [[ "$install_nine" == true ]]; then
+    provider_key="auto-generated-after-9router-starts"
+    info "A dedicated 9router API key will be configured automatically for Hermes."
   else
-    entered_key="$(prompt_secret "9router API key (Enter for local-no-auth)" true)"
-    provider_key="${entered_key:-local-no-auth}"
+    provider_key="$(prompt_secret "9router/OpenAI-compatible API key")"
   fi
 
   if confirm "Enable Telegram connectivity?" y; then
@@ -636,6 +636,7 @@ mv "$tmp_env" "$ENV_FILE"
 
 if [[ "$configure_hermes" == true ]]; then
   config="$(<"$ROOT_DIR/templates/hermes-config.yaml.template")"
+  config="${config//__PROVIDER_ID__/$(yaml_quote "custom:$provider_name")}"
   config="${config//__PROVIDER_NAME__/$(yaml_quote "$provider_name")}"
   config="${config//__PROVIDER_BASE_URL__/$(yaml_quote "$provider_url")}"
   config="${config//__MODEL_NAME__/$(yaml_quote "$model_name")}"
@@ -691,8 +692,8 @@ detect_docker
 ok "Docker Compose configuration is valid."
 
 if [[ "$NO_START" == true ]]; then
-  if [[ "$install_nine" == true && "$install_webui" == true ]]; then
-    warn "Automatic Open WebUI key/model provisioning requires a normal installer run when services are started."
+  if [[ "$install_nine" == true && ( "$install_hermes" == true || "$install_webui" == true ) ]]; then
+    warn "Automatic 9router key/model provisioning requires a normal installer run when services are started."
   fi
   ok "Configuration complete. Start later with ./manage.sh start"
   exit 0
@@ -702,17 +703,19 @@ info "Pulling official container images..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" pull
 
 openwebui_key_status=""
-opencode_combo_status=""
+hermes_key_status=""
+opencode_combo_status="not-requested"
+ai_combo_status="not-requested"
 opencode_free_model_count="0"
-if [[ "$install_nine" == true && "$install_webui" == true ]]; then
+if [[ "$install_nine" == true && ( "$install_hermes" == true || "$install_webui" == true ) ]]; then
   openwebui_db_preexisting=false
   [[ -f "$OPENWEBUI_DIR/webui.db" ]] && openwebui_db_preexisting=true
 
-  info "Starting 9router to provision Open WebUI access..."
+  info "Starting 9router to provision service access..."
   "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --no-deps nine-router
   # 9router answers /api/health before it has created and migrated its SQLite
   # database, so a health probe alone lets the installer race ahead and fail in
-  # bootstrap-openwebui.mjs. Also require the tables that script writes to.
+  # the provisioning script. Also require the tables that script writes to.
   nine_ready=false
   for _ in {1..90}; do
     if "${DOCKER[@]}" exec nine-router node -e \
@@ -726,16 +729,30 @@ if [[ "$install_nine" == true && "$install_webui" == true ]]; then
     fi
     sleep 2
   done
-  [[ "$nine_ready" == true ]] || die "9router did not become ready for Open WebUI provisioning."
+  [[ "$nine_ready" == true ]] || die "9router did not become ready for service provisioning."
 
-  info "Generating/reusing the Open WebUI key and configuring OpenCode-Free..."
-  bootstrap_output="$("${DOCKER[@]}" exec -i nine-router node --input-type=module < "$ROOT_DIR/scripts/bootstrap-openwebui.mjs")"
+  info "Generating/reusing dedicated 9router keys and configuring model combos..."
+  bootstrap_output="$("${DOCKER[@]}" exec -i \
+    -e PROVISION_HERMES="$install_hermes" \
+    -e PROVISION_OPENWEBUI="$install_webui" \
+    -e HERMES_MODEL_NAME="$model_name" \
+    nine-router node --input-type=module < "$ROOT_DIR/scripts/bootstrap-openwebui.mjs")"
   openwebui_api_key="$(sed -n 's/^OPENWEBUI_API_KEY=//p' <<< "$bootstrap_output" | tail -n1)"
   openwebui_key_status="$(sed -n 's/^OPENWEBUI_KEY_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
+  hermes_api_key="$(sed -n 's/^HERMES_API_KEY=//p' <<< "$bootstrap_output" | tail -n1)"
+  hermes_key_status="$(sed -n 's/^HERMES_KEY_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
   opencode_combo_status="$(sed -n 's/^OPENCODE_COMBO_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
+  ai_combo_status="$(sed -n 's/^AI_COMBO_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
   opencode_free_model_count="$(sed -n 's/^OPENCODE_FREE_MODEL_COUNT=//p' <<< "$bootstrap_output" | tail -n1)"
-  [[ -n "$openwebui_api_key" ]] || die "9router did not return the generated Open WebUI API key."
-  replace_env_value "$ENV_FILE" OPENWEBUI_OPENAI_API_KEY "$(dotenv_quote "$openwebui_api_key")"
+
+  if [[ "$install_webui" == true ]]; then
+    [[ -n "$openwebui_api_key" ]] || die "9router did not return the generated Open WebUI API key."
+    replace_env_value "$ENV_FILE" OPENWEBUI_OPENAI_API_KEY "$(dotenv_quote "$openwebui_api_key")"
+  fi
+  if [[ "$install_hermes" == true ]]; then
+    [[ -n "$hermes_api_key" ]] || die "9router did not return the generated Hermes API key."
+    replace_env_value "$HERMES_DIR/.env" NINEROUTER_API_KEY "$(dotenv_quote "$hermes_api_key")"
+  fi
 fi
 
 if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
@@ -774,6 +791,12 @@ fi
 printf '\n'
 ok "Installation complete."
 [[ "$install_nine" == true ]] && printf '9router dashboard: %s\n' "$nine_public_url"
+if [[ -n "$hermes_key_status" ]]; then
+  printf 'Hermes 9router key: %s (stored securely; not printed)\n' "$hermes_key_status"
+  if [[ "$model_name" == ai ]]; then
+    printf 'Hermes ai combo: %s (%s free upstream models)\n' "$ai_combo_status" "$opencode_free_model_count"
+  fi
+fi
 if [[ "$install_hermes" == true && -n "$telegram_token" ]]; then
   printf '%s\n' 'Telegram: open your bot and send /start'
 fi
