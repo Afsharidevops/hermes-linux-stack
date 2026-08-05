@@ -151,6 +151,112 @@ until you customize their ordered model lists in the 9router dashboard.
 ./manage.sh doctor
 ```
 
+### Using models in route mode
+
+Use the `auto` model for normal operation in route mode:
+
+```text
+auto → combo-fast, combo-standard, or combo-strong
+```
+
+| Selected model | Behavior |
+|---|---|
+| `auto` | Smart Router analyzes the request and selects a tier |
+| `auto-fast` | Requests the fast tier; capability requirements may upgrade it |
+| `auto-standard` | Requests the standard tier; capabilities may require strong |
+| `auto-strong` | Requests the strong tier |
+| `ai` | Bypasses automatic routing and sends the explicit `ai` combo unchanged |
+| `OpenCode-Free` | Bypasses automatic routing and sends that explicit combo unchanged |
+
+Therefore, the recommended normal selection is:
+
+```text
+Model: auto
+```
+
+#### Hermes and Telegram
+
+The installer configures Hermes with `auto` when Smart Router is enabled. Verify
+its active model and backend URL:
+
+```bash
+grep -E '^[[:space:]]*(default|base_url):' \
+  /root/hermes-linux-stack/data/hermes/config.yaml
+```
+
+Expected output:
+
+```yaml
+default: 'auto'
+base_url: 'http://smart-router:8080/v1'
+```
+
+Telegram `/model` should report:
+
+```text
+Current model: auto
+Provider: custom:9router
+```
+
+Selecting `ai` manually bypasses automatic tier selection. Select `auto` again to
+restore Smart Router routing.
+
+#### Open WebUI
+
+Select `auto` in the Open WebUI model selector for automatic routing. For manual
+tier testing, select one of:
+
+```text
+auto-fast
+auto-standard
+auto-strong
+```
+
+Selecting `ai`, `OpenCode-Free`, or another explicit model bypasses automatic tier
+selection and forwards that model unchanged.
+
+#### Confirm automatic routing
+
+Send a simple prompt while using `auto`:
+
+```text
+Reply briefly: hello
+```
+
+Then inspect the latest decision:
+
+```bash
+docker logs --since 2m hermes-smart-router 2>&1 | grep route_decision
+```
+
+A simple request should include:
+
+```json
+{
+  "requested_model": "auto",
+  "effective_model": "combo-fast",
+  "mode": "route"
+}
+```
+
+For a difficult request, such as:
+
+```text
+Perform a detailed security review and threat model for this architecture.
+```
+
+the decision should include:
+
+```json
+{
+  "requested_model": "auto",
+  "effective_model": "combo-strong",
+  "mode": "route"
+}
+```
+
+In short: use `auto` for normal operation in route mode.
+
 The router stores only HMAC-pseudonymous sticky-route metadata in
 `data/smart-router/router.sqlite3`. It does not cache answers, rewrite messages,
 filter tools, classify with another LLM, or retry requests. 9router may still apply
