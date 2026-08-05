@@ -40,7 +40,7 @@ selection, or install Open WebUI by itself.
 Telegram API
     ↑ outbound polling
     │
-Hermes Agent ──┐
+Hermes Agent ───┐
                 ├──→ optional Smart Router ──→ 9router ──→ AI providers
 Open WebUI ─────┘
                                 ↑
