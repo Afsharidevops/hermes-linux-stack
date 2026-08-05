@@ -5,6 +5,9 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEST_DIR"' EXIT
 
+# Keep LAN-address suggestions deterministic regardless of the test host.
+export HERMES_STACK_LAN_IP=192.168.85.244
+
 cp -a "$ROOT_DIR/." "$TEST_DIR/stack"
 rm -f "$TEST_DIR/stack/.env"
 rm -f "$TEST_DIR/stack/data/hermes/.env"
@@ -18,6 +21,9 @@ printf '\ny\n\n\ntest-password\n\nn\n\n\n\n\ny\n%s\n946652372,7264771088\n\nn\nn
   | "$TEST_DIR/stack/install.sh" --dry-run >/dev/null
 
 grep -q '^COMPOSE_PROFILES=9router,hermes,open-webui,caddy$' "$TEST_DIR/stack/.env"
+grep -q '^NINEROUTER_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
+grep -q '^HERMES_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
+grep -q '^OPENWEBUI_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_AUTH_COOKIE_SECURE=true$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_PUBLIC_BASE_URL="https://router.example.com"$' "$TEST_DIR/stack/.env"
 grep -q '^OPENWEBUI_URL="https://chat.example.com"$' "$TEST_DIR/stack/.env"
@@ -40,6 +46,8 @@ rm -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
 printf '2\nn\n\n\nsecond-password\n\nn\nn\n' \
   | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
 grep -q '^COMPOSE_PROFILES=9router$' "$TEST_DIR/no-caddy/.env"
+grep -q '^NINEROUTER_BIND_IP=192.168.85.244$' "$TEST_DIR/no-caddy/.env"
+grep -q '^NINEROUTER_PUBLIC_BASE_URL="http://192.168.85.244:20128"$' "$TEST_DIR/no-caddy/.env"
 test ! -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
 docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
 

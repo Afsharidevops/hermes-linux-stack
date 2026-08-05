@@ -129,6 +129,70 @@ valid_bind_ip() {
   done
 }
 
+private_ipv4() {
+  local first second
+  IFS=. read -r first second _ <<< "$1"
+  (( 10#$first == 10 \
+    || (10#$first == 172 && 16 <= 10#$second && 10#$second <= 31) \
+    || (10#$first == 192 && 10#$second == 168) ))
+}
+
+detect_lan_ipv4() {
+  local candidate
+  if [[ -n "${HERMES_STACK_LAN_IP:-}" ]]; then
+    valid_bind_ip "$HERMES_STACK_LAN_IP" \
+      || die "HERMES_STACK_LAN_IP is not a valid IPv4 address: $HERMES_STACK_LAN_IP"
+    printf '%s' "$HERMES_STACK_LAN_IP"
+    return 0
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    candidate="$(ip -4 route get 1.1.1.1 2>/dev/null \
+      | awk '{ for (i=1; i<=NF; i++) if ($i == "src") { print $(i+1); exit } }')"
+    if valid_bind_ip "$candidate" && private_ipv4 "$candidate"; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+
+    while read -r candidate; do
+      if valid_bind_ip "$candidate" && private_ipv4 "$candidate"; then
+        printf '%s' "$candidate"
+        return 0
+      fi
+    done < <(ip -o -4 addr show scope global 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }')
+  fi
+
+  if command -v hostname >/dev/null 2>&1; then
+    for candidate in $(hostname -I 2>/dev/null); do
+      if valid_bind_ip "$candidate" && private_ipv4 "$candidate"; then
+        printf '%s' "$candidate"
+        return 0
+      fi
+    done
+  fi
+  return 1
+}
+
+suggested_bind_ip() {
+  local current="$1"
+  if [[ -n "$lan_ip" && "$current" == 127.0.0.1 ]]; then
+    printf '%s' "$lan_ip"
+  else
+    printf '%s' "$current"
+  fi
+}
+
+service_url_host() {
+  local bind_ip="$1"
+  if [[ "$bind_ip" == 127.0.0.1 ]]; then
+    printf 'localhost'
+  elif [[ "$bind_ip" == 0.0.0.0 ]]; then
+    printf '%s' "${lan_ip:-localhost}"
+  else
+    printf '%s' "$bind_ip"
+  fi
+}
+
 prompt_bind_ip() {
   local label="$1" default="$2" value
   while true; do
@@ -246,6 +310,12 @@ profile_enabled() {
 
 printf '\nHermes + 9router Linux Installer\n'
 printf '%s\n' '================================'
+lan_ip="$(detect_lan_ipv4 || true)"
+if [[ -n "$lan_ip" ]]; then
+  info "Detected LAN IPv4 address: $lan_ip (press Enter to use it when suggested)."
+else
+  warn "No private LAN IPv4 address was detected; localhost will be suggested."
+fi
 configure_nine=false
 configure_hermes=false
 configure_webui=false
@@ -311,7 +381,7 @@ profiles=""
 mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$CADDY_DIR"
 backup_existing
 
-nine_bind="$(existing_env_value NINEROUTER_BIND_IP)"; nine_bind="${nine_bind:-127.0.0.1}"
+nine_bind="$(existing_env_value NINEROUTER_BIND_IP)"; nine_bind="${nine_bind:-${lan_ip:-127.0.0.1}}"
 nine_port="$(existing_env_value NINEROUTER_PORT)"; nine_port="${nine_port:-20128}"
 nine_password="$(existing_env_value NINEROUTER_INITIAL_PASSWORD)"; nine_password="${nine_password:-not-installed}"
 nine_require_key="$(existing_env_value NINEROUTER_REQUIRE_API_KEY)"; nine_require_key="${nine_require_key:-false}"
@@ -327,18 +397,18 @@ nine_salt="${existing_nine_salt:-$(random_hex 32)}"
 if [[ "$configure_nine" == true ]]; then
   printf '\n9router settings\n'
   printf '%s\n' '----------------'
-  nine_bind="$(prompt_bind_ip "9router host bind address (127.0.0.1 is safest)" "$nine_bind")"
+  nine_bind="$(prompt_bind_ip "9router host bind address" "$(suggested_bind_ip "$nine_bind")")"
   nine_port="$(prompt "Dashboard/API port" "20128")"
   valid_port "$nine_port" || die "Invalid 9router port: $nine_port"
   nine_password="$(prompt_secret "Initial 9router dashboard password")"
-  nine_public_url="$(prompt "Public dashboard URL (or local URL)" "http://localhost:$nine_port")"
+  nine_public_url="$(prompt "Public dashboard URL (or local URL)" "http://$(service_url_host "$nine_bind"):$nine_port")"
   if [[ "$nine_public_url" == https://* ]]; then nine_cookie_secure="true"; fi
   if confirm "Require a 9router Bearer API key on /v1 routes?" n; then
     nine_require_key="true"
   fi
 fi
 
-openwebui_bind="$(existing_env_value OPENWEBUI_BIND_IP)"; openwebui_bind="${openwebui_bind:-127.0.0.1}"
+openwebui_bind="$(existing_env_value OPENWEBUI_BIND_IP)"; openwebui_bind="${openwebui_bind:-${lan_ip:-127.0.0.1}}"
 openwebui_port="$(existing_env_value OPENWEBUI_PORT)"; openwebui_port="${openwebui_port:-3000}"
 openwebui_url="$(existing_env_value OPENWEBUI_URL)"; openwebui_url="${openwebui_url:-http://localhost:3000}"
 existing_openwebui_secret="$(existing_env_value OPENWEBUI_SECRET_KEY)"
@@ -347,7 +417,7 @@ openwebui_api_url="$(existing_env_value OPENWEBUI_OPENAI_BASE_URL)"; openwebui_a
 openwebui_api_key="$(existing_env_value OPENWEBUI_OPENAI_API_KEY)"; openwebui_api_key="${openwebui_api_key:-local-no-auth}"
 openwebui_signup="$(existing_env_value OPENWEBUI_ENABLE_SIGNUP)"; openwebui_signup="${openwebui_signup:-true}"
 
-hermes_bind="$(existing_env_value HERMES_BIND_IP)"; hermes_bind="${hermes_bind:-127.0.0.1}"
+hermes_bind="$(existing_env_value HERMES_BIND_IP)"; hermes_bind="${hermes_bind:-${lan_ip:-127.0.0.1}}"
 hermes_api_port="$(existing_env_value HERMES_API_PORT)"; hermes_api_port="${hermes_api_port:-8642}"
 hermes_dashboard_port="$(existing_env_value HERMES_DASHBOARD_PORT)"; hermes_dashboard_port="${hermes_dashboard_port:-9119}"
 hermes_dashboard="$(existing_env_value HERMES_DASHBOARD)"; hermes_dashboard="${hermes_dashboard:-0}"
@@ -366,13 +436,13 @@ if [[ "$change_bind_ips" == true ]]; then
   printf '\nPublished container bind IPs\n'
   printf '%s\n' '----------------------------'
   if [[ "$install_nine" == true && "$configure_nine" != true ]]; then
-    nine_bind="$(prompt_bind_ip "9router bind IP" "$nine_bind")"
+    nine_bind="$(prompt_bind_ip "9router bind IP" "$(suggested_bind_ip "$nine_bind")")"
   fi
   if [[ "$install_hermes" == true && "$configure_hermes" != true ]]; then
-    hermes_bind="$(prompt_bind_ip "Hermes API/dashboard bind IP" "$hermes_bind")"
+    hermes_bind="$(prompt_bind_ip "Hermes API/dashboard bind IP" "$(suggested_bind_ip "$hermes_bind")")"
   fi
   if [[ "$install_webui" == true && "$configure_webui" != true ]]; then
-    openwebui_bind="$(prompt_bind_ip "Open WebUI bind IP" "$openwebui_bind")"
+    openwebui_bind="$(prompt_bind_ip "Open WebUI bind IP" "$(suggested_bind_ip "$openwebui_bind")")"
   fi
   if [[ "$install_caddy" == true && "$configure_caddy" != true ]]; then
     caddy_bind="$(prompt_bind_ip "Caddy HTTP/HTTPS bind IP" "$caddy_bind")"
@@ -388,7 +458,7 @@ fi
 if [[ "$configure_hermes" == true ]]; then
   printf '\nHermes Agent settings\n'
   printf '%s\n' '---------------------'
-  hermes_bind="$(prompt_bind_ip "Hermes API/dashboard host bind address (127.0.0.1 is safest)" "$hermes_bind")"
+  hermes_bind="$(prompt_bind_ip "Hermes API/dashboard host bind address" "$(suggested_bind_ip "$hermes_bind")")"
   if [[ "$install_nine" == true ]]; then
     provider_url="http://nine-router:20128/v1"
     info "Hermes will reach 9router through the private Docker network."
@@ -441,10 +511,10 @@ fi
 if [[ "$configure_webui" == true ]]; then
   printf '\nOpen WebUI settings\n'
   printf '%s\n' '-------------------'
-  openwebui_bind="$(prompt_bind_ip "Open WebUI host bind address (127.0.0.1 is safest)" "$openwebui_bind")"
+  openwebui_bind="$(prompt_bind_ip "Open WebUI host bind address" "$(suggested_bind_ip "$openwebui_bind")")"
   openwebui_port="$(prompt "Open WebUI port" "3000")"
   valid_port "$openwebui_port" || die "Invalid Open WebUI port."
-  openwebui_url="$(prompt "Open WebUI public URL (or local URL)" "http://localhost:$openwebui_port")"
+  openwebui_url="$(prompt "Open WebUI public URL (or local URL)" "http://$(service_url_host "$openwebui_bind"):$openwebui_port")"
 
   if [[ "$install_nine" == true ]]; then
     openwebui_api_url="http://nine-router:20128/v1"
@@ -640,10 +710,16 @@ if [[ "$install_nine" == true && "$install_webui" == true ]]; then
 
   info "Starting 9router to provision Open WebUI access..."
   "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --no-deps nine-router
+  # 9router answers /api/health before it has created and migrated its SQLite
+  # database, so a health probe alone lets the installer race ahead and fail in
+  # bootstrap-openwebui.mjs. Also require the tables that script writes to.
   nine_ready=false
-  for _ in {1..60}; do
+  for _ in {1..90}; do
     if "${DOCKER[@]}" exec nine-router node -e \
-      'fetch("http://127.0.0.1:20128/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' \
+      'const Database=require("node:module").createRequire("/app/package.json")("better-sqlite3");
+       const db=new Database("/app/data/db/data.sqlite",{readonly:true,fileMustExist:true});
+       try{db.prepare("SELECT 1 FROM apiKeys LIMIT 1").get();db.prepare("SELECT 1 FROM combos LIMIT 1").get();}finally{db.close();}
+       fetch("http://127.0.0.1:20128/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' \
       >/dev/null 2>&1; then
       nine_ready=true
       break
