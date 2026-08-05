@@ -21,7 +21,7 @@ selection, or install Open WebUI by itself.
 - Telegram polling: no domain, inbound port, or SSL required
 - Numeric Telegram user allowlist
 - Private Docker network between services
-- Localhost-only published ports by default
+- Automatic private LAN IPv4 detection with LAN-accessible service defaults
 - Optional Hermes dashboard and API
 - Optional Open WebUI connected to 9router or another OpenAI-compatible API
 - Dedicated auto-generated 9router keys for Hermes and Open WebUI
@@ -46,11 +46,11 @@ Open WebUI ─────┘
                                 ↑
 Internet ── HTTPS ── optional Caddy reverse proxy
 
-Host defaults:
-  9router:    127.0.0.1:20128
-  Open WebUI: 127.0.0.1:3000
-  Hermes API: 127.0.0.1:8642 (disabled unless selected)
-  Hermes UI:  127.0.0.1:9119 (disabled unless selected)
+Host defaults (using the detected private LAN IP):
+  9router:    LAN_IP:20128
+  Open WebUI: LAN_IP:3000
+  Hermes API: LAN_IP:8642 (disabled unless selected)
+  Hermes UI:  LAN_IP:9119 (disabled unless selected)
 ```
 
 ## Requirements
@@ -108,11 +108,29 @@ The installer asks:
 11. Open WebUI endpoint (or automatic routed 9router connection), URL, and signup policy
 12. Caddy bind address and optional HTTPS domains for each installed web service
 
-Application ports default to `127.0.0.1`. The bind prompts accept a specific
-server/LAN IPv4 address or `0.0.0.0` for all interfaces. On a later wizard run,
-choose **Change published container bind IPs only** to update these addresses
-without re-entering service or Telegram secrets. Caddy defaults to `0.0.0.0`
-because public certificate validation must reach ports 80 and 443.
+The installer detects the server's primary private LAN IPv4 address and suggests
+it as the default bind for 9router, Hermes, and Open WebUI. Choose the bind mode
+that matches how you want to access the services:
+
+| Bind value | Who can connect | How to open a service |
+|---|---|---|
+| Detected `LAN_IP` | Trusted devices on the same LAN | `http://LAN_IP:PORT` |
+| `127.0.0.1` | Only the Linux server itself | Use an SSH tunnel, then open `http://localhost:PORT` |
+| `0.0.0.0` | Devices reaching any server interface | Use only with a firewall and appropriate authentication |
+
+Press Enter at a bind prompt to accept the suggested `LAN_IP`. This is convenient
+for a trusted home, office, or lab network. Restrict each application port to your
+trusted LAN subnet with the host or network firewall. LAN binding uses plain HTTP
+unless you add a reverse proxy with HTTPS.
+
+Enter `127.0.0.1` when you want the service hidden from the LAN. A remote device
+must then create an SSH tunnel to the server. A specific `LAN_IP` is preferable to
+`0.0.0.0` because it avoids publishing the service on unrelated interfaces.
+
+On a later wizard run, choose **Change published container bind IPs only** to
+update these addresses without re-entering service or Telegram secrets. Caddy
+defaults to `0.0.0.0` because public certificate validation must reach ports 80
+and 443.
 
 Secrets are written to ignored files with mode `0600`:
 
@@ -276,14 +294,30 @@ is preserved for inspection.
 
 ### 1. Open 9router
 
-The default bind is localhost. From your workstation, create an SSH tunnel:
+The installer suggests the detected private LAN IP as the bind address. From any
+trusted device on the same LAN, open:
+
+```text
+http://LAN_IP:20128
+```
+
+For example:
+
+```text
+http://192.168.10.10:20128
+```
+
+Sign in with the initial password entered during installation. Ensure the server
+firewall permits TCP port `20128` only from your trusted LAN subnet.
+
+If you selected `127.0.0.1` instead of the LAN IP, create an SSH tunnel from your
+workstation:
 
 ```bash
 ssh -L 20128:127.0.0.1:20128 user@your-server
 ```
 
-Then open <http://localhost:20128> and sign in with the initial password entered
-during installation.
+Then open <http://localhost:20128>.
 
 Configure provider accounts and create a combo/model such as `ai`. The combo
 name must match the model name entered in the installer.
@@ -342,15 +376,30 @@ allowed users can still chat normally.
 
 ### 4. Create the first Open WebUI account
 
-Tunnel the default Open WebUI port:
+From a trusted device on the same LAN, open:
+
+```text
+http://LAN_IP:3000
+```
+
+For example:
+
+```text
+http://192.168.10.10:3000
+```
+
+The first registered account becomes the administrator. After creating it, open
+Admin Panel → Settings → General and turn off new-user signup. Restrict TCP port
+`3000` to the trusted LAN; plain HTTP does not protect traffic on an untrusted
+network.
+
+If Open WebUI is bound to `127.0.0.1`, use an SSH tunnel instead:
 
 ```bash
 ssh -L 3000:127.0.0.1:3000 user@your-server
 ```
 
-Open <http://localhost:3000>. The first registered account becomes the
-administrator. After creating it, open Admin Panel → Settings → General and
-turn off new-user signup.
+Then open <http://localhost:3000>.
 
 Open WebUI persists some configuration in its own database after first start.
 Later connection changes can also be made in its Admin Panel.
