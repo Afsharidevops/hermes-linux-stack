@@ -640,10 +640,16 @@ if [[ "$install_nine" == true && "$install_webui" == true ]]; then
 
   info "Starting 9router to provision Open WebUI access..."
   "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --no-deps nine-router
+  # 9router answers /api/health before it has created and migrated its SQLite
+  # database, so a health probe alone lets the installer race ahead and fail in
+  # bootstrap-openwebui.mjs. Also require the tables that script writes to.
   nine_ready=false
-  for _ in {1..60}; do
+  for _ in {1..90}; do
     if "${DOCKER[@]}" exec nine-router node -e \
-      'fetch("http://127.0.0.1:20128/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' \
+      'const Database=require("node:module").createRequire("/app/package.json")("better-sqlite3");
+       const db=new Database("/app/data/db/data.sqlite",{readonly:true,fileMustExist:true});
+       try{db.prepare("SELECT 1 FROM apiKeys LIMIT 1").get();db.prepare("SELECT 1 FROM combos LIMIT 1").get();}finally{db.close();}
+       fetch("http://127.0.0.1:20128/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' \
       >/dev/null 2>&1; then
       nine_ready=true
       break
