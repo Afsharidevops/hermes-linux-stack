@@ -41,21 +41,21 @@ services:
 
   smart-router-init:
     profiles: ["smart-router"]
-    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.1.0}
+    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.1.0@sha256:4290667e8c90940a5dd97bcd6fd1575c0f1b822db507f9cc5076abe126708bef}
     container_name: hermes-smart-router-init
     user: "0:0"
     command: ["sh", "-c", "install -d -m 0700 -o 10001 -g 10001 /data"]
     volumes:
       - ./data/smart-router:/data
     cap_drop: ["ALL"]
-    cap_add: ["CHOWN", "DAC_OVERRIDE"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
     security_opt:
       - no-new-privileges:true
     networks: [agent-net]
 
   smart-router:
     profiles: ["smart-router"]
-    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.1.0}
+    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.1.0@sha256:4290667e8c90940a5dd97bcd6fd1575c0f1b822db507f9cc5076abe126708bef}
     container_name: hermes-smart-router
     restart: unless-stopped
     environment:

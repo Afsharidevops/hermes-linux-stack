@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import httpx
 from starlette.background import BackgroundTask
@@ -70,13 +70,21 @@ async def proxy_streaming(
     url: str,
     headers: list[tuple[bytes, bytes]],
     content: bytes,
+    on_complete: Callable[[bool], None] | None = None,
 ) -> StreamingResponse:
     request = client.build_request(method, url, headers=headers, content=content)
     upstream = await client.send(request, stream=True)
 
     async def chunks() -> AsyncIterator[bytes]:
-        async for chunk in upstream.aiter_raw():
-            yield chunk
+        completed = False
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+            completed = True
+        finally:
+            await upstream.aclose()
+            if on_complete:
+                on_complete(completed)
 
     response = StreamingResponse(
         chunks(),

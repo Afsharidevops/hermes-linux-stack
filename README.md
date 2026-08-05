@@ -390,12 +390,13 @@ interfaces.
 The generated `COMPOSE_PROFILES` value controls active services:
 
 ```env
-COMPOSE_PROFILES=9router,hermes,open-webui,caddy
+COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,caddy
 ```
 
 Valid profile names are:
 
 - `9router`
+- `smart-router`
 - `hermes`
 - `open-webui`
 - `caddy`

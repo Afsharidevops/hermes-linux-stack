@@ -166,7 +166,7 @@ def decide(
         proposed_tier=tier,
         proposed_model=settings.tier(tier).model,
         score=score,
-        reasons=tuple(reasons or ["default_standard"]),
+        reasons=tuple(reasons or [f"default_{tier}"]),
         facts=facts,
     )
 

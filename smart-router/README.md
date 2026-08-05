@@ -3,7 +3,7 @@
 A privacy-conscious OpenAI-compatible routing sidecar for Hermes Agent, Open WebUI, and 9router.
 
 ```text
-Hermes Agent ──┐
+Hermes Agent ───┐
                 ├──→ Hermes Smart Router ──→ 9router ──→ AI providers
 Open WebUI ─────┘
 ```
@@ -26,7 +26,7 @@ Version `0.1.0` includes an SBOM and build-provenance attestations.
 For reproducible deployment, pin the manifest digest:
 
 ```text
-afsharidevops/hermes-smart-router:0.1.0@sha256:162cabc9cd55ed2d3237fc88638e4f3f8bc3c06da4c30b2fb5041742cf344a57
+afsharidevops/hermes-smart-router:0.1.0@sha256:4290667e8c90940a5dd97bcd6fd1575c0f1b822db507f9cc5076abe126708bef
 ```
 
 ## Features

@@ -28,7 +28,7 @@ printf '%s\n' \
 
 grep -q '^COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,caddy$' "$TEST_DIR/stack/.env"
 grep -q '^SMART_ROUTER_MODE=observe$' "$TEST_DIR/stack/.env"
-grep -q '^SMART_ROUTER_IMAGE=afsharidevops/hermes-smart-router:0.1.0$' "$TEST_DIR/stack/.env"
+grep -q '^SMART_ROUTER_IMAGE=afsharidevops/hermes-smart-router:0.1.0@sha256:4290667e8c90940a5dd97bcd6fd1575c0f1b822db507f9cc5076abe126708bef$' "$TEST_DIR/stack/.env"
 grep -q '^SMART_ROUTER_HMAC_SECRET=[0-9a-f]\{64\}$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
 grep -q '^HERMES_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
@@ -87,5 +87,21 @@ grep -q '^HERMES_BIND_IP=192.168.10.20$' "$TEST_DIR/no-caddy/.env"
 grep -q '^CADDY_BIND_IP=192.168.10.21$' "$TEST_DIR/no-caddy/.env"
 test "$hermes_env_checksum" = "$(sha256sum "$TEST_DIR/no-caddy/data/hermes/.env")"
 docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
+
+# Invalid numeric answers must retry in-place rather than aborting the wizard.
+cp -a "$ROOT_DIR/." "$TEST_DIR/retry-inputs"
+rm -f "$TEST_DIR/retry-inputs/.env"
+rm -f "$TEST_DIR/retry-inputs/data/hermes/.env"
+rm -f "$TEST_DIR/retry-inputs/data/hermes/config.yaml"
+printf '%s\n' \
+  invalid 1 n n \
+  '' not-a-port 20128 retry-password '' n \
+  '' '' '' y \
+  "$test_token" 111111111 invalid-home 111111111 n n \
+  n \
+  | "$TEST_DIR/retry-inputs/install.sh" --dry-run >/dev/null
+
+grep -q '^NINEROUTER_PORT=20128$' "$TEST_DIR/retry-inputs/.env"
+grep -q '^TELEGRAM_HOME_CHANNEL=111111111$' "$TEST_DIR/retry-inputs/data/hermes/.env"
 
 printf 'Installer smoke test passed.\n'

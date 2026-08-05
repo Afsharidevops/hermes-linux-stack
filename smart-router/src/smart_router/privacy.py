@@ -22,10 +22,8 @@ def session_identity(
         if isinstance(value, str) and value.strip():
             return _digest(secret, source, value.strip()), source
 
-    fingerprint = _conversation_fingerprint(body)
-    if fingerprint:
-        credential = _credential_namespace(headers, secret)
-        return _digest(secret, "fingerprint", credential + "\0" + fingerprint), "fingerprint"
+    # Without a trusted session value, stay stateless. Content fingerprints can
+    # merge unrelated users who share an endpoint key and ask the same question.
     return None, "none"
 
 

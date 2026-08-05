@@ -120,6 +120,30 @@ valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && (( 1 <= 10#$1 && 10#$1 <= 65535 ))
 }
 
+prompt_port() {
+  local label="$1" default="$2" value
+  while true; do
+    value="$(prompt "$label" "$default")"
+    if valid_port "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
+    warn "Enter a numeric port from 1 to 65535." >&2
+  done
+}
+
+prompt_optional_integer() {
+  local label="$1" value
+  while true; do
+    value="$(prompt "$label")"
+    if [[ -z "$value" || "$value" =~ ^-?[0-9]+$ ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+    warn "Enter a numeric ID, or press Enter to skip." >&2
+  done
+}
+
 valid_bind_ip() {
   local ip="$1" octet
   local -a octets
@@ -371,15 +395,16 @@ else
   printf '%s\n' '2) Install 9router only'
   printf '%s\n' '3) Install Hermes Agent only'
   printf '%s\n' '4) Install Open WebUI only'
-  selection="$(prompt "Choose installation" "1")"
-
-  case "$selection" in
-    1) install_nine=true; install_hermes=true; install_webui=false ;;
-    2) install_nine=true; install_hermes=false; install_webui=false ;;
-    3) install_nine=false; install_hermes=true; install_webui=false ;;
-    4) install_nine=false; install_hermes=false; install_webui=true ;;
-    *) die "Choose 1, 2, 3, or 4." ;;
-  esac
+  while true; do
+    selection="$(prompt "Choose installation" "1")"
+    case "$selection" in
+      1) install_nine=true; install_hermes=true; install_webui=false; break ;;
+      2) install_nine=true; install_hermes=false; install_webui=false; break ;;
+      3) install_nine=false; install_hermes=true; install_webui=false; break ;;
+      4) install_nine=false; install_hermes=false; install_webui=true; break ;;
+      *) warn "Choose 1, 2, 3, or 4." >&2 ;;
+    esac
+  done
 
   if [[ "$selection" != 4 ]] && confirm "Also install Open WebUI?" n; then
     install_webui=true
@@ -422,8 +447,7 @@ if [[ "$configure_nine" == true ]]; then
   printf '\n9router settings\n'
   printf '%s\n' '----------------'
   nine_bind="$(prompt_bind_ip "9router host bind address" "$(suggested_bind_ip "$nine_bind")")"
-  nine_port="$(prompt "Dashboard/API port" "20128")"
-  valid_port "$nine_port" || die "Invalid 9router port: $nine_port"
+  nine_port="$(prompt_port "Dashboard/API port" "20128")"
   nine_password="$(prompt_secret "Initial 9router dashboard password")"
   nine_public_url="$(prompt "Public dashboard URL (or local URL)" "http://$(service_url_host "$nine_bind"):$nine_port")"
   if [[ "$nine_public_url" == https://* ]]; then nine_cookie_secure="true"; fi
@@ -454,7 +478,7 @@ telegram_ids="$(existing_hermes_env_value TELEGRAM_ALLOWED_USERS)"
 telegram_home="$(existing_hermes_env_value TELEGRAM_HOME_CHANNEL)"
 api_enabled="$(existing_hermes_env_value API_SERVER_ENABLED)"; api_enabled="${api_enabled:-false}"
 api_key="$(existing_hermes_env_value API_SERVER_KEY)"
-smart_router_image="$(existing_env_value SMART_ROUTER_IMAGE)"; smart_router_image="${smart_router_image:-afsharidevops/hermes-smart-router:0.1.0}"
+smart_router_image="$(existing_env_value SMART_ROUTER_IMAGE)"; smart_router_image="${smart_router_image:-afsharidevops/hermes-smart-router:0.1.0@sha256:4290667e8c90940a5dd97bcd6fd1575c0f1b822db507f9cc5076abe126708bef}"
 smart_router_mode="$(existing_env_value SMART_ROUTER_MODE)"; smart_router_mode="${smart_router_mode:-observe}"
 smart_router_secret="$(existing_env_value SMART_ROUTER_HMAC_SECRET)"; smart_router_secret="${smart_router_secret:-$(random_hex 32)}"
 smart_router_policy="$(existing_env_value SMART_ROUTER_POLICY_VERSION)"; smart_router_policy="${smart_router_policy:-1}"
@@ -563,23 +587,18 @@ if [[ "$configure_hermes" == true ]]; then
       valid_ids "$telegram_ids" && break
       warn "Use numeric IDs separated by commas, without usernames."
     done
-    telegram_home="$(prompt "Optional Telegram home chat ID for cron results (Enter to skip)")"
-    if [[ -n "$telegram_home" && ! "$telegram_home" =~ ^-?[0-9]+$ ]]; then
-      die "Telegram home chat ID must be numeric."
-    fi
+    telegram_home="$(prompt_optional_integer "Optional Telegram home chat ID for cron results (Enter to skip)")"
   fi
 
   if confirm "Enable the Hermes web dashboard?" n; then
     hermes_dashboard="1"
-    hermes_dashboard_port="$(prompt "Hermes dashboard port" "9119")"
-    valid_port "$hermes_dashboard_port" || die "Invalid dashboard port."
+    hermes_dashboard_port="$(prompt_port "Hermes dashboard port" "9119")"
     warn "The dashboard binds to localhost by default. Use an authenticated HTTPS reverse proxy for public access."
   fi
 
   if confirm "Enable the Hermes OpenAI-compatible API?" n; then
     api_enabled="true"
-    hermes_api_port="$(prompt "Hermes API port" "8642")"
-    valid_port "$hermes_api_port" || die "Invalid Hermes API port."
+    hermes_api_port="$(prompt_port "Hermes API port" "8642")"
     api_key="$(random_hex 32)"
   fi
 fi
@@ -588,8 +607,7 @@ if [[ "$configure_webui" == true ]]; then
   printf '\nOpen WebUI settings\n'
   printf '%s\n' '-------------------'
   openwebui_bind="$(prompt_bind_ip "Open WebUI host bind address" "$(suggested_bind_ip "$openwebui_bind")")"
-  openwebui_port="$(prompt "Open WebUI port" "3000")"
-  valid_port "$openwebui_port" || die "Invalid Open WebUI port."
+  openwebui_port="$(prompt_port "Open WebUI port" "3000")"
   openwebui_url="$(prompt "Open WebUI public URL (or local URL)" "http://$(service_url_host "$openwebui_bind"):$openwebui_port")"
 
   if [[ "$install_nine" == true ]]; then

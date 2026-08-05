@@ -101,6 +101,16 @@ class RouteStore:
         now = now or int(time.time())
         with self._lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                DELETE FROM session_routes WHERE rowid IN (
+                    SELECT rowid FROM session_routes
+                    WHERE expires_at <= ? OR created_at + ? <= ?
+                    LIMIT 100
+                )
+                """,
+                (now, self.settings.max_session_age_seconds, now),
+            )
             row = connection.execute(
                 """
                 SELECT * FROM session_routes

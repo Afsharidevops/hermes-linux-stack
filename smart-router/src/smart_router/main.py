@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -19,6 +20,7 @@ from .budget import BudgetResult, enforce_budget, propose_budget
 from .config import Settings
 from .database import RouteStore
 from .metrics import (
+    ACTIVE_STREAMS,
     BUDGET_ENFORCEMENTS,
     DURATION,
     EFFECTIVE_OUTPUT,
@@ -186,8 +188,9 @@ def create_app(
         if settings.mode == "route" and session_hash:
             try:
                 if request.headers.get("x-router-reset", "").lower() == "true":
-                    store.reset(session_hash, requested_model)
-                sticky = store.resolve(
+                    await asyncio.to_thread(store.reset, session_hash, requested_model)
+                sticky = await asyncio.to_thread(
+                    store.resolve,
                     session_hash,
                     requested_model,
                     decision.proposed_tier,
@@ -277,10 +280,28 @@ async def _dispatch(
 ) -> Response:
     try:
         if stream:
+            ACTIVE_STREAMS.inc()
+
+            def stream_complete(completed: bool) -> None:
+                ACTIVE_STREAMS.dec()
+                USAGE_MISSING.labels("true").inc()
+                _record_request(
+                    "chat",
+                    mode,
+                    request_kind,
+                    True,
+                    response.status_code if completed else 502,
+                    started,
+                )
+
             response = await proxy_streaming(
-                request.app.state.client, "POST", url, headers, content
+                request.app.state.client,
+                "POST",
+                url,
+                headers,
+                content,
+                on_complete=stream_complete,
             )
-            USAGE_MISSING.labels("true").inc()
         else:
             response = await proxy_buffered(
                 request.app.state.client, "POST", url, headers, content
@@ -292,7 +313,8 @@ async def _dispatch(
         return _openai_error("upstream unavailable", "upstream_unavailable", 503)
     if response.status_code >= 400:
         UPSTREAM_ERRORS.labels(_status_class(response.status_code)).inc()
-    _record_request("chat", mode, request_kind, stream, response.status_code, started)
+    if not stream:
+        _record_request("chat", mode, request_kind, False, response.status_code, started)
     return response
 
 
