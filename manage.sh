@@ -16,8 +16,9 @@ Commands:
   restart                       Restart selected services
   update                        Pull current official images and recreate
   status                        Show container status
-  logs [hermes|9router|webui|caddy]
+  logs [hermes|9router|smart-router|webui|caddy]
                                 Follow all or one service's logs
+  set-router-mode MODE          Set Smart Router mode to observe or route
   doctor                        Validate files and show diagnostics
   configure                     Run the interactive installer again
   add-telegram-user ID          Add one numeric Telegram user ID
@@ -64,6 +65,7 @@ interactive_menu() {
     printf '%s\n' '6) Update official images'
     printf '%s\n' '7) Follow logs'
     printf '%s\n' '8) Reconfigure installation'
+    printf '%s\n' '9) Change Smart Router mode'
     printf '%s\n' '0) Exit'
     read -r -p 'Choose: ' choice
     case "$choice" in
@@ -83,7 +85,7 @@ interactive_menu() {
         [[ "$value" =~ ^[Yy]$ ]] && "$ROOT_DIR/manage.sh" update
         ;;
       7)
-        read -r -p 'Service (all/hermes/9router/webui/caddy) [all]: ' service
+        read -r -p 'Service (all/hermes/9router/smart-router/webui/caddy) [all]: ' service
         if [[ -n "$service" && "$service" != all ]]; then
           "$ROOT_DIR/manage.sh" logs "$service" || true
         else
@@ -91,6 +93,10 @@ interactive_menu() {
         fi
         ;;
       8) exec "$ROOT_DIR/install.sh" ;;
+      9)
+        read -r -p 'Smart Router mode (observe/route) [observe]: ' value
+        "$ROOT_DIR/manage.sh" set-router-mode "${value:-observe}"
+        ;;
       0) return 0 ;;
       *) printf 'Unknown choice.\n' >&2 ;;
     esac
@@ -130,9 +136,10 @@ case "$command" in
       "") compose logs -f --tail=100 ;;
       hermes) compose logs -f --tail=100 hermes ;;
       9router|nine-router) compose logs -f --tail=100 nine-router ;;
+      smart-router|router) compose logs -f --tail=100 smart-router ;;
       webui|open-webui) compose logs -f --tail=100 open-webui ;;
       caddy) compose logs -f --tail=100 caddy ;;
-      *) printf 'Choose hermes, 9router, webui, or caddy.\n' >&2; exit 2 ;;
+      *) printf 'Choose hermes, 9router, smart-router, webui, or caddy.\n' >&2; exit 2 ;;
     esac
     ;;
   doctor)
@@ -145,11 +152,47 @@ case "$command" in
       [[ "$mode" == 600 ]] || printf 'WARNING: expected data/hermes/.env mode 600\n'
     fi
     profiles="$(sed -n 's/^COMPOSE_PROFILES=//p' "$ENV_FILE")"
+    if [[ "$profiles" == *smart-router* ]]; then
+      compose exec -T smart-router python -c \
+        'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=5)'
+      compose exec -T smart-router python -c \
+        'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/ready", timeout=5)'
+      printf 'Smart Router health/readiness: valid\n'
+    fi
     if [[ "$profiles" == *caddy* ]]; then
       compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
     fi
     ;;
   configure) exec "$ROOT_DIR/install.sh" ;;
+  set-router-mode)
+    mode="${2:-}"
+    [[ "$mode" == observe || "$mode" == route ]] || {
+      printf 'Mode must be observe or route.\n' >&2
+      exit 2
+    }
+    profiles="$(sed -n 's/^COMPOSE_PROFILES=//p' "$ENV_FILE")"
+    [[ ",$profiles," == *,smart-router,* ]] || {
+      printf 'Smart Router is not selected. Run ./manage.sh configure first.\n' >&2
+      exit 1
+    }
+    replace_env_value "$ENV_FILE" SMART_ROUTER_MODE "$mode"
+    compose up -d nine-router smart-router
+    ready=false
+    for _ in {1..60}; do
+      if compose exec -T smart-router python -c \
+        'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/ready", timeout=5)' \
+        >/dev/null 2>&1; then
+        ready=true
+        break
+      fi
+      sleep 2
+    done
+    [[ "$ready" == true ]] || {
+      printf 'Smart Router was recreated but did not become ready.\n' >&2
+      exit 1
+    }
+    printf 'Smart Router mode changed to %s and is ready.\n' "$mode"
+    ;;
   show-telegram-users)
     [[ -f "$HERMES_ENV" ]] || { printf 'Hermes is not configured.\n' >&2; exit 1; }
     grep '^TELEGRAM_ALLOWED_USERS=' "$HERMES_ENV" || true

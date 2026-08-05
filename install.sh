@@ -40,6 +40,7 @@ ENV_FILE="$ROOT_DIR/.env"
 HERMES_DIR="$ROOT_DIR/data/hermes"
 NINEROUTER_DIR="$ROOT_DIR/data/9router"
 OPENWEBUI_DIR="$ROOT_DIR/data/open-webui"
+SMART_ROUTER_DIR="$ROOT_DIR/data/smart-router"
 CADDY_DIR="$ROOT_DIR/data/caddy"
 DRY_RUN=false
 NO_START=false
@@ -319,8 +320,10 @@ fi
 configure_nine=false
 configure_hermes=false
 configure_webui=false
+configure_smart_router=false
 configure_caddy=false
 existing_install=false
+smart_router_was_enabled=false
 change_bind_ips=false
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -328,6 +331,8 @@ if [[ -f "$ENV_FILE" ]]; then
   install_nine=false; profile_enabled 9router && install_nine=true
   install_hermes=false; profile_enabled hermes && install_hermes=true
   install_webui=false; profile_enabled open-webui && install_webui=true
+  install_smart_router=false; profile_enabled smart-router && install_smart_router=true
+  smart_router_was_enabled="$install_smart_router"
   install_caddy=false; profile_enabled caddy && install_caddy=true
 
   printf 'Existing components: %s\n' "$(existing_env_value COMPOSE_PROFILES)"
@@ -347,6 +352,18 @@ if [[ -f "$ENV_FILE" ]]; then
     confirm "Reconfigure existing Open WebUI settings?" n && configure_webui=true
   elif confirm "Add Open WebUI?" n; then
     install_webui=true; configure_webui=true
+  fi
+  if [[ "$install_smart_router" == true ]]; then
+    if ! confirm "Keep the Hermes Smart Router enabled?" y; then
+      install_smart_router=false
+      configure_smart_router=true
+    elif confirm "Reconfigure existing Smart Router settings?" n; then
+      configure_smart_router=true
+    fi
+  elif [[ "$install_nine" == true && "$install_hermes" == true ]] \
+    && confirm "Add optional Hermes Smart Router (observation mode first)?" n; then
+    install_smart_router=true
+    configure_smart_router=true
   fi
   confirm "Change published container bind IPs only?" n && change_bind_ips=true
 else
@@ -370,15 +387,22 @@ else
   configure_nine="$install_nine"
   configure_hermes="$install_hermes"
   configure_webui="$install_webui"
+  install_smart_router=false
+  if [[ "$install_nine" == true && "$install_hermes" == true ]] \
+    && confirm "Add optional Hermes Smart Router (observation mode first)?" n; then
+    install_smart_router=true
+    configure_smart_router=true
+  fi
   install_caddy=false
 fi
 
 profiles=""
 [[ "$install_nine" == true ]] && profiles="9router"
+[[ "$install_smart_router" == true ]] && profiles="${profiles:+$profiles,}smart-router"
 [[ "$install_hermes" == true ]] && profiles="${profiles:+$profiles,}hermes"
 [[ "$install_webui" == true ]] && profiles="${profiles:+$profiles,}open-webui"
 
-mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$CADDY_DIR"
+mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$SMART_ROUTER_DIR" "$CADDY_DIR"
 backup_existing
 
 nine_bind="$(existing_env_value NINEROUTER_BIND_IP)"; nine_bind="${nine_bind:-${lan_ip:-127.0.0.1}}"
@@ -430,7 +454,51 @@ telegram_ids="$(existing_hermes_env_value TELEGRAM_ALLOWED_USERS)"
 telegram_home="$(existing_hermes_env_value TELEGRAM_HOME_CHANNEL)"
 api_enabled="$(existing_hermes_env_value API_SERVER_ENABLED)"; api_enabled="${api_enabled:-false}"
 api_key="$(existing_hermes_env_value API_SERVER_KEY)"
+smart_router_image="$(existing_env_value SMART_ROUTER_IMAGE)"; smart_router_image="${smart_router_image:-afsharidevops/hermes-smart-router:0.1.0}"
+smart_router_mode="$(existing_env_value SMART_ROUTER_MODE)"; smart_router_mode="${smart_router_mode:-observe}"
+smart_router_secret="$(existing_env_value SMART_ROUTER_HMAC_SECRET)"; smart_router_secret="${smart_router_secret:-$(random_hex 32)}"
+smart_router_policy="$(existing_env_value SMART_ROUTER_POLICY_VERSION)"; smart_router_policy="${smart_router_policy:-1}"
+smart_router_fast_model="$(existing_env_value SMART_ROUTER_FAST_MODEL)"; smart_router_fast_model="${smart_router_fast_model:-combo-fast}"
+smart_router_standard_model="$(existing_env_value SMART_ROUTER_STANDARD_MODEL)"; smart_router_standard_model="${smart_router_standard_model:-combo-standard}"
+smart_router_strong_model="$(existing_env_value SMART_ROUTER_STRONG_MODEL)"; smart_router_strong_model="${smart_router_strong_model:-combo-strong}"
+smart_router_observe_model="$(existing_env_value SMART_ROUTER_OBSERVE_MODEL)"; smart_router_observe_model="${smart_router_observe_model:-ai}"
+smart_router_fail_open_model="$(existing_env_value SMART_ROUTER_FAIL_OPEN_MODEL)"; smart_router_fail_open_model="${smart_router_fail_open_model:-ai}"
+smart_router_ttl="$(existing_env_value SMART_ROUTER_SESSION_TTL_SECONDS)"; smart_router_ttl="${smart_router_ttl:-2700}"
+smart_router_max_age="$(existing_env_value SMART_ROUTER_MAX_SESSION_AGE_SECONDS)"; smart_router_max_age="${smart_router_max_age:-43200}"
+smart_router_demotion="$(existing_env_value SMART_ROUTER_DEMOTION_TURNS)"; smart_router_demotion="${smart_router_demotion:-5}"
+smart_router_fast_tokens="$(existing_env_value SMART_ROUTER_FAST_MAX_TOKENS)"; smart_router_fast_tokens="${smart_router_fast_tokens:-1024}"
+smart_router_standard_tokens="$(existing_env_value SMART_ROUTER_STANDARD_MAX_TOKENS)"; smart_router_standard_tokens="${smart_router_standard_tokens:-4096}"
+smart_router_strong_tokens="$(existing_env_value SMART_ROUTER_STRONG_MAX_TOKENS)"; smart_router_strong_tokens="${smart_router_strong_tokens:-6144}"
+smart_router_connect_timeout="$(existing_env_value SMART_ROUTER_CONNECT_TIMEOUT_SECONDS)"; smart_router_connect_timeout="${smart_router_connect_timeout:-10}"
+smart_router_read_timeout="$(existing_env_value SMART_ROUTER_READ_TIMEOUT_SECONDS)"; smart_router_read_timeout="${smart_router_read_timeout:-600}"
+smart_router_max_bytes="$(existing_env_value SMART_ROUTER_MAX_REQUEST_BYTES)"; smart_router_max_bytes="${smart_router_max_bytes:-10485760}"
+nine_image="$(existing_env_value NINEROUTER_IMAGE)"; nine_image="${nine_image:-decolua/9router:latest}"
+hermes_image="$(existing_env_value HERMES_IMAGE)"; hermes_image="${hermes_image:-nousresearch/hermes-agent:latest}"
+openwebui_image="$(existing_env_value OPENWEBUI_IMAGE)"; openwebui_image="${openwebui_image:-ghcr.io/open-webui/open-webui:main}"
+caddy_image="$(existing_env_value CADDY_IMAGE)"; caddy_image="${caddy_image:-caddy:2-alpine}"
 caddy_bind="$(existing_env_value CADDY_BIND_IP)"; caddy_bind="${caddy_bind:-0.0.0.0}"
+
+if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; then
+  printf '\nHermes Smart Router settings\n'
+  printf '%s\n' '----------------------------'
+  smart_router_mode="$(prompt "Initial mode (observe is safest)" "$smart_router_mode")"
+  [[ "$smart_router_mode" == observe || "$smart_router_mode" == route ]] \
+    || die "Smart Router mode must be observe or route."
+  smart_router_fast_model="$(prompt "Fast-tier 9router combo" "$smart_router_fast_model")"
+  smart_router_standard_model="$(prompt "Standard-tier 9router combo" "$smart_router_standard_model")"
+  smart_router_strong_model="$(prompt "Strong-tier 9router combo" "$smart_router_strong_model")"
+  warn "The installer initially clones ai into all three tier combos; customize their model lists in 9router before route mode provides meaningful tier differences."
+fi
+
+if [[ "$install_smart_router" == true ]]; then
+  provider_url="http://smart-router:8080/v1"
+  openwebui_api_url="http://smart-router:8080/v1"
+  model_name="auto"
+elif [[ "$install_nine" == true ]]; then
+  openwebui_api_url="http://nine-router:20128/v1"
+  provider_url="http://nine-router:20128/v1"
+  [[ "$model_name" == auto* ]] && model_name="ai"
+fi
 
 if [[ "$change_bind_ips" == true ]]; then
   printf '\nPublished container bind IPs\n'
@@ -459,14 +527,22 @@ if [[ "$configure_hermes" == true ]]; then
   printf '\nHermes Agent settings\n'
   printf '%s\n' '---------------------'
   hermes_bind="$(prompt_bind_ip "Hermes API/dashboard host bind address" "$(suggested_bind_ip "$hermes_bind")")"
-  if [[ "$install_nine" == true ]]; then
+  if [[ "$install_smart_router" == true ]]; then
+    provider_url="http://smart-router:8080/v1"
+    info "Hermes will reach 9router through the Smart Router in observation mode."
+  elif [[ "$install_nine" == true ]]; then
     provider_url="http://nine-router:20128/v1"
     info "Hermes will reach 9router through the private Docker network."
   else
     provider_url="$(prompt "OpenAI-compatible API base URL (include /v1)" "http://host.docker.internal:20128/v1")"
   fi
   provider_name="$(prompt "Hermes provider name" "9router")"
-  model_name="$(prompt "9router model/combo name" "ai")"
+  if [[ "$install_smart_router" == true ]]; then
+    model_name="auto"
+    info "Hermes model is set to auto; explicit /model selections still pass through unchanged."
+  else
+    model_name="$(prompt "9router model/combo name" "ai")"
+  fi
 
   if [[ "$install_nine" == true ]]; then
     provider_key="auto-generated-after-9router-starts"
@@ -517,10 +593,15 @@ if [[ "$configure_webui" == true ]]; then
   openwebui_url="$(prompt "Open WebUI public URL (or local URL)" "http://$(service_url_host "$openwebui_bind"):$openwebui_port")"
 
   if [[ "$install_nine" == true ]]; then
-    openwebui_api_url="http://nine-router:20128/v1"
+    if [[ "$install_smart_router" == true ]]; then
+      openwebui_api_url="http://smart-router:8080/v1"
+      info "Open WebUI will reach 9router through the Smart Router."
+    else
+      openwebui_api_url="http://nine-router:20128/v1"
+      info "Open WebUI will reach 9router through the private Docker network."
+    fi
     openwebui_api_key="auto-generated-after-9router-starts"
     info "A dedicated 9router API key and OpenCode-Free model will be configured automatically."
-    info "Open WebUI will reach 9router through the private Docker network."
   else
     openwebui_api_url="$(prompt "OpenAI-compatible API base URL for Open WebUI" "http://host.docker.internal:20128/v1")"
     openwebui_api_key="$(prompt_secret "OpenAI-compatible API key for Open WebUI")"
@@ -601,7 +682,7 @@ gid="${SUDO_GID:-$(id -g)}"
 tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
 {
   printf 'COMPOSE_PROFILES=%s\n' "$profiles"
-  printf 'NINEROUTER_IMAGE=decolua/9router:latest\n'
+  printf 'NINEROUTER_IMAGE=%s\n' "$nine_image"
   printf 'NINEROUTER_BIND_IP=%s\n' "$nine_bind"
   printf 'NINEROUTER_PORT=%s\n' "$nine_port"
   printf 'NINEROUTER_INITIAL_PASSWORD=%s\n' "$(dotenv_quote "$nine_password")"
@@ -613,14 +694,32 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'NINEROUTER_PUBLIC_BASE_URL=%s\n' "$(dotenv_quote "$nine_public_url")"
   printf 'NINEROUTER_ENABLE_REQUEST_LOGS=false\n'
   printf 'NINEROUTER_OBSERVABILITY_ENABLED=true\n'
-  printf 'HERMES_IMAGE=nousresearch/hermes-agent:latest\n'
+  printf 'HERMES_IMAGE=%s\n' "$hermes_image"
   printf 'HERMES_BIND_IP=%s\n' "$hermes_bind"
   printf 'HERMES_API_PORT=%s\n' "$hermes_api_port"
   printf 'HERMES_DASHBOARD_PORT=%s\n' "$hermes_dashboard_port"
   printf 'HERMES_DASHBOARD=%s\n' "$hermes_dashboard"
   printf 'HERMES_UID=%s\n' "$uid"
   printf 'HERMES_GID=%s\n' "$gid"
-  printf 'OPENWEBUI_IMAGE=ghcr.io/open-webui/open-webui:main\n'
+  printf 'SMART_ROUTER_IMAGE=%s\n' "$smart_router_image"
+  printf 'SMART_ROUTER_MODE=%s\n' "$smart_router_mode"
+  printf 'SMART_ROUTER_HMAC_SECRET=%s\n' "$smart_router_secret"
+  printf 'SMART_ROUTER_POLICY_VERSION=%s\n' "$smart_router_policy"
+  printf 'SMART_ROUTER_OBSERVE_MODEL=%s\n' "$smart_router_observe_model"
+  printf 'SMART_ROUTER_FAIL_OPEN_MODEL=%s\n' "$smart_router_fail_open_model"
+  printf 'SMART_ROUTER_FAST_MODEL=%s\n' "$smart_router_fast_model"
+  printf 'SMART_ROUTER_STANDARD_MODEL=%s\n' "$smart_router_standard_model"
+  printf 'SMART_ROUTER_STRONG_MODEL=%s\n' "$smart_router_strong_model"
+  printf 'SMART_ROUTER_SESSION_TTL_SECONDS=%s\n' "$smart_router_ttl"
+  printf 'SMART_ROUTER_MAX_SESSION_AGE_SECONDS=%s\n' "$smart_router_max_age"
+  printf 'SMART_ROUTER_DEMOTION_TURNS=%s\n' "$smart_router_demotion"
+  printf 'SMART_ROUTER_FAST_MAX_TOKENS=%s\n' "$smart_router_fast_tokens"
+  printf 'SMART_ROUTER_STANDARD_MAX_TOKENS=%s\n' "$smart_router_standard_tokens"
+  printf 'SMART_ROUTER_STRONG_MAX_TOKENS=%s\n' "$smart_router_strong_tokens"
+  printf 'SMART_ROUTER_CONNECT_TIMEOUT_SECONDS=%s\n' "$smart_router_connect_timeout"
+  printf 'SMART_ROUTER_READ_TIMEOUT_SECONDS=%s\n' "$smart_router_read_timeout"
+  printf 'SMART_ROUTER_MAX_REQUEST_BYTES=%s\n' "$smart_router_max_bytes"
+  printf 'OPENWEBUI_IMAGE=%s\n' "$openwebui_image"
   printf 'OPENWEBUI_BIND_IP=%s\n' "$openwebui_bind"
   printf 'OPENWEBUI_PORT=%s\n' "$openwebui_port"
   printf 'OPENWEBUI_URL=%s\n' "$(dotenv_quote "$openwebui_url")"
@@ -628,7 +727,7 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'OPENWEBUI_OPENAI_BASE_URL=%s\n' "$(dotenv_quote "$openwebui_api_url")"
   printf 'OPENWEBUI_OPENAI_API_KEY=%s\n' "$(dotenv_quote "$openwebui_api_key")"
   printf 'OPENWEBUI_ENABLE_SIGNUP=%s\n' "$openwebui_signup"
-  printf 'CADDY_IMAGE=caddy:2-alpine\n'
+  printf 'CADDY_IMAGE=%s\n' "$caddy_image"
   printf 'CADDY_BIND_IP=%s\n' "$caddy_bind"
 } > "$tmp_env"
 chmod 600 "$tmp_env"
@@ -656,6 +755,35 @@ if [[ "$configure_hermes" == true ]]; then
   } > "$HERMES_DIR/.env"
   chmod 600 "$HERMES_DIR/.env"
   chmod 644 "$HERMES_DIR/config.yaml"
+fi
+
+if [[ "$configure_smart_router" == true && "$configure_hermes" != true \
+  && -f "$HERMES_DIR/config.yaml" ]]; then
+  # Update only the active provider's base_url and the model default so Telegram
+  # secrets and any additional custom providers stay untouched.
+  tmp_config="$(mktemp "$HERMES_DIR/config.yaml.tmp.XXXXXX")"
+  awk -v model="$model_name" -v url="$provider_url" -v provider="$provider_name" '
+    BEGIN { in_model = 0; in_providers = 0; active = 0 }
+    /^[^[:space:]#]/ {
+      in_model = ($0 ~ /^model:/)
+      in_providers = ($0 ~ /^custom_providers:/)
+      active = 0
+    }
+    in_model && /^  default:/ { print "  default: '\''" model "'\''"; next }
+    in_providers && /^  - name:/ {
+      line = $0
+      gsub(/^  - name:[[:space:]]*/, "", line)
+      gsub(/^'\''|'\''$|^"|"$/, "", line)
+      active = (line == provider)
+    }
+    in_providers && active && /^    base_url:/ {
+      print "    base_url: '\''" url "'\''"
+      next
+    }
+    { print }
+  ' "$HERMES_DIR/config.yaml" > "$tmp_config"
+  chmod --reference="$HERMES_DIR/config.yaml" "$tmp_config"
+  mv "$tmp_config" "$HERMES_DIR/config.yaml"
 fi
 
 if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
@@ -699,7 +827,7 @@ if [[ "$NO_START" == true ]]; then
   exit 0
 fi
 
-info "Pulling official container images..."
+info "Pulling selected container images..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" pull
 
 openwebui_key_status=""
@@ -735,6 +863,10 @@ if [[ "$install_nine" == true && ( "$install_hermes" == true || "$install_webui"
   bootstrap_output="$("${DOCKER[@]}" exec -i \
     -e PROVISION_HERMES="$install_hermes" \
     -e PROVISION_OPENWEBUI="$install_webui" \
+    -e PROVISION_SMART_ROUTER="$install_smart_router" \
+    -e SMART_ROUTER_FAST_MODEL="$smart_router_fast_model" \
+    -e SMART_ROUTER_STANDARD_MODEL="$smart_router_standard_model" \
+    -e SMART_ROUTER_STRONG_MODEL="$smart_router_strong_model" \
     -e HERMES_MODEL_NAME="$model_name" \
     nine-router node --input-type=module < "$ROOT_DIR/scripts/bootstrap-openwebui.mjs")"
   openwebui_api_key="$(sed -n 's/^OPENWEBUI_API_KEY=//p' <<< "$bootstrap_output" | tail -n1)"
@@ -743,6 +875,7 @@ if [[ "$install_nine" == true && ( "$install_hermes" == true || "$install_webui"
   hermes_key_status="$(sed -n 's/^HERMES_KEY_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
   opencode_combo_status="$(sed -n 's/^OPENCODE_COMBO_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
   ai_combo_status="$(sed -n 's/^AI_COMBO_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
+  smart_router_combo_status="$(sed -n 's/^SMART_ROUTER_COMBO_STATUS=//p' <<< "$bootstrap_output" | tail -n1)"
   opencode_free_model_count="$(sed -n 's/^OPENCODE_FREE_MODEL_COUNT=//p' <<< "$bootstrap_output" | tail -n1)"
 
   if [[ "$install_webui" == true ]]; then
@@ -759,12 +892,34 @@ if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
   info "Validating generated Caddy configuration..."
   "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
 fi
+if [[ "$smart_router_was_enabled" == true && "$install_smart_router" != true ]]; then
+  info "Stopping the disabled Hermes Smart Router..."
+  COMPOSE_PROFILES=smart-router "${DOCKER[@]}" compose \
+    -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" \
+    rm -sf smart-router smart-router-init
+fi
+
 info "Starting selected services..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --remove-orphans
 
+if [[ "$install_smart_router" == true ]]; then
+  info "Waiting for the Hermes Smart Router to become ready..."
+  smart_router_ready=false
+  for _ in {1..60}; do
+    if "${DOCKER[@]}" exec hermes-smart-router python -c \
+      'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/ready", timeout=5)' \
+      >/dev/null 2>&1; then
+      smart_router_ready=true
+      break
+    fi
+    sleep 2
+  done
+  [[ "$smart_router_ready" == true ]] || die "Hermes Smart Router did not become ready."
+fi
+
 if [[ "$install_nine" == true && "$install_webui" == true ]]; then
-  if [[ "$openwebui_db_preexisting" == true ]]; then
-    info "Updating the existing Open WebUI connection without deleting its data..."
+  if [[ "$openwebui_db_preexisting" == true || "$configure_smart_router" == true ]]; then
+    info "Synchronizing the Open WebUI backend connection without deleting its data..."
     webui_db_ready=false
     for _ in {1..60}; do
       if "${DOCKER[@]}" exec open-webui python -c \
@@ -793,9 +948,14 @@ ok "Installation complete."
 [[ "$install_nine" == true ]] && printf '9router dashboard: %s\n' "$nine_public_url"
 if [[ -n "$hermes_key_status" ]]; then
   printf 'Hermes 9router key: %s (stored securely; not printed)\n' "$hermes_key_status"
-  if [[ "$model_name" == ai ]]; then
+  if [[ "$model_name" == ai || "$install_smart_router" == true ]]; then
     printf 'Hermes ai combo: %s (%s free upstream models)\n' "$ai_combo_status" "$opencode_free_model_count"
   fi
+fi
+if [[ "$install_smart_router" == true ]]; then
+  printf 'Hermes Smart Router: enabled (%s mode)\n' "$smart_router_mode"
+  printf 'Smart Router tier combos: %s (initially cloned from ai)\n' "$smart_router_combo_status"
+  warn "Customize combo-fast, combo-standard, and combo-strong in 9router before enabling route mode."
 fi
 if [[ "$install_hermes" == true && -n "$telegram_token" ]]; then
   printf '%s\n' 'Telegram: open your bot and send /start'

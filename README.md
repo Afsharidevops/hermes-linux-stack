@@ -3,6 +3,7 @@
 Interactive, public-safe Docker deployment for:
 
 - [9router](https://github.com/decolua/9router) — OpenAI-compatible provider router
+- Hermes Smart Router — optional sticky complexity routing and output budgeting
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) — persistent AI agent with Telegram
 - [Open WebUI](https://github.com/open-webui/open-webui) — optional browser chat interface
 - [Caddy](https://caddyserver.com/) — optional domain routing and automatic HTTPS
@@ -23,8 +24,10 @@ selection, or install Open WebUI by itself.
 - Localhost-only published ports by default
 - Optional Hermes dashboard and API
 - Optional Open WebUI connected to 9router or another OpenAI-compatible API
-- Dedicated auto-generated 9router key for Open WebUI
-- Installer-managed `OpenCode-Free` model with current free OpenCode fallbacks
+- Dedicated auto-generated 9router keys for Hermes and Open WebUI
+- Installer-managed `OpenCode-Free` and `ai` combos with current free fallbacks
+- Optional Smart Router with observe/route modes, sticky tiers, transparent SSE,
+  request-aware output budgets, privacy-safe metrics, and no answer cache
 - Optional Caddy profile with wizard-generated domains and automatic HTTPS
 - Secure generated JWT, signing, machine-ID, WebUI, and API secrets
 - Reconfiguration backups
@@ -37,10 +40,9 @@ selection, or install Open WebUI by itself.
 Telegram API
     ↑ outbound polling
     │
-Hermes Agent ──────→ 9router ──────→ configured AI providers
-    │                   ↑
-    │                   │
-    └──── shared Docker network ─── Open WebUI
+Hermes Agent ──┐
+                ├──→ optional Smart Router ──→ 9router ──→ AI providers
+Open WebUI ─────┘
                                 ↑
 Internet ── HTTPS ── optional Caddy reverse proxy
 
@@ -102,8 +104,9 @@ The installer asks:
 7. Telegram BotFather token and allowed numeric IDs
 8. Optional Telegram home channel
 9. Optional Hermes dashboard and API
-10. Open WebUI endpoint (or automatic 9router connection), URL, and signup policy
-11. Caddy bind address and optional HTTPS domains for each installed web service
+10. Optional Smart Router for both Hermes and Open WebUI, initially in observe mode
+11. Open WebUI endpoint (or automatic routed 9router connection), URL, and signup policy
+12. Caddy bind address and optional HTTPS domains for each installed web service
 
 Application ports default to `127.0.0.1`. The bind prompts accept a specific
 server/LAN IPv4 address or `0.0.0.0` for all interfaces. On a later wizard run,
@@ -113,10 +116,55 @@ because public certificate validation must reach ports 80 and 443.
 
 Secrets are written to ignored files with mode `0600`:
 
-- `.env` — Compose and service secrets
+- `.env` — Compose, service, and Smart Router HMAC secrets
 - `data/hermes/.env` — Hermes/Telegram secrets
+- `data/smart-router/router.sqlite3` — pseudonymous sticky-route state
 
 Never commit either file.
+
+## Optional Hermes Smart Router
+
+The installer can place an internal OpenAI-compatible Smart Router between Hermes,
+Open WebUI, and 9router. Both clients retain separate 9router endpoint keys, so
+sticky sessions and metrics remain isolated by caller. The image source is
+in `smart-router/`; the versioned public image is:
+
+```text
+afsharidevops/hermes-smart-router:0.1.0
+```
+
+The initial mode is `observe`. Requests using the virtual `auto` model are sent to
+the existing `ai` combo while the router records a proposed fast, standard, or
+strong tier and proposed output budget. **Observation mode does not enforce output
+budgets**, so it can be compared fairly with direct Hermes → 9router behavior.
+Explicit non-auto models always pass through unchanged.
+
+In `route` mode, auto requests select `combo-fast`, `combo-standard`, or
+`combo-strong` and may have output limits clamped but never increased. The
+installer initially clones `ai` into all three combos. They are therefore identical
+until you customize their ordered model lists in the 9router dashboard.
+
+```bash
+./manage.sh set-router-mode observe
+./manage.sh set-router-mode route
+./manage.sh logs smart-router
+./manage.sh doctor
+```
+
+The router stores only HMAC-pseudonymous sticky-route metadata in
+`data/smart-router/router.sqlite3`. It does not cache answers, rewrite messages,
+filter tools, classify with another LLM, or retry requests. 9router may still apply
+its own provider/combo fallback behavior. Metrics at `/metrics` are available only
+inside the private Docker network and separate proposed budgets from actual
+upstream usage; they do not claim realized savings.
+
+Smart routing primarily reduces strong-model use and cost. Actual token reduction
+in v0.1.0 comes from enforced output limits in route mode, plus Hermes compression
+and 9router RTK/optional Headroom outside this sidecar.
+
+Rollback is available by rerunning `./install.sh` and disabling the Smart Router;
+Hermes returns to `http://nine-router:20128/v1` with model `ai`, while router state
+is preserved for inspection.
 
 ## First setup when installing all services
 
@@ -136,16 +184,15 @@ name must match the model name entered in the installer.
 
 ### 2. Configure endpoint authentication
 
-When 9router and Open WebUI are selected together, the installer automatically:
+When 9router is selected with Hermes or Open WebUI, the installer automatically:
 
-1. Generates or reuses a dedicated 9router endpoint key named
-   `Open WebUI (hermes-linux-stack)`.
+1. Generates or reuses separate endpoint keys named `Hermes Agent
+   (hermes-linux-stack)` and `Open WebUI (hermes-linux-stack)`.
 2. Fetches the current no-cost model list from OpenCode.
-3. Creates or updates a 9router combo named `OpenCode-Free` with those `oc/*`
-   models as fallbacks.
-4. Stores the endpoint key in `.env`, synchronizes an existing Open WebUI
-   database when upgrading, and verifies authenticated model discovery from the
-   Open WebUI container.
+3. Creates or updates `ai` and `OpenCode-Free`; with Smart Router enabled it also
+   clones `ai` into `combo-fast`, `combo-standard`, and `combo-strong`.
+4. Stores keys without printing them, synchronizes an existing Open WebUI database
+   to the selected direct/routed URL, and verifies authenticated model discovery.
 
 The key is intentionally not printed. You can inspect, rotate, or revoke it in
 the 9router dashboard. OpenCode's free catalog is dynamic, so rerunning the
@@ -245,7 +292,7 @@ Add one user without removing existing users:
 Replace the complete list:
 
 ```bash
-./manage.sh set-telegram-users 946652372,7264771088,445110861
+./manage.sh set-telegram-users 111111111,222222222,333333333
 ```
 
 Hermes is recreated automatically after an allowlist change.

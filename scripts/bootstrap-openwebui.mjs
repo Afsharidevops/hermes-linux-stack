@@ -8,6 +8,7 @@ database.pragma("busy_timeout = 30000");
 
 const provisionHermes = process.env.PROVISION_HERMES === "true";
 const provisionOpenWebUI = process.env.PROVISION_OPENWEBUI === "true";
+const provisionSmartRouter = process.env.PROVISION_SMART_ROUTER === "true";
 const hermesModelName = process.env.HERMES_MODEL_NAME || "ai";
 
 function provisionKey(keyName) {
@@ -29,10 +30,11 @@ function provisionKey(keyName) {
   return { key: row.key, status };
 }
 
-function upsertCombo(name, models) {
+function upsertCombo(name, models, { createOnly = false } = {}) {
   const now = new Date().toISOString();
   const existing = database.prepare("SELECT id FROM combos WHERE name = ? LIMIT 1").get(name);
   if (existing) {
+    if (createOnly) return "preserved";
     database
       .prepare("UPDATE combos SET kind = ?, models = ?, updatedAt = ? WHERE id = ?")
       .run("llm", JSON.stringify(models), now, existing.id);
@@ -53,8 +55,9 @@ const hermesKey = provisionHermes
 
 let openCodeComboStatus = "not-requested";
 let aiComboStatus = "not-requested";
+let smartRouterComboStatus = "not-requested";
 let freeModelCount = 0;
-if (provisionOpenWebUI || (provisionHermes && hermesModelName === "ai")) {
+if (provisionOpenWebUI || (provisionHermes && (hermesModelName === "ai" || provisionSmartRouter))) {
   try {
     const response = await fetch("https://opencode.ai/zen/v1/models", {
       headers: { "x-opencode-client": "desktop" },
@@ -70,10 +73,32 @@ if (provisionOpenWebUI || (provisionHermes && hermesModelName === "ai")) {
     if (freeModelCount === 0) throw new Error("OpenCode returned no currently free models");
 
     if (provisionOpenWebUI) openCodeComboStatus = upsertCombo("OpenCode-Free", freeModels);
-    if (provisionHermes && hermesModelName === "ai") aiComboStatus = upsertCombo("ai", freeModels);
+    if (provisionHermes && (hermesModelName === "ai" || provisionSmartRouter)) {
+      aiComboStatus = upsertCombo("ai", freeModels);
+    }
+    if (provisionSmartRouter) {
+      // Tier combos are seeded once, then owned by the operator. Reruns must not
+      // discard model lists customized in the 9router dashboard.
+      const tierNames = [
+        process.env.SMART_ROUTER_FAST_MODEL || "combo-fast",
+        process.env.SMART_ROUTER_STANDARD_MODEL || "combo-standard",
+        process.env.SMART_ROUTER_STRONG_MODEL || "combo-strong",
+      ];
+      const statuses = tierNames.map((name) =>
+        upsertCombo(name, freeModels, { createOnly: true }),
+      );
+      smartRouterComboStatus = statuses.every((status) => status === "created")
+        ? "created"
+        : statuses.every((status) => status === "preserved")
+          ? "preserved"
+          : "partially-created";
+    }
   } catch (error) {
     if (provisionOpenWebUI) openCodeComboStatus = "unavailable";
-    if (provisionHermes && hermesModelName === "ai") aiComboStatus = "unavailable";
+    if (provisionHermes && (hermesModelName === "ai" || provisionSmartRouter)) {
+      aiComboStatus = "unavailable";
+    }
+    if (provisionSmartRouter) smartRouterComboStatus = "unavailable";
     process.stderr.write(`OpenCode free-model combo warning: ${error.message}\n`);
   }
 }
@@ -90,4 +115,5 @@ if (hermesKey) {
 }
 process.stdout.write(`OPENCODE_COMBO_STATUS=${openCodeComboStatus}\n`);
 process.stdout.write(`AI_COMBO_STATUS=${aiComboStatus}\n`);
+process.stdout.write(`SMART_ROUTER_COMBO_STATUS=${smartRouterComboStatus}\n`);
 process.stdout.write(`OPENCODE_FREE_MODEL_COUNT=${freeModelCount}\n`);

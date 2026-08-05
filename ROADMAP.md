@@ -7,6 +7,8 @@
 3. Add non-interactive installer flags for automation and cloud-init.
 4. Pin images in tagged releases and automate update pull requests.
 5. Add HTTP readiness checks for every enabled service.
+6. Measure Smart Router observation data before enabling route mode by default.
+7. Add safe workload-normalized cost reporting outside the request path.
 
 ## RustFS recommendation
 

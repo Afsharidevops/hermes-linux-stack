@@ -11,6 +11,7 @@ Never commit or publish:
 - Telegram bot tokens
 - 9router endpoint or provider keys
 - Open WebUI signing secrets
+- Smart Router HMAC secrets and SQLite state
 
 The repository `.gitignore` excludes runtime secrets and persistent data. Check
 with `git status --ignored` before every public release.
@@ -26,6 +27,15 @@ Telegram polling uses outbound connections and needs no inbound firewall rule.
 When the optional Caddy profile is enabled, expose only TCP 80/443 and UDP 443.
 Keep 9router, Open WebUI, and Hermes host ports bound to `127.0.0.1`. DNS names
 must point to the server before Caddy can obtain public certificates.
+
+The Smart Router has no published host port and must remain on the private Docker
+network. It forwards endpoint authentication to 9router unchanged and never logs
+or stores prompts, responses, raw credentials, or raw session identifiers. Rotating
+`SMART_ROUTER_HMAC_SECRET` intentionally invalidates existing sticky routes.
+
+Publish Smart Router images with a versioned tag or manifest digest. Docker Hub
+credentials belong only in a local credential helper or protected GitHub Actions
+secrets; never add them to this repository, `.env`, Docker build arguments, or logs.
 
 ## Reporting vulnerabilities
 

@@ -18,6 +18,14 @@ jobs:
         run: |
           node --check scripts/bootstrap-openwebui.mjs
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("scripts").glob("*.py")]'
+          python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("smart-router/src").rglob("*.py")]'
+      - name: Test Smart Router
+        run: |
+          python3 -m venv /tmp/smart-router-venv
+          /tmp/smart-router-venv/bin/pip install -r smart-router/requirements-dev.txt
+          PYTHONPATH=smart-router/src /tmp/smart-router-venv/bin/pytest -q smart-router/tests
+      - name: Build Smart Router image
+        run: docker build -t hermes-smart-router:test smart-router
       - name: Validate Compose
         run: cp .env.example .env && docker compose config --quiet
       - name: Test interactive installer
@@ -28,3 +36,4 @@ jobs:
           test "$(git check-ignore data/hermes/.env)" = "data/hermes/.env"
           test "$(git check-ignore data/open-webui/webui.db)" = "data/open-webui/webui.db"
           test "$(git check-ignore data/caddy/Caddyfile)" = "data/caddy/Caddyfile"
+          test "$(git check-ignore data/smart-router/router.sqlite3)" = "data/smart-router/router.sqlite3"

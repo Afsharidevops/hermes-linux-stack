@@ -3,9 +3,13 @@ data/9router/*
 data/hermes/*
 data/open-webui/*
 data/caddy/*
+data/smart-router/*
 !data/9router/.gitkeep
 !data/hermes/.gitkeep
 !data/open-webui/.gitkeep
 !data/caddy/.gitkeep
+!data/smart-router/.gitkeep
 *.backup-*
 *.log
+__pycache__/
+*.py[cod]

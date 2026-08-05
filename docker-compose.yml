@@ -39,6 +39,70 @@ services:
       retries: 5
       start_period: 40s
 
+  smart-router-init:
+    profiles: ["smart-router"]
+    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.1.0}
+    container_name: hermes-smart-router-init
+    user: "0:0"
+    command: ["sh", "-c", "install -d -m 0700 -o 10001 -g 10001 /data"]
+    volumes:
+      - ./data/smart-router:/data
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE"]
+    security_opt:
+      - no-new-privileges:true
+    networks: [agent-net]
+
+  smart-router:
+    profiles: ["smart-router"]
+    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.1.0}
+    container_name: hermes-smart-router
+    restart: unless-stopped
+    environment:
+      SMART_ROUTER_MODE: ${SMART_ROUTER_MODE:-observe}
+      SMART_ROUTER_UPSTREAM_BASE_URL: http://nine-router:20128/v1
+      SMART_ROUTER_DATABASE_PATH: /data/router.sqlite3
+      SMART_ROUTER_HMAC_SECRET: ${SMART_ROUTER_HMAC_SECRET}
+      SMART_ROUTER_POLICY_VERSION: ${SMART_ROUTER_POLICY_VERSION:-1}
+      SMART_ROUTER_OBSERVE_MODEL: ${SMART_ROUTER_OBSERVE_MODEL:-ai}
+      SMART_ROUTER_FAIL_OPEN_MODEL: ${SMART_ROUTER_FAIL_OPEN_MODEL:-ai}
+      SMART_ROUTER_FAST_MODEL: ${SMART_ROUTER_FAST_MODEL:-combo-fast}
+      SMART_ROUTER_STANDARD_MODEL: ${SMART_ROUTER_STANDARD_MODEL:-combo-standard}
+      SMART_ROUTER_STRONG_MODEL: ${SMART_ROUTER_STRONG_MODEL:-combo-strong}
+      SMART_ROUTER_SESSION_TTL_SECONDS: ${SMART_ROUTER_SESSION_TTL_SECONDS:-2700}
+      SMART_ROUTER_MAX_SESSION_AGE_SECONDS: ${SMART_ROUTER_MAX_SESSION_AGE_SECONDS:-43200}
+      SMART_ROUTER_DEMOTION_TURNS: ${SMART_ROUTER_DEMOTION_TURNS:-5}
+      SMART_ROUTER_FAST_MAX_TOKENS: ${SMART_ROUTER_FAST_MAX_TOKENS:-1024}
+      SMART_ROUTER_STANDARD_MAX_TOKENS: ${SMART_ROUTER_STANDARD_MAX_TOKENS:-4096}
+      SMART_ROUTER_STRONG_MAX_TOKENS: ${SMART_ROUTER_STRONG_MAX_TOKENS:-6144}
+      SMART_ROUTER_CONNECT_TIMEOUT_SECONDS: ${SMART_ROUTER_CONNECT_TIMEOUT_SECONDS:-10}
+      SMART_ROUTER_READ_TIMEOUT_SECONDS: ${SMART_ROUTER_READ_TIMEOUT_SECONDS:-600}
+      SMART_ROUTER_MAX_REQUEST_BYTES: ${SMART_ROUTER_MAX_REQUEST_BYTES:-10485760}
+    volumes:
+      - ./data/smart-router:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: ["ALL"]
+    depends_on:
+      nine-router:
+        condition: service_healthy
+      smart-router-init:
+        condition: service_completed_successfully
+    networks: [agent-net]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   hermes:
     profiles: ["hermes"]
     image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}

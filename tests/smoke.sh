@@ -17,19 +17,30 @@ rm -f "$TEST_DIR/stack/data/caddy/Caddyfile"
 test_token='123456:'
 test_token+='abcdefghijklmnopqrstuvwxyzABCDE'
 
-printf '\ny\n\n\ntest-password\n\nn\n\n\n\n\ny\n%s\n946652372,7264771088\n\nn\nn\n\n\n\ny\ny\n\nadmin@example.com\ny\nrouter.example.com\ny\nchat.example.com\n' "$test_token" \
+printf '%s\n' \
+  '' y y \
+  '' '' test-password '' n \
+  '' '' '' '' \
+  '' '' y "$test_token" 946652372,7264771088 '' n n \
+  '' '' '' y \
+  y '' admin@example.com y router.example.com y chat.example.com \
   | "$TEST_DIR/stack/install.sh" --dry-run >/dev/null
 
-grep -q '^COMPOSE_PROFILES=9router,hermes,open-webui,caddy$' "$TEST_DIR/stack/.env"
+grep -q '^COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,caddy$' "$TEST_DIR/stack/.env"
+grep -q '^SMART_ROUTER_MODE=observe$' "$TEST_DIR/stack/.env"
+grep -q '^SMART_ROUTER_IMAGE=afsharidevops/hermes-smart-router:0.1.0$' "$TEST_DIR/stack/.env"
+grep -q '^SMART_ROUTER_HMAC_SECRET=[0-9a-f]\{64\}$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
 grep -q '^HERMES_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
 grep -q '^OPENWEBUI_BIND_IP=192.168.85.244$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_AUTH_COOKIE_SECURE=true$' "$TEST_DIR/stack/.env"
 grep -q '^NINEROUTER_PUBLIC_BASE_URL="https://router.example.com"$' "$TEST_DIR/stack/.env"
 grep -q '^OPENWEBUI_URL="https://chat.example.com"$' "$TEST_DIR/stack/.env"
+grep -q '^OPENWEBUI_OPENAI_BASE_URL="http://smart-router:8080/v1"$' "$TEST_DIR/stack/.env"
 grep -q '^OPENWEBUI_OPENAI_API_KEY="auto-generated-after-9router-starts"$' "$TEST_DIR/stack/.env"
 grep -q "^  provider: 'custom:9router'$" "$TEST_DIR/stack/data/hermes/config.yaml"
-grep -q "^  default: 'ai'$" "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q "^  default: 'auto'$" "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q "^    base_url: 'http://smart-router:8080/v1'$" "$TEST_DIR/stack/data/hermes/config.yaml"
 grep -q '^NINEROUTER_API_KEY="auto-generated-after-9router-starts"$' "$TEST_DIR/stack/data/hermes/.env"
 ! grep -q "custom:'9router'" "$TEST_DIR/stack/data/hermes/config.yaml"
 grep -q '^router.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
@@ -56,7 +67,10 @@ test ! -f "$TEST_DIR/no-caddy/data/caddy/Caddyfile"
 docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/no-caddy/.env" config --quiet
 
 # A second wizard run must preserve 9router while adding Hermes and Caddy.
-printf 'n\ny\nn\nn\n\n\n\nn\nn\nn\ny\n\n\ny\nrouter-added.example.com\n' \
+printf '%s\n' \
+  n y n n n \
+  '' '' '' n n n \
+  y '' '' y router-added.example.com \
   | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
 grep -q '^COMPOSE_PROFILES=9router,hermes,caddy$' "$TEST_DIR/no-caddy/.env"
 grep -q '^NINEROUTER_INITIAL_PASSWORD="second-password"$' "$TEST_DIR/no-caddy/.env"
@@ -66,7 +80,7 @@ docker compose -f "$TEST_DIR/no-caddy/docker-compose.yml" --env-file "$TEST_DIR/
 
 # Bind addresses can be changed later without reconfiguring service secrets.
 hermes_env_checksum="$(sha256sum "$TEST_DIR/no-caddy/data/hermes/.env")"
-printf 'n\nn\nn\ny\n0.0.0.0\n192.168.10.20\n192.168.10.21\nn\n' \
+printf 'n\nn\nn\nn\ny\n0.0.0.0\n192.168.10.20\n192.168.10.21\nn\n' \
   | "$TEST_DIR/no-caddy/install.sh" --dry-run >/dev/null
 grep -q '^NINEROUTER_BIND_IP=0.0.0.0$' "$TEST_DIR/no-caddy/.env"
 grep -q '^HERMES_BIND_IP=192.168.10.20$' "$TEST_DIR/no-caddy/.env"
