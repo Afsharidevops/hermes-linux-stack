@@ -115,11 +115,17 @@ services:
       - "${HERMES_BIND_IP:-127.0.0.1}:${HERMES_DASHBOARD_PORT:-9119}:9119"
     volumes:
       - ./data/hermes:/opt/data
+      - ./plugins/stack-package-policy:/opt/data/plugins/stack-package-policy:ro
     environment:
       HERMES_HOME: /opt/data
       HERMES_DASHBOARD: ${HERMES_DASHBOARD:-0}
       HERMES_UID: ${HERMES_UID:-10000}
       HERMES_GID: ${HERMES_GID:-10000}
+      HERMES_DISABLE_LAZY_INSTALLS: "1"
+      HERMES_LAZY_INSTALL_TARGET: /opt/data/lazy-packages
+      NPM_CONFIG_PREFIX: /opt/data/npm-packages
+      NODE_PATH: /opt/data/npm-packages/lib/node_modules
+      PATH: /opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/data/npm-packages/bin
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks: [agent-net]
@@ -144,6 +150,65 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks: [agent-net]
+
+  n8n-init:
+    profiles: ["n8n"]
+    image: ${N8N_IMAGE:-n8nio/n8n:latest}
+    container_name: hermes-n8n-init
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["install -d -m 0700 -o 1000 -g 1000 /home/node/.n8n"]
+    volumes:
+      - ./data/n8n:/home/node/.n8n
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+    security_opt:
+      - no-new-privileges:true
+    networks: [agent-net]
+
+  n8n:
+    profiles: ["n8n"]
+    image: ${N8N_IMAGE:-n8nio/n8n:latest}
+    container_name: hermes-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_BIND_IP:-127.0.0.1}:${N8N_PORT:-5678}:5678"
+    volumes:
+      - ./data/n8n:/home/node/.n8n
+    environment:
+      N8N_HOST: ${N8N_HOSTNAME:-localhost}
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_LISTEN_ADDRESS: 0.0.0.0
+      N8N_EDITOR_BASE_URL: ${N8N_PUBLIC_URL:-http://localhost:5678}
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-0}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_DIAGNOSTICS_ENABLED: ${N8N_DIAGNOSTICS_ENABLED:-false}
+      N8N_VERSION_NOTIFICATIONS_ENABLED: ${N8N_VERSION_NOTIFICATIONS_ENABLED:-false}
+      N8N_PERSONALIZATION_SURVEY_ENABLED: "false"
+      GENERIC_TIMEZONE: ${N8N_TIMEZONE:-UTC}
+      TZ: ${N8N_TIMEZONE:-UTC}
+      NODE_ENV: production
+    depends_on:
+      n8n-init:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [agent-net]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5678/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   caddy:
     profiles: ["caddy"]

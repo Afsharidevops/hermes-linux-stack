@@ -9,11 +9,28 @@ custom_providers:
     base_url: __PROVIDER_BASE_URL__
     key_env: NINEROUTER_API_KEY
 
+__MCP_SERVERS_BLOCK__
 agent:
   max_turns: 30
+  # Arbitrary local execution would bypass the package broker's one-time gate.
+  disabled_toolsets:
+    - terminal
+    - code_execution
 
 terminal:
   backend: local
+
+approvals:
+  mode: manual
+  timeout: 300
+  cron_mode: deny
+
+skills:
+  write_approval: true
+
+plugins:
+  enabled:
+    - stack-package-policy
 
 tool_loop_guardrails:
   hard_stop_enabled: true

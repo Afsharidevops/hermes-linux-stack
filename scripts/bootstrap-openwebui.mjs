@@ -9,6 +9,7 @@ database.pragma("busy_timeout = 30000");
 const provisionHermes = process.env.PROVISION_HERMES === "true";
 const provisionOpenWebUI = process.env.PROVISION_OPENWEBUI === "true";
 const provisionSmartRouter = process.env.PROVISION_SMART_ROUTER === "true";
+const provisionN8n = process.env.PROVISION_N8N === "true";
 const hermesModelName = process.env.HERMES_MODEL_NAME || "ai";
 
 function provisionKey(keyName) {
@@ -51,6 +52,9 @@ const openWebUIKey = provisionOpenWebUI
   : null;
 const hermesKey = provisionHermes
   ? provisionKey("Hermes Agent (hermes-linux-stack)")
+  : null;
+const n8nKey = provisionN8n
+  ? provisionKey("n8n (hermes-linux-stack)")
   : null;
 
 let openCodeComboStatus = "not-requested";
@@ -112,6 +116,10 @@ if (openWebUIKey) {
 if (hermesKey) {
   process.stdout.write(`HERMES_API_KEY=${hermesKey.key}\n`);
   process.stdout.write(`HERMES_KEY_STATUS=${hermesKey.status}\n`);
+}
+if (n8nKey) {
+  process.stdout.write(`N8N_API_KEY=${n8nKey.key}\n`);
+  process.stdout.write(`N8N_KEY_STATUS=${n8nKey.status}\n`);
 }
 process.stdout.write(`OPENCODE_COMBO_STATUS=${openCodeComboStatus}\n`);
 process.stdout.write(`AI_COMBO_STATUS=${aiComboStatus}\n`);

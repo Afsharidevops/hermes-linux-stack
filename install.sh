@@ -41,6 +41,7 @@ HERMES_DIR="$ROOT_DIR/data/hermes"
 NINEROUTER_DIR="$ROOT_DIR/data/9router"
 OPENWEBUI_DIR="$ROOT_DIR/data/open-webui"
 SMART_ROUTER_DIR="$ROOT_DIR/data/smart-router"
+N8N_DIR="$ROOT_DIR/data/n8n"
 CADDY_DIR="$ROOT_DIR/data/caddy"
 DRY_RUN=false
 NO_START=false
@@ -114,6 +115,134 @@ yaml_quote() {
   local value="$1"
   value="${value//\'/\'\'}"
   printf "'%s'" "$value"
+}
+
+# Emits the installer-owned mcp_servers block, or nothing when the bridge is off.
+# Hermes resolves ${N8N_MCP_*} at connect time from data/hermes/.env, so the
+# bearer token never lands in the world-readable config.yaml.
+render_mcp_block() {
+  [[ "${install_n8n_mcp:-false}" == true ]] || return 0
+  printf 'mcp_servers:\n'
+  render_mcp_entry
+}
+
+render_mcp_entry() {
+  [[ "${install_n8n_mcp:-false}" == true ]] || return 0
+  cat <<'MCP_ENTRY'
+  # >>> hermes-stack n8n mcp (managed) >>>
+  n8n:
+    url: "${N8N_MCP_URL}"
+    headers:
+      Authorization: "Bearer ${N8N_MCP_TOKEN}"
+  # <<< hermes-stack n8n mcp (managed) <<<
+MCP_ENTRY
+}
+
+ensure_hermes_policy_config() {
+  local file="$1" tmp next
+  [[ -f "$file" ]] || return 0
+  tmp="$(mktemp "$file.tmp.XXXXXX")"
+  cp "$file" "$tmp"
+
+  command -v python3 >/dev/null 2>&1 || die "python3 is required to reconcile Hermes policy settings."
+  next="$(mktemp "$file.tmp.XXXXXX")"
+  python3 - "$tmp" > "$next" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+lines = open(path, encoding="utf-8").read().splitlines()
+
+
+def section_bounds(name):
+    starts = [i for i, line in enumerate(lines) if re.fullmatch(rf"{re.escape(name)}:\s*", line)]
+    if len(starts) > 1:
+        raise SystemExit(f"Duplicate top-level {name}: sections are unsafe; restore the backup and merge them first.")
+    if not starts:
+        return None
+    start = starts[0]
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^[^\s#]", lines[i])), len(lines))
+    return start, end
+
+
+def enforce_fields(name, required):
+    bounds = section_bounds(name)
+    if bounds is None:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.append(f"{name}:")
+        lines.extend(f"  {key}: {value}" for key, value in required.items())
+        return
+    start, end = bounds
+    found = set()
+    for i in range(start + 1, end):
+        match = re.match(r"^  ([A-Za-z0-9_-]+):", lines[i])
+        if match and match.group(1) in required:
+            key = match.group(1)
+            lines[i] = f"  {key}: {required[key]}"
+            found.add(key)
+    insert_at = end
+    for key, value in required.items():
+        if key not in found:
+            lines.insert(insert_at, f"  {key}: {value}")
+            insert_at += 1
+
+
+def enforce_disabled_toolsets():
+    bounds = section_bounds("agent")
+    required = ("terminal", "code_execution")
+    if bounds is None:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.extend(["agent:", "  disabled_toolsets:", *(f"    - {name}" for name in required)])
+        return
+    start, end = bounds
+    disabled = next((i for i in range(start + 1, end) if re.fullmatch(r"  disabled_toolsets:\s*", lines[i])), None)
+    if disabled is None:
+        lines[end:end] = ["  disabled_toolsets:", *(f"    - {name}" for name in required)]
+        return
+    disabled_end = next(
+        (i for i in range(disabled + 1, end) if re.match(r"^  [^\s#]", lines[i])),
+        end,
+    )
+    present = {
+        match.group(1)
+        for line in lines[disabled + 1:disabled_end]
+        if (match := re.fullmatch(r"    -\s*([A-Za-z0-9_-]+)\s*", line))
+    }
+    for name in required:
+        if name not in present:
+            lines.insert(disabled_end, f"    - {name}")
+            disabled_end += 1
+
+
+def enable_plugin():
+    bounds = section_bounds("plugins")
+    if bounds is None:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.extend(["plugins:", "  enabled:", "    - stack-package-policy"])
+        return
+    start, end = bounds
+    if any(re.fullmatch(r"\s*-\s*stack-package-policy\s*", line) for line in lines[start + 1:end]):
+        return
+    enabled = next((i for i in range(start + 1, end) if re.fullmatch(r"  enabled:\s*", lines[i])), None)
+    if enabled is None:
+        lines[end:end] = ["  enabled:", "    - stack-package-policy"]
+    else:
+        lines.insert(enabled + 1, "    - stack-package-policy")
+
+
+enforce_disabled_toolsets()
+enable_plugin()
+enforce_fields("approvals", {"mode": "manual", "timeout": "300", "cron_mode": "deny"})
+enforce_fields("skills", {"write_approval": "true"})
+print("\n".join(lines) + "\n", end="")
+PY
+  mv "$next" "$tmp"
+  chmod 640 "$tmp"
+  chown "$hermes_uid:$hermes_gid" "$tmp"
+  mv "$tmp" "$file"
 }
 
 valid_port() {
@@ -294,24 +423,23 @@ backup_existing() {
   return 0
 }
 
-existing_env_value() {
-  local key="$1" value=""
-  if [[ -f "$ENV_FILE" ]]; then
-    value="$(sed -n "s/^${key}=//p" "$ENV_FILE" | head -n1)"
-    value="${value#\"}"
-    value="${value%\"}"
-  fi
+read_unique_env_value() {
+  local file="$1" key="$2" value="" count
+  [[ -f "$file" ]] || { printf '%s' "$value"; return 0; }
+  count="$(grep -c "^${key}=" "$file" || true)"
+  (( count <= 1 )) || die "Duplicate ${key} entries in ${file#$ROOT_DIR/} are unsafe; restore the backup and keep one value."
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  value="${value#\"}"
+  value="${value%\"}"
   printf '%s' "$value"
 }
 
+existing_env_value() {
+  read_unique_env_value "$ENV_FILE" "$1"
+}
+
 existing_hermes_env_value() {
-  local key="$1" value=""
-  if [[ -f "$HERMES_DIR/.env" ]]; then
-    value="$(sed -n "s/^${key}=//p" "$HERMES_DIR/.env" | head -n1)"
-    value="${value#\"}"
-    value="${value%\"}"
-  fi
-  printf '%s' "$value"
+  read_unique_env_value "$HERMES_DIR/.env" "$1"
 }
 
 replace_env_value() {
@@ -345,9 +473,11 @@ configure_nine=false
 configure_hermes=false
 configure_webui=false
 configure_smart_router=false
+configure_n8n=false
 configure_caddy=false
 existing_install=false
 smart_router_was_enabled=false
+n8n_was_enabled=false
 change_bind_ips=false
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -357,6 +487,8 @@ if [[ -f "$ENV_FILE" ]]; then
   install_webui=false; profile_enabled open-webui && install_webui=true
   install_smart_router=false; profile_enabled smart-router && install_smart_router=true
   smart_router_was_enabled="$install_smart_router"
+  install_n8n=false; profile_enabled n8n && install_n8n=true
+  n8n_was_enabled="$install_n8n"
   install_caddy=false; profile_enabled caddy && install_caddy=true
 
   printf 'Existing components: %s\n' "$(existing_env_value COMPOSE_PROFILES)"
@@ -389,6 +521,17 @@ if [[ -f "$ENV_FILE" ]]; then
     install_smart_router=true
     configure_smart_router=true
   fi
+  if [[ "$install_n8n" == true ]]; then
+    if ! confirm "Keep n8n workflow automation enabled?" y; then
+      install_n8n=false
+      configure_n8n=true
+    elif confirm "Reconfigure existing n8n settings?" n; then
+      configure_n8n=true
+    fi
+  elif confirm "Add optional n8n workflow automation?" n; then
+    install_n8n=true
+    configure_n8n=true
+  fi
   confirm "Change published container bind IPs only?" n && change_bind_ips=true
 else
   printf '%s\n' '1) Install both 9router and Hermes Agent (recommended)'
@@ -418,6 +561,11 @@ else
     install_smart_router=true
     configure_smart_router=true
   fi
+  install_n8n=false
+  if confirm "Add optional n8n workflow automation?" n; then
+    install_n8n=true
+    configure_n8n=true
+  fi
   install_caddy=false
 fi
 
@@ -426,8 +574,14 @@ profiles=""
 [[ "$install_smart_router" == true ]] && profiles="${profiles:+$profiles,}smart-router"
 [[ "$install_hermes" == true ]] && profiles="${profiles:+$profiles,}hermes"
 [[ "$install_webui" == true ]] && profiles="${profiles:+$profiles,}open-webui"
+[[ "$install_n8n" == true ]] && profiles="${profiles:+$profiles,}n8n"
 
-mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$SMART_ROUTER_DIR" "$CADDY_DIR"
+mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$SMART_ROUTER_DIR" "$N8N_DIR" "$CADDY_DIR"
+mkdir -p "$HERMES_DIR/lazy-packages" "$HERMES_DIR/npm-packages" "$ROOT_DIR/data/stack-secrets"
+chmod 700 "$ROOT_DIR/data/stack-secrets"
+# The n8n bootstrap containers run --cap-drop ALL, so a mode-0700 directory owned
+# by anyone other than the operator running manage.sh is unreadable to them.
+chown -R "${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}" "$ROOT_DIR/data/stack-secrets" 2>/dev/null || true
 backup_existing
 
 nine_bind="$(existing_env_value NINEROUTER_BIND_IP)"; nine_bind="${nine_bind:-${lan_ip:-127.0.0.1}}"
@@ -501,6 +655,26 @@ hermes_image="$(existing_env_value HERMES_IMAGE)"; hermes_image="${hermes_image:
 openwebui_image="$(existing_env_value OPENWEBUI_IMAGE)"; openwebui_image="${openwebui_image:-ghcr.io/open-webui/open-webui:main}"
 caddy_image="$(existing_env_value CADDY_IMAGE)"; caddy_image="${caddy_image:-caddy:2-alpine}"
 caddy_bind="$(existing_env_value CADDY_BIND_IP)"; caddy_bind="${caddy_bind:-0.0.0.0}"
+n8n_image="$(existing_env_value N8N_IMAGE)"; n8n_image="${n8n_image:-n8nio/n8n:latest}"
+n8n_bind="$(existing_env_value N8N_BIND_IP)"; n8n_bind="${n8n_bind:-${lan_ip:-127.0.0.1}}"
+n8n_port="$(existing_env_value N8N_PORT)"; n8n_port="${n8n_port:-5678}"
+n8n_hostname="$(existing_env_value N8N_HOSTNAME)"; n8n_hostname="${n8n_hostname:-localhost}"
+n8n_protocol="$(existing_env_value N8N_PROTOCOL)"; n8n_protocol="${n8n_protocol:-http}"
+n8n_public_url="$(existing_env_value N8N_PUBLIC_URL)"; n8n_public_url="${n8n_public_url:-http://localhost:5678}"
+n8n_secure_cookie="$(existing_env_value N8N_SECURE_COOKIE)"; n8n_secure_cookie="${n8n_secure_cookie:-false}"
+n8n_proxy_hops="$(existing_env_value N8N_PROXY_HOPS)"; n8n_proxy_hops="${n8n_proxy_hops:-0}"
+n8n_timezone="$(existing_env_value N8N_TIMEZONE)"; n8n_timezone="${n8n_timezone:-UTC}"
+n8n_diagnostics="$(existing_env_value N8N_DIAGNOSTICS_ENABLED)"; n8n_diagnostics="${n8n_diagnostics:-false}"
+n8n_version_notifications="$(existing_env_value N8N_VERSION_NOTIFICATIONS_ENABLED)"; n8n_version_notifications="${n8n_version_notifications:-false}"
+# Never regenerate: rotating this key makes every stored n8n credential undecryptable.
+existing_n8n_key="$(existing_env_value N8N_ENCRYPTION_KEY)"
+n8n_encryption_key="${existing_n8n_key:-$(random_hex 32)}"
+# The managed n8n workflow owns the fixed production path /mcp/hermes.
+n8n_mcp_path="hermes"
+n8n_mcp_token="$(existing_hermes_env_value N8N_MCP_TOKEN)"
+n8n_mcp_was_enabled=false
+[[ -n "$n8n_mcp_token" ]] && n8n_mcp_was_enabled=true
+install_n8n_mcp="$n8n_mcp_was_enabled"
 
 if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; then
   printf '\nHermes Smart Router settings\n'
@@ -512,6 +686,52 @@ if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; t
   smart_router_standard_model="$(prompt "Standard-tier 9router combo" "$smart_router_standard_model")"
   smart_router_strong_model="$(prompt "Strong-tier 9router combo" "$smart_router_strong_model")"
   warn "The installer initially clones ai into all three tier combos; customize their model lists in 9router before route mode provides meaningful tier differences."
+fi
+
+if [[ "$configure_n8n" == true && "$install_n8n" == true ]]; then
+  printf '\nn8n settings\n'
+  printf '%s\n' '------------'
+  n8n_bind="$(prompt_bind_ip "n8n editor host bind address" "$(suggested_bind_ip "$n8n_bind")")"
+  n8n_port="$(prompt_port "n8n editor port" "$n8n_port")"
+  n8n_public_url="$(prompt "Public n8n URL (or local URL)" "http://$(service_url_host "$n8n_bind"):$n8n_port")"
+  case "$n8n_public_url" in
+    https://*) n8n_protocol="https"; n8n_secure_cookie="true" ;;
+    http://*) n8n_protocol="http" ;;
+    *) die "The n8n public URL must start with http:// or https://." ;;
+  esac
+  n8n_hostname="${n8n_public_url#*://}"
+  n8n_hostname="${n8n_hostname%%/*}"
+  if [[ "$n8n_hostname" == \[*\]* ]]; then
+    n8n_hostname="${n8n_hostname#\[}"; n8n_hostname="${n8n_hostname%%\]*}"
+  else
+    n8n_hostname="${n8n_hostname%%:*}"
+  fi
+  [[ -n "$n8n_hostname" ]] || die "The n8n public URL must include a host."
+  n8n_timezone="$(prompt "n8n timezone (IANA name)" "$n8n_timezone")"
+  if [[ -z "$existing_n8n_key" ]]; then
+    info "A new n8n encryption key was generated. Back it up: stored n8n credentials cannot be decrypted without it."
+  else
+    info "Reusing the existing n8n encryption key so stored credentials stay readable."
+  fi
+fi
+
+# The MCP bridge only makes sense when Hermes and n8n are both present.
+if [[ "$install_hermes" == true && "$install_n8n" == true ]]; then
+  if [[ "$install_n8n_mcp" == true ]]; then
+    if [[ "$configure_n8n" == true || "$configure_hermes" == true ]]; then
+      confirm "Keep the Hermes MCP connection to n8n?" y || install_n8n_mcp=false
+    fi
+  elif confirm "Let Hermes call n8n workflows as tools over MCP?" n; then
+    install_n8n_mcp=true
+  fi
+  if [[ "$install_n8n_mcp" == true ]]; then
+    if [[ -z "$n8n_mcp_token" ]]; then
+      n8n_mcp_token="$(random_hex 32)"
+      info "Generated an MCP bearer token for the managed n8n credential."
+    fi
+  fi
+else
+  install_n8n_mcp=false
 fi
 
 if [[ "$install_smart_router" == true ]]; then
@@ -536,12 +756,16 @@ if [[ "$change_bind_ips" == true ]]; then
   if [[ "$install_webui" == true && "$configure_webui" != true ]]; then
     openwebui_bind="$(prompt_bind_ip "Open WebUI bind IP" "$(suggested_bind_ip "$openwebui_bind")")"
   fi
+  if [[ "$install_n8n" == true && "$configure_n8n" != true ]]; then
+    n8n_bind="$(prompt_bind_ip "n8n editor bind IP" "$(suggested_bind_ip "$n8n_bind")")"
+  fi
   if [[ "$install_caddy" == true && "$configure_caddy" != true ]]; then
     caddy_bind="$(prompt_bind_ip "Caddy HTTP/HTTPS bind IP" "$caddy_bind")"
   fi
   if [[ ( "$install_nine" == true && "$nine_bind" == 0.0.0.0 ) \
     || ( "$install_hermes" == true && "$hermes_bind" == 0.0.0.0 ) \
     || ( "$install_webui" == true && "$openwebui_bind" == 0.0.0.0 ) \
+    || ( "$install_n8n" == true && "$n8n_bind" == 0.0.0.0 ) \
     || ( "$install_caddy" == true && "$caddy_bind" == 0.0.0.0 ) ]]; then
     warn "0.0.0.0 publishes a service on every host interface; protect it with a firewall and authentication."
   fi
@@ -636,8 +860,10 @@ caddy_nine_domain=""
 caddy_webui_domain=""
 caddy_hermes_dashboard_domain=""
 caddy_hermes_api_domain=""
+caddy_n8n_domain=""
 
-if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard" == 1 || "$api_enabled" == true ]]; then
+if [[ "$install_nine" == true || "$install_webui" == true || "$install_n8n" == true \
+  || "$hermes_dashboard" == 1 || "$api_enabled" == true ]]; then
   if [[ "$install_caddy" == true ]]; then
     confirm "Reconfigure existing Caddy domains?" n && configure_caddy=true
   elif confirm "Add optional Caddy domains with automatic HTTPS?" n; then
@@ -677,6 +903,16 @@ if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard"
       [[ -z "${selected_domains[$caddy_hermes_api_domain]+x}" ]] || die "Each service needs a unique domain."
       selected_domains["$caddy_hermes_api_domain"]=1
     fi
+    if [[ "$install_n8n" == true ]] && confirm "Publish n8n with a domain?" n; then
+      caddy_n8n_domain="$(prompt_domain "n8n domain")"
+      [[ -z "${selected_domains[$caddy_n8n_domain]+x}" ]] || die "Each service needs a unique domain."
+      selected_domains["$caddy_n8n_domain"]=1
+      n8n_public_url="https://$caddy_n8n_domain"
+      n8n_hostname="$caddy_n8n_domain"
+      n8n_protocol="https"
+      n8n_secure_cookie="true"
+      n8n_proxy_hops="1"
+    fi
 
     if ((${#selected_domains[@]} == 0)); then
       warn "No domains were selected; Caddy will not be installed."
@@ -689,14 +925,31 @@ if [[ "$install_nine" == true || "$install_webui" == true || "$hermes_dashboard"
       if [[ -n "$caddy_webui_domain" && "$openwebui_signup" == true ]]; then
         warn "Create the first Open WebUI administrator promptly, then disable signup in its Admin Panel."
       fi
+      if [[ -n "$caddy_n8n_domain" ]]; then
+        warn "n8n will be public. Create its owner account immediately: the first visitor to an unclaimed instance becomes the owner."
+      fi
     fi
   fi
 fi
 
 [[ "$install_caddy" == true ]] && profiles="${profiles:+$profiles,}caddy"
 
-uid="${SUDO_UID:-$(id -u)}"
-gid="${SUDO_GID:-$(id -g)}"
+invoking_uid="${SUDO_UID:-$(id -u)}"
+invoking_gid="${SUDO_GID:-$(id -g)}"
+# The Hermes image refuses to run its gateway as root. A direct-root install has
+# no SUDO_UID/SUDO_GID to map, so retain a valid existing identity or use the
+# image's 10000:10000 default instead of emitting HERMES_UID=0/HERMES_GID=0.
+existing_hermes_uid="$(existing_env_value HERMES_UID)"
+existing_hermes_gid="$(existing_env_value HERMES_GID)"
+if [[ "$invoking_uid" == 0 ]]; then
+  hermes_uid="${existing_hermes_uid:-10000}"
+  hermes_gid="${existing_hermes_gid:-10000}"
+  [[ "$hermes_uid" != 0 ]] || hermes_uid=10000
+  [[ "$hermes_gid" != 0 ]] || hermes_gid=10000
+else
+  hermes_uid="$invoking_uid"
+  hermes_gid="$invoking_gid"
+fi
 tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
 {
   printf 'COMPOSE_PROFILES=%s\n' "$profiles"
@@ -717,8 +970,8 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'HERMES_API_PORT=%s\n' "$hermes_api_port"
   printf 'HERMES_DASHBOARD_PORT=%s\n' "$hermes_dashboard_port"
   printf 'HERMES_DASHBOARD=%s\n' "$hermes_dashboard"
-  printf 'HERMES_UID=%s\n' "$uid"
-  printf 'HERMES_GID=%s\n' "$gid"
+  printf 'HERMES_UID=%s\n' "$hermes_uid"
+  printf 'HERMES_GID=%s\n' "$hermes_gid"
   printf 'SMART_ROUTER_IMAGE=%s\n' "$smart_router_image"
   printf 'SMART_ROUTER_MODE=%s\n' "$smart_router_mode"
   printf 'SMART_ROUTER_HMAC_SECRET=%s\n' "$smart_router_secret"
@@ -745,6 +998,18 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'OPENWEBUI_OPENAI_BASE_URL=%s\n' "$(dotenv_quote "$openwebui_api_url")"
   printf 'OPENWEBUI_OPENAI_API_KEY=%s\n' "$(dotenv_quote "$openwebui_api_key")"
   printf 'OPENWEBUI_ENABLE_SIGNUP=%s\n' "$openwebui_signup"
+  printf 'N8N_IMAGE=%s\n' "$n8n_image"
+  printf 'N8N_BIND_IP=%s\n' "$n8n_bind"
+  printf 'N8N_PORT=%s\n' "$n8n_port"
+  printf 'N8N_HOSTNAME=%s\n' "$n8n_hostname"
+  printf 'N8N_PROTOCOL=%s\n' "$n8n_protocol"
+  printf 'N8N_PUBLIC_URL=%s\n' "$(dotenv_quote "$n8n_public_url")"
+  printf 'N8N_SECURE_COOKIE=%s\n' "$n8n_secure_cookie"
+  printf 'N8N_PROXY_HOPS=%s\n' "$n8n_proxy_hops"
+  printf 'N8N_TIMEZONE=%s\n' "$n8n_timezone"
+  printf 'N8N_DIAGNOSTICS_ENABLED=%s\n' "$n8n_diagnostics"
+  printf 'N8N_VERSION_NOTIFICATIONS_ENABLED=%s\n' "$n8n_version_notifications"
+  printf 'N8N_ENCRYPTION_KEY=%s\n' "$n8n_encryption_key"
   printf 'CADDY_IMAGE=%s\n' "$caddy_image"
   printf 'CADDY_BIND_IP=%s\n' "$caddy_bind"
 } > "$tmp_env"
@@ -757,12 +1022,17 @@ if [[ "$configure_hermes" == true ]]; then
   config="${config//__PROVIDER_NAME__/$(yaml_quote "$provider_name")}"
   config="${config//__PROVIDER_BASE_URL__/$(yaml_quote "$provider_url")}"
   config="${config//__MODEL_NAME__/$(yaml_quote "$model_name")}"
+  config="${config//__MCP_SERVERS_BLOCK__/$(render_mcp_block)}"
   printf '%s\n' "$config" > "$HERMES_DIR/config.yaml"
 
   {
     printf 'TELEGRAM_BOT_TOKEN=%s\n' "$(dotenv_quote "$telegram_token")"
     printf 'TELEGRAM_ALLOWED_USERS=%s\n' "$telegram_ids"
     printf 'NINEROUTER_API_KEY=%s\n' "$(dotenv_quote "$provider_key")"
+    if [[ "$install_nine" == true ]]; then
+      printf 'NINEROUTER_URL=%s\n' "$(dotenv_quote "http://nine-router:20128")"
+      printf 'NINEROUTER_KEY=%s\n' "$(dotenv_quote "$provider_key")"
+    fi
     [[ -n "$telegram_home" ]] && printf 'TELEGRAM_HOME_CHANNEL=%s\n' "$telegram_home"
     printf 'API_SERVER_ENABLED=%s\n' "$api_enabled"
     if [[ "$api_enabled" == true ]]; then
@@ -770,9 +1040,87 @@ if [[ "$configure_hermes" == true ]]; then
       printf 'API_SERVER_KEY=%s\n' "$api_key"
       printf 'API_SERVER_CORS_ORIGINS=[]\n'
     fi
+    if [[ "$install_n8n_mcp" == true ]]; then
+      printf 'N8N_MCP_PATH=%s\n' "$n8n_mcp_path"
+      printf 'N8N_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp/$n8n_mcp_path")"
+      printf 'N8N_MCP_TOKEN=%s\n' "$n8n_mcp_token"
+    fi
   } > "$HERMES_DIR/.env"
   chmod 600 "$HERMES_DIR/.env"
-  chmod 644 "$HERMES_DIR/config.yaml"
+  chmod 640 "$HERMES_DIR/config.yaml"
+  chown "$hermes_uid:$hermes_gid" "$HERMES_DIR/.env" "$HERMES_DIR/config.yaml"
+fi
+
+# Enabling or disabling n8n on a later run must not force a full Hermes
+# reconfiguration, so patch the sentinel-delimited block in place instead.
+if [[ "$configure_hermes" != true && -f "$HERMES_DIR/config.yaml" \
+  && ( "$configure_n8n" == true \
+    || "$n8n_was_enabled" != "$install_n8n" \
+    || "$n8n_mcp_was_enabled" != "$install_n8n_mcp" ) ]]; then
+  tmp_config="$(mktemp "$HERMES_DIR/config.yaml.tmp.XXXXXX")"
+  top_open_count="$(grep -c '^# >>> hermes-stack n8n mcp (managed) >>>$' "$HERMES_DIR/config.yaml" || true)"
+  top_close_count="$(grep -c '^# <<< hermes-stack n8n mcp (managed) <<<$' "$HERMES_DIR/config.yaml" || true)"
+  entry_open_count="$(grep -c '^  # >>> hermes-stack n8n mcp (managed) >>>$' "$HERMES_DIR/config.yaml" || true)"
+  entry_close_count="$(grep -c '^  # <<< hermes-stack n8n mcp (managed) <<<$' "$HERMES_DIR/config.yaml" || true)"
+  if (( top_open_count != top_close_count || entry_open_count != entry_close_count \
+    || top_open_count > 1 || entry_open_count > 1 \
+    || (top_open_count > 0 && entry_open_count > 0) )); then
+    rm -f "$tmp_config"
+    die "Hermes config has incomplete or duplicate managed n8n MCP markers; restore its backup before reconfiguring."
+  fi
+  if (( top_open_count == 1 )); then
+    awk -v block="$(render_mcp_block)" '
+      BEGIN { skipping = 0 }
+      $0 == "# >>> hermes-stack n8n mcp (managed) >>>" { skipping = 1; next }
+      $0 == "# <<< hermes-stack n8n mcp (managed) <<<" {
+        skipping = 0
+        if (block != "") print block
+        next
+      }
+      skipping == 0 { print }
+    ' "$HERMES_DIR/config.yaml" > "$tmp_config"
+  elif (( entry_open_count == 1 )); then
+    # An existing top-level mcp_servers map belongs to the user. Replace only
+    # the installer-owned n8n entry inside it, preserving every other server.
+    awk -v entry="$(render_mcp_entry)" '
+      BEGIN { skipping = 0 }
+      $0 == "  # >>> hermes-stack n8n mcp (managed) >>>" { skipping = 1; next }
+      $0 == "  # <<< hermes-stack n8n mcp (managed) <<<" {
+        skipping = 0
+        if (entry != "") print entry
+        next
+      }
+      skipping == 0 { print }
+    ' "$HERMES_DIR/config.yaml" > "$tmp_config"
+  elif [[ "$install_n8n_mcp" == true ]] && grep -q '^mcp_servers:[[:space:]]*$' "$HERMES_DIR/config.yaml"; then
+    awk -v entry="$(render_mcp_entry)" '
+      { print }
+      !inserted && /^mcp_servers:[[:space:]]*$/ { print entry; inserted = 1 }
+    ' "$HERMES_DIR/config.yaml" > "$tmp_config"
+  else
+    cp "$HERMES_DIR/config.yaml" "$tmp_config"
+    if [[ "$install_n8n_mcp" == true ]]; then
+      printf '\n%s\n' "$(render_mcp_block)" >> "$tmp_config"
+    fi
+  fi
+  chmod 640 "$tmp_config"
+  chown "$hermes_uid:$hermes_gid" "$tmp_config"
+  mv "$tmp_config" "$HERMES_DIR/config.yaml"
+
+  if [[ -f "$HERMES_DIR/.env" ]]; then
+    tmp_hermes_env="$(mktemp "$HERMES_DIR/.env.tmp.XXXXXX")"
+    grep -v '^N8N_MCP_' "$HERMES_DIR/.env" > "$tmp_hermes_env" || true
+    if [[ "$install_n8n_mcp" == true ]]; then
+      {
+        printf 'N8N_MCP_PATH=%s\n' "$n8n_mcp_path"
+        printf 'N8N_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp/$n8n_mcp_path")"
+        printf 'N8N_MCP_TOKEN=%s\n' "$n8n_mcp_token"
+      } >> "$tmp_hermes_env"
+    fi
+    chmod 600 "$tmp_hermes_env"
+    chown "$hermes_uid:$hermes_gid" "$tmp_hermes_env"
+    mv "$tmp_hermes_env" "$HERMES_DIR/.env"
+  fi
 fi
 
 if [[ "$configure_smart_router" == true && "$configure_hermes" != true \
@@ -800,8 +1148,27 @@ if [[ "$configure_smart_router" == true && "$configure_hermes" != true \
     }
     { print }
   ' "$HERMES_DIR/config.yaml" > "$tmp_config"
-  chmod --reference="$HERMES_DIR/config.yaml" "$tmp_config"
+  chmod 640 "$tmp_config"
+  chown "$hermes_uid:$hermes_gid" "$tmp_config"
   mv "$tmp_config" "$HERMES_DIR/config.yaml"
+fi
+
+# Normalize ownership even when Hermes itself was not reconfigured. This repairs
+# files previously rewritten by a root-run installer and keeps the uid/gid used
+# by the gateway process aligned with its bind-mounted configuration.
+if [[ "$install_hermes" == true ]]; then
+  chown "$hermes_uid:$hermes_gid" "$HERMES_DIR"
+  ensure_hermes_policy_config "$HERMES_DIR/config.yaml"
+  if [[ -f "$HERMES_DIR/config.yaml" ]]; then
+    chmod 640 "$HERMES_DIR/config.yaml"
+    chown "$hermes_uid:$hermes_gid" "$HERMES_DIR/config.yaml"
+  fi
+  if [[ -f "$HERMES_DIR/.env" ]]; then
+    chmod 600 "$HERMES_DIR/.env"
+    chown "$hermes_uid:$hermes_gid" "$HERMES_DIR/.env"
+  fi
+  install -d -m 0750 -o "$hermes_uid" -g "$hermes_gid" \
+    "$HERMES_DIR/lazy-packages" "$HERMES_DIR/npm-packages"
 fi
 
 if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
@@ -820,6 +1187,15 @@ if [[ "$configure_caddy" == true && "$install_caddy" == true ]]; then
     fi
     if [[ -n "$caddy_hermes_api_domain" ]]; then
       printf '%s {\n\tencode zstd gzip\n\treverse_proxy hermes:8642\n}\n\n' "$caddy_hermes_api_domain"
+    fi
+    if [[ -n "$caddy_n8n_domain" ]]; then
+      # MCP needs unbuffered streaming, so /mcp* is proxied without compression.
+      printf '%s {\n' "$caddy_n8n_domain"
+      printf '\t@mcp path /mcp*\n'
+      printf '\treverse_proxy @mcp n8n:5678 {\n\t\tflush_interval -1\n\t}\n'
+      printf '\tencode zstd gzip\n'
+      printf '\treverse_proxy n8n:5678\n'
+      printf '}\n\n'
     fi
   } > "$CADDY_DIR/Caddyfile"
   sed -i '${/^$/d;}' "$CADDY_DIR/Caddyfile"
@@ -903,6 +1279,8 @@ if [[ "$install_nine" == true && ( "$install_hermes" == true || "$install_webui"
   if [[ "$install_hermes" == true ]]; then
     [[ -n "$hermes_api_key" ]] || die "9router did not return the generated Hermes API key."
     replace_env_value "$HERMES_DIR/.env" NINEROUTER_API_KEY "$(dotenv_quote "$hermes_api_key")"
+    replace_env_value "$HERMES_DIR/.env" NINEROUTER_URL "$(dotenv_quote "http://nine-router:20128")"
+    replace_env_value "$HERMES_DIR/.env" NINEROUTER_KEY "$(dotenv_quote "$hermes_api_key")"
   fi
 fi
 
@@ -915,6 +1293,13 @@ if [[ "$smart_router_was_enabled" == true && "$install_smart_router" != true ]];
   COMPOSE_PROFILES=smart-router "${DOCKER[@]}" compose \
     -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" \
     rm -sf smart-router smart-router-init
+fi
+
+if [[ "$n8n_was_enabled" == true && "$install_n8n" != true ]]; then
+  info "Stopping disabled n8n (data/n8n is preserved)..."
+  COMPOSE_PROFILES=n8n "${DOCKER[@]}" compose \
+    -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" \
+    rm -sf n8n n8n-init
 fi
 
 info "Starting selected services..."
@@ -933,6 +1318,21 @@ if [[ "$install_smart_router" == true ]]; then
     sleep 2
   done
   [[ "$smart_router_ready" == true ]] || die "Hermes Smart Router did not become ready."
+fi
+
+if [[ "$install_n8n" == true ]]; then
+  info "Waiting for n8n to become ready..."
+  n8n_ready=false
+  for _ in {1..60}; do
+    if "${DOCKER[@]}" exec hermes-n8n node -e \
+      "fetch('http://127.0.0.1:5678/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+      >/dev/null 2>&1; then
+      n8n_ready=true
+      break
+    fi
+    sleep 2
+  done
+  [[ "$n8n_ready" == true ]] || warn "n8n did not report healthy yet; check ./manage.sh logs n8n."
 fi
 
 if [[ "$install_nine" == true && "$install_webui" == true ]]; then
@@ -988,11 +1388,23 @@ if [[ "$install_webui" == true ]]; then
   fi
   [[ "$openwebui_signup" == true ]] && printf '%s\n' 'Open WebUI: the first registered account becomes administrator; disable signup afterward.'
 fi
+if [[ "$install_n8n" == true ]]; then
+  printf 'n8n: %s\n' "$n8n_public_url"
+  printf '%s\n' 'n8n: the first visitor claims the owner account; create it now.'
+  printf '%s\n' 'n8n encryption key: stored in .env as N8N_ENCRYPTION_KEY (back it up with data/n8n).'
+  if [[ "$install_n8n_mcp" == true ]]; then
+    printf 'Hermes MCP endpoint: http://n8n:5678/mcp/%s\n' "$n8n_mcp_path"
+    printf '%s\n' 'After owner setup, create an n8n API key, then run:'
+    printf '%s\n' '  ./manage.sh set-n8n-api-key'
+    printf '%s\n' '  ./manage.sh bootstrap-n8n'
+  fi
+fi
 if [[ "$install_caddy" == true ]]; then
   [[ -n "$caddy_nine_domain" ]] && printf '9router HTTPS: https://%s\n' "$caddy_nine_domain"
   [[ -n "$caddy_webui_domain" ]] && printf 'Open WebUI HTTPS: https://%s\n' "$caddy_webui_domain"
   [[ -n "$caddy_hermes_dashboard_domain" ]] && printf 'Hermes dashboard HTTPS: https://%s\n' "$caddy_hermes_dashboard_domain"
   [[ -n "$caddy_hermes_api_domain" ]] && printf 'Hermes API HTTPS: https://%s\n' "$caddy_hermes_api_domain"
+  [[ -n "$caddy_n8n_domain" ]] && printf 'n8n HTTPS: https://%s\n' "$caddy_n8n_domain"
   printf '%s\n' 'Caddy requires public DNS plus inbound TCP 80/443 and UDP 443.'
 fi
 printf '%s\n' 'Status: ./manage.sh status'

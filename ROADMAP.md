@@ -1,5 +1,26 @@
 # Roadmap and design recommendations
 
+## Implemented optional integrations
+
+- The opt-in `n8n` Compose profile runs `n8nio/n8n:latest`, persists state in
+  `data/n8n/`, and supports localhost, trusted-LAN, or Caddy HTTPS editor access.
+- After owner setup, the operator can store an n8n API key silently and use the
+  public API reconciler to create encrypted credentials plus two published,
+  stack-owned workflows: authenticated MCP Calculator tools and n8n-user-
+  authenticated hosted chat routed through Smart Router with model `auto`.
+- Reconciliation persists managed IDs/fingerprints, is idempotent, fails closed on
+  name collisions or manual drift, supports transactional token rotation, and
+  permits removing the stored owner API key after bootstrap. Runtime verification
+  checks fingerprints, access policy, Calculator output, and MCP session closure.
+- Hermes can install reviewed skills and exact-version unprivileged Python/npm
+  packages through staged or one-time manual Telegram approvals. Generic terminal
+  and code-execution toolsets are disabled so the broker is the only local package
+  path; OS installs, privileged execution, Docker access, and reusable or smart
+  package approval are blocked.
+- Disabling n8n stops and removes its containers while preserving workflow data.
+  Backups must keep `N8N_ENCRYPTION_KEY` coupled with `data/n8n/` and should retain
+  `data/stack-secrets/n8n-bootstrap-state.json` for managed-object ownership.
+
 ## Recommended next release
 
 1. Add tested backup and restore commands with retention settings.

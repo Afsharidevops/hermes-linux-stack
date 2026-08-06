@@ -17,8 +17,16 @@ jobs:
       - name: Check provisioning script syntax
         run: |
           node --check scripts/bootstrap-openwebui.mjs
+          node --check scripts/bootstrap-n8n.mjs
+          node --check scripts/verify-n8n.mjs
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("scripts").glob("*.py")]'
+          python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("plugins").rglob("*.py")]'
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("smart-router/src").rglob("*.py")]'
+      - name: Test stack integrations
+        run: |
+          python3 -m unittest -v tests/test_stack_package_policy.py
+          node --test tests/test-bootstrap-n8n.mjs
+          node --test tests/test-verify-n8n.mjs
       - name: Test Smart Router
         run: |
           python3 -m venv /tmp/smart-router-venv
@@ -37,3 +45,6 @@ jobs:
           test "$(git check-ignore data/open-webui/webui.db)" = "data/open-webui/webui.db"
           test "$(git check-ignore data/caddy/Caddyfile)" = "data/caddy/Caddyfile"
           test "$(git check-ignore data/smart-router/router.sqlite3)" = "data/smart-router/router.sqlite3"
+          test "$(git check-ignore data/n8n/config)" = "data/n8n/config"
+          test "$(git check-ignore data/stack-secrets/n8n-bootstrap.env)" = "data/stack-secrets/n8n-bootstrap.env"
+          test "$(git check-ignore data/stack-secrets/n8n-bootstrap-state.json)" = "data/stack-secrets/n8n-bootstrap-state.json"

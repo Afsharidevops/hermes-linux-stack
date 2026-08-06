@@ -4,11 +4,15 @@ data/hermes/*
 data/open-webui/*
 data/caddy/*
 data/smart-router/*
+data/n8n/*
+data/stack-secrets/*
 !data/9router/.gitkeep
 !data/hermes/.gitkeep
 !data/open-webui/.gitkeep
 !data/caddy/.gitkeep
 !data/smart-router/.gitkeep
+!data/n8n/.gitkeep
+!data/stack-secrets/.gitkeep
 *.backup-*
 *.log
 __pycache__/

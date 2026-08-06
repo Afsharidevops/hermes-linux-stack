@@ -6,11 +6,14 @@ Interactive, public-safe Docker deployment for:
 - Hermes Smart Router — optional sticky complexity routing and output budgeting
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) — persistent AI agent with Telegram
 - [Open WebUI](https://github.com/open-webui/open-webui) — optional browser chat interface
+- [n8n](https://n8n.io/) — optional workflow automation and Hermes MCP tools
 - [Caddy](https://caddyserver.com/) — optional domain routing and automatic HTTPS
 
 The installer asks what to install and collects all required settings. You can
-install both 9router and Hermes, either service alone, add Open WebUI to any
-selection, or install Open WebUI by itself.
+install both 9router and Hermes, either service alone, add Open WebUI or n8n to
+any selection, or install Open WebUI by itself. n8n is opt-in and is not started
+unless its Compose profile is selected; on an existing installation it can remain
+the only selected profile after the other services are disabled.
 
 ## Features
 
@@ -28,8 +31,11 @@ selection, or install Open WebUI by itself.
 - Installer-managed `OpenCode-Free` and `ai` combos with current free fallbacks
 - Optional Smart Router with observe/route modes, sticky tiers, transparent SSE,
   request-aware output budgets, privacy-safe metrics, and no answer cache
-- Optional Caddy profile with wizard-generated domains and automatic HTTPS
-- Secure generated JWT, signing, machine-ID, WebUI, and API secrets
+- Optional n8n Compose profile with persistent workflows and a Hermes MCP
+  client bridge
+- Optional Caddy profile with wizard-generated domains, automatic HTTPS, and
+  unbuffered n8n MCP streaming
+- Secure generated JWT, signing, machine-ID, WebUI, n8n, and API secrets
 - Reconfiguration backups
 - Simple update, logs, status, and user-management commands
 - GitHub Actions validation for shell and Compose files
@@ -41,7 +47,10 @@ Telegram API
     ↑ outbound polling
     │
 Hermes Agent ───┐
-                ├──→ optional Smart Router ──→ 9router ──→ AI providers
+       │        ├──→ optional Smart Router ──→ 9router ──→ AI providers
+       │        │
+       │        └──→ n8n MCP Server Trigger (private Docker network)
+       │
 Open WebUI ─────┘
                                 ↑
 Internet ── HTTPS ── optional Caddy reverse proxy
@@ -49,6 +58,7 @@ Internet ── HTTPS ── optional Caddy reverse proxy
 Host defaults (using the detected private LAN IP):
   9router:    LAN_IP:20128
   Open WebUI: LAN_IP:3000
+  n8n editor: LAN_IP:5678 (only when selected)
   Hermes API: LAN_IP:8642 (disabled unless selected)
   Hermes UI:  LAN_IP:9119 (disabled unless selected)
 ```
@@ -106,10 +116,13 @@ The installer asks:
 9. Optional Hermes dashboard and API
 10. Optional Smart Router for both Hermes and Open WebUI, initially in observe mode
 11. Open WebUI endpoint (or automatic routed 9router connection), URL, and signup policy
-12. Caddy bind address and optional HTTPS domains for each installed web service
+12. Optional n8n workflow automation, editor bind/URL, timezone, and Hermes MCP bridge
+13. Caddy bind address and optional HTTPS domains for each installed web service
 
 The installer detects the server's primary private LAN IPv4 address and suggests
-it as the default bind for 9router, Hermes, and Open WebUI. Choose the bind mode
+it as the default bind for 9router, Hermes, Open WebUI, and the optional n8n editor.
+The Compose/.env default remains `127.0.0.1`; accept the LAN suggestion only when
+trusted LAN access is intentional. Choose the bind mode
 that matches how you want to access the services:
 
 | Bind value | Who can connect | How to open a service |
@@ -134,11 +147,12 @@ and 443.
 
 Secrets are written to ignored files with mode `0600`:
 
-- `.env` — Compose, service, and Smart Router HMAC secrets
-- `data/hermes/.env` — Hermes/Telegram secrets
+- `.env` — Compose, service, Smart Router HMAC, and n8n encryption secrets
+- `data/hermes/.env` — Hermes/Telegram secrets and the n8n MCP bearer token
 - `data/smart-router/router.sqlite3` — pseudonymous sticky-route state
+- `data/n8n/` — n8n workflows, settings, and encrypted credentials
 
-Never commit either file.
+Never commit these secret files or runtime data.
 
 ## Optional Hermes Smart Router
 
@@ -290,6 +304,83 @@ Rollback is available by rerunning `./install.sh` and disabling the Smart Router
 Hermes returns to `http://nine-router:20128/v1` with model `ai`, while router state
 is preserved for inspection.
 
+## Optional n8n and Hermes MCP tools
+
+The opt-in `n8n` Compose profile runs the user-requested `n8nio/n8n:latest` image
+and stores its state in `data/n8n/`. Select **Add optional n8n workflow
+automation?** in the installer. The editor's Compose default is localhost; the
+wizard suggests the detected private LAN address for convenient trusted-LAN
+access and lets you keep `127.0.0.1` instead. Do not expose an unclaimed instance:
+the first visitor to a fresh n8n installation can create its owner account.
+
+The installer generates and preserves `N8N_ENCRYPTION_KEY` in `.env`. n8n uses
+this key to encrypt stored credentials. Always back up `.env`—specifically this
+key—together with `data/n8n/`; restoring the data without the matching key makes
+those credentials unreadable. The bundled image is subject to the
+[n8n Sustainable Use License](https://github.com/n8n-io/n8n/blob/master/LICENSE.md),
+not this repository's MIT license. Review that license for your use case.
+
+### Bootstrap the managed MCP and hosted-chat workflows
+
+When Hermes, n8n, 9router, and Smart Router are selected, opt in when the wizard
+asks whether Hermes may call n8n tools. Hermes uses the fixed private endpoint
+`http://n8n:5678/mcp/hermes`; the public editor URL and host/LAN port are not used
+for this connection.
+
+After claiming the n8n owner account, create an API key in n8n. Capture it through
+a silent prompt so it does not enter shell history or process arguments:
+
+```bash
+./manage.sh set-n8n-api-key
+./manage.sh bootstrap-n8n
+```
+
+The bootstrap command uses n8n's public API to create encrypted credentials and
+publish two stack-owned workflows:
+
+- **Hermes MCP Tools (managed)**: authenticated MCP Server Trigger at `hermes`
+  with a harmless Calculator tool.
+- **Hermes Hosted Chat (managed)**: n8n-user-authenticated hosted Chat Trigger →
+  AI Agent → OpenAI Chat Model `auto` at `http://smart-router:8080/v1` using a
+  dedicated n8n 9router key. Open it while signed in to n8n; anonymous requests
+  are rejected.
+
+Model `auto` is interpreted by Smart Router and routed to `combo-fast`,
+`combo-standard`, or `combo-strong`; no 9router combo named `auto` is needed.
+The command persists only managed IDs and fingerprints in
+`data/stack-secrets/n8n-bootstrap-state.json`, restarts Hermes after publication,
+and verifies the integration. Verification checks both managed workflow
+fingerprints and publication state, proves anonymous hosted-chat access is denied,
+invokes Calculator through authenticated MCP, and closes the established MCP
+session. It never prints the owner API key, MCP token, or router key. Rerunning
+`./manage.sh reconcile-n8n` is idempotent. Name collisions or manual edits to
+stack-owned objects fail closed; clone a managed workflow before customizing it.
+
+Useful lifecycle commands are:
+
+```bash
+./manage.sh verify-n8n
+./manage.sh reconcile-n8n
+./manage.sh rotate-n8n-token
+./manage.sh remove-n8n-bootstrap-key
+```
+
+Removing the bootstrap API key retains IDs and fingerprints, but later API
+reconciliation and rotation require storing a valid key again. Keep the Bearer
+token secret; Hermes stores it only in mode-`0600` `data/hermes/.env`, while
+`config.yaml` contains environment references. n8n stores its copy in the
+encrypted managed credential.
+
+If Caddy publishes n8n, the generated `/mcp*` route disables compression and sets
+`flush_interval -1` so MCP SSE/streaming responses are not buffered. Hermes still
+uses the private Docker endpoint; Caddy is only for clients using the public n8n
+domain.
+
+Rerun `./manage.sh configure` and decline **Keep n8n workflow automation
+enabled?** to disable the profile. The installer stops and removes the active
+n8n containers but deliberately preserves `data/n8n/`, the encryption key, and
+managed bootstrap state.
+
 ## First setup when installing all services
 
 ### 1. Open 9router
@@ -426,7 +517,15 @@ reconfiguration without exposing another web administration service.
 ./manage.sh logs hermes
 ./manage.sh logs 9router
 ./manage.sh logs webui
+./manage.sh logs n8n
 ./manage.sh logs caddy
+./manage.sh restart-hermes
+./manage.sh set-n8n-api-key
+./manage.sh bootstrap-n8n
+./manage.sh reconcile-n8n
+./manage.sh verify-n8n
+./manage.sh rotate-n8n-token
+./manage.sh remove-n8n-bootstrap-key
 ./manage.sh configure
 ```
 
@@ -451,6 +550,52 @@ Replace the complete list:
 ```
 
 Hermes is recreated automatically after an allowlist change.
+
+### Approval-gated skills and packages
+
+Hermes skills continue through the native staged review flow: inspect changes
+with `/skills diff`, then explicitly `/skills approve` or `/skills reject`.
+Direct `hermes skills install` execution is blocked so it cannot bypass that
+review.
+
+The read-only `stack-package-policy` plugin provides persistent, unprivileged
+Python and npm installation. Each operation is prepared as a sealed one-time
+request and requires a fresh approval from an interactive Telegram session while
+`approvals.mode` is `manual`. A session-wide, permanent, smart/model-mediated,
+YOLO, cron, or background authorization cannot approve a package operation.
+
+To make the broker the only local installation path, the managed Hermes config
+disables the generic `terminal` and `code_execution` toolsets. This is the primary
+confinement boundary; the plugin's raw-command checks remain defense in depth.
+Hermes can still use ordinary non-execution tools, staged skills, MCP tools, and
+the four package-broker tools.
+
+Supported package specifications are deliberately narrow:
+
+- Python: exactly `package==version` from PyPI, binary wheels only.
+- npm: exactly `package@version` from the npm registry, lifecycle scripts off.
+
+URLs, Git refs, local paths, ranges, `latest`, alternate registries, arbitrary
+flags, raw package-manager commands, OS package managers, and direct writes to
+the managed targets are blocked. Before approving, verify the displayed source,
+package, exact version, destination, and normalized command. Packages persist in
+`data/hermes/lazy-packages/` and `data/hermes/npm-packages/`; they do not grant
+root access, Docker access, or additional host mounts. Run `./manage.sh doctor`
+to check that the policy plugin is enabled and mounted read-only.
+
+### 9router web search
+
+The installer writes the aliases expected by compatible 9router search skills:
+`NINEROUTER_URL=http://nine-router:20128` (without `/v1`) and a dedicated
+`NINEROUTER_KEY`. These aliases provide authenticated access to 9router, but do
+not create a search-provider account. Search remains unavailable until an
+operator configures a supported provider such as Tavily, Exa, Brave, or Serper
+in 9router. Install any web-search skill only through the staged skill review
+flow above.
+
+The generated n8n MCP workflow intentionally exposes only Calculator, and the
+hosted-chat workflow has no search tool. Clone a managed workflow before adding
+custom n8n tools; direct edits to a stack-owned workflow are detected as drift.
 
 ### Backend key
 
@@ -487,8 +632,11 @@ tar --exclude='./.git' -czf ../hermes-stack-backup.tar.gz .env data
 chmod 600 ../hermes-stack-backup.tar.gz
 ```
 
-The archive contains secrets, provider data, Telegram sessions, chats, and
-9router's SQLite database. Store it as sensitive material.
+The archive contains secrets, provider data, Telegram sessions, chats, 9router's
+SQLite database, and n8n state when selected. Store it as sensitive material.
+`N8N_ENCRYPTION_KEY` in `.env` and `data/n8n/` are a required pair: do not restore
+or retain either one without the other if encrypted n8n credentials must remain
+usable.
 
 Restore by extracting `.env` and `data/` into a fresh clone, then run:
 
@@ -506,6 +654,7 @@ whether to publish:
 
 - 9router
 - Open WebUI
+- n8n, when selected
 - the Hermes dashboard, when enabled
 - the Hermes API, when enabled
 
@@ -545,7 +694,7 @@ interfaces.
 The generated `COMPOSE_PROFILES` value controls active services:
 
 ```env
-COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,caddy
+COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,n8n,caddy
 ```
 
 Valid profile names are:
@@ -554,14 +703,16 @@ Valid profile names are:
 - `smart-router`
 - `hermes`
 - `open-webui`
+- `n8n`
 - `caddy`
 
 Rerun the same curl command, `./install.sh`, or `./manage.sh configure` at any
 time. When an installation already exists, the wizard shows its active
 components and asks separately whether to reconfigure each installed component
 or add each missing component. For example, you can install 9router first and
-later add Hermes Agent, Open WebUI, or Caddy without reinstalling the stack.
+later add Hermes Agent, Open WebUI, n8n, or Caddy without reinstalling the stack.
 It also offers a bind-IP-only path for changing published interfaces safely.
+Disabling n8n removes its active containers but preserves `data/n8n/`.
 
 Components you do not select for reconfiguration keep their settings, secrets,
 data, and Compose profile. Configuration files receive timestamped backups
@@ -628,9 +779,13 @@ the API URL and key in Open WebUI Admin Panel → Settings → Connections.
 - [Hermes Telegram guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/messaging/telegram.md)
 - [Open WebUI quick start](https://docs.openwebui.com/getting-started/quick-start/)
 - [Open WebUI environment reference](https://docs.openwebui.com/reference/env-configuration/)
+- [n8n Docker installation](https://docs.n8n.io/hosting/installation/docker/)
+- [n8n MCP Server Trigger](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-langchain.mcptrigger/)
+- [n8n Sustainable Use License](https://github.com/n8n-io/n8n/blob/master/LICENSE.md)
 - [Caddy automatic HTTPS](https://caddyserver.com/docs/quick-starts/https)
 - [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 
 ## License
 
-MIT — see `LICENSE`.
+This stack's code is MIT — see `LICENSE`. The bundled n8n image remains subject
+to the n8n Sustainable Use License described above.
