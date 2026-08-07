@@ -491,7 +491,7 @@ ensure_stack_secrets_dir() {
   chmod 700 "$STACK_SECRETS_DIR"
   owner="$(stat -c '%u:%g' "$STACK_SECRETS_DIR")"
   if [[ "$owner" != "$(id -u):$(id -g)" ]]; then
-    chown -R "$(id -u):$(id -g)" "$STACK_SECRETS_DIR" 2>/dev/null || {
+    chown "$(id -u):$(id -g)" "$STACK_SECRETS_DIR" 2>/dev/null || {
       printf 'data/stack-secrets is owned by %s; rerun as that user or fix its ownership.\n' \
         "$owner" >&2
       return 1
@@ -501,19 +501,40 @@ ensure_stack_secrets_dir() {
 
 execution_root() { printf '%s/execution' "$STACK_SECRETS_DIR"; }
 
+execution_hermes_uid() {
+  local uid
+  uid="$(env_value "$ENV_FILE" HERMES_UID)"
+  uid="${uid:-10000}"
+  [[ "$uid" =~ ^[1-9][0-9]*$ ]] || {
+    printf 'HERMES_UID must be a non-root numeric uid before configuring execution.\n' >&2
+    return 1
+  }
+  printf '%s' "$uid"
+}
+
 ensure_execution_paths() {
-  local root file
+  local root file hermes_uid
   ensure_stack_secrets_dir || return 1
+  hermes_uid="$(execution_hermes_uid)" || return 1
   root="$(execution_root)"
   [[ ! -L "$root" ]] || { printf 'Refusing unsafe execution symlink: %s\n' "$root" >&2; return 1; }
   install -d -m 0700 "$root"
   for file in "$root/docker-state" "$root/ssh-state" "$root/approver-state" "$root/ssh"; do
     [[ ! -L "$file" ]] || { printf 'Refusing unsafe execution symlink: %s\n' "$file" >&2; return 1; }
     install -d -o 10003 -g 10003 -m 0700 "$file"
+    chown 10003:10003 "$file"
+    chmod 700 "$file"
   done
-  for file in "$root/control-secret" "$root/approval-request-secret" \
-    "$root/approval-signing-key.pem" "$root/approval-public-key.pem" \
-    "$root/approval-bot-token" "$root/users"; do
+  for file in "$root/control-secret" "$root/users"; do
+    [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
+      printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
+    }
+    [[ -e "$file" ]] || install -o "$hermes_uid" -g 10003 -m 0640 /dev/null "$file"
+    chown "$hermes_uid:10003" "$file"
+    chmod 640 "$file"
+  done
+  for file in "$root/approval-request-secret" "$root/approval-signing-key.pem" \
+    "$root/approval-public-key.pem" "$root/approval-bot-token"; do
     [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
       printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
     }
@@ -543,13 +564,14 @@ execution_users_valid() {
 }
 
 write_execution_users() {
-  local users="$1" root tmp
+  local users="$1" root tmp hermes_uid
   ensure_execution_paths || return 1
+  hermes_uid="$(execution_hermes_uid)"
   root="$(execution_root)"
   tmp="$(mktemp "$root/users.tmp.XXXXXX")"
   printf '%s\n' "$users" > "$tmp"
-  chown 10003:10003 "$tmp"
-  chmod 600 "$tmp"
+  chown "$hermes_uid:10003" "$tmp"
+  chmod 640 "$tmp"
   mv "$tmp" "$root/users"
 }
 
@@ -1040,14 +1062,25 @@ case "$command" in
       fi
       if [[ -d "$(execution_root)" ]]; then
         printf 'Execution features: %s\n' "$(execution_features | sed 's/^$/off/')"
-        for execution_file in "$(execution_root)/control-secret" \
-          "$(execution_root)/approval-request-secret" "$(execution_root)/approval-signing-key.pem" \
-          "$(execution_root)/approval-public-key.pem" "$(execution_root)/approval-bot-token" \
-          "$(execution_root)/users"; do
-          if [[ -f "$execution_file" && ! -L "$execution_file" && "$(stat -c %a "$execution_file")" == 600 ]]; then
-            printf 'Execution policy %s: safe mode 600\n' "${execution_file##*/}"
+        execution_gateway_uid="$(execution_hermes_uid)"
+        for execution_file in "$(execution_root)/control-secret" "$(execution_root)/users"; do
+          if [[ -f "$execution_file" && ! -L "$execution_file" \
+            && "$(stat -c %a "$execution_file")" == 640 \
+            && "$(stat -c %u "$execution_file")" == "$execution_gateway_uid" \
+            && "$(stat -c %g "$execution_file")" == 10003 ]]; then
+            printf 'Execution policy %s: safe owner %s, group 10003, mode 640\n' \
+              "${execution_file##*/}" "$execution_gateway_uid"
           else
-            printf 'WARNING: execution policy %s is missing, unsafe, or not mode 600.\n' "${execution_file##*/}"
+            printf 'WARNING: shared execution policy %s is missing or has unsafe permissions.\n' "${execution_file##*/}"
+          fi
+        done
+        for execution_file in "$(execution_root)/approval-request-secret" \
+          "$(execution_root)/approval-signing-key.pem" "$(execution_root)/approval-public-key.pem" \
+          "$(execution_root)/approval-bot-token"; do
+          if [[ -f "$execution_file" && ! -L "$execution_file" && "$(stat -c %a "$execution_file")" == 600 ]]; then
+            printf 'Execution policy %s: safe private mode 600\n' "${execution_file##*/}"
+          else
+            printf 'WARNING: private execution policy %s is missing, unsafe, or not mode 600.\n' "${execution_file##*/}"
           fi
         done
         users="$(execution_users)"
@@ -1365,6 +1398,14 @@ for name, service in (data.get("services") or {}).items():
       [[ -n "$(env_value "$ENV_FILE" EXECUTION_SANDBOX_IMAGE)" ]] || \
         replace_env_value "$ENV_FILE" EXECUTION_SANDBOX_IMAGE \
           'python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419'
+      if [[ ",$features," == *,local,* ]]; then
+        sandbox_image="$(env_value "$ENV_FILE" EXECUTION_SANDBOX_IMAGE)"
+        [[ "$sandbox_image" =~ @sha256:[0-9a-f]{64}$ ]] || {
+          printf 'EXECUTION_SANDBOX_IMAGE must use an immutable sha256 digest.\n' >&2
+          exit 1
+        }
+        "${DOCKER[@]}" pull "$sandbox_image"
+      fi
     fi
     apply_execution_features "$features"
     printf 'Execution features now: %s\n' "${features:-off}"
@@ -1387,7 +1428,7 @@ for name, service in (data.get("services") or {}).items():
     printf '%s\n' "$token" > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/approval-bot-token"
     if [[ ! -s "$root/control-secret" ]]; then
       tmp="$(mktemp "$root/control-secret.tmp.XXXXXX")"
-      random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/control-secret"
+      random_hex 32 > "$tmp"; chown "$(execution_hermes_uid):10003" "$tmp"; chmod 640 "$tmp"; mv "$tmp" "$root/control-secret"
     fi
     if [[ ! -s "$root/approval-request-secret" ]]; then
       tmp="$(mktemp "$root/approval-request-secret.tmp.XXXXXX")"
@@ -1411,7 +1452,7 @@ for name, service in (data.get("services") or {}).items():
     ensure_execution_paths
     secret_file="$(execution_root)/control-secret"
     tmp="$(mktemp "$(execution_root)/control-secret.tmp.XXXXXX")"
-    random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$secret_file"
+    random_hex 32 > "$tmp"; chown "$(execution_hermes_uid):10003" "$tmp"; chmod 640 "$tmp"; mv "$tmp" "$secret_file"
     rotate_execution_generation
     compose up -d --force-recreate hermes execution-approver execution-docker-broker execution-ssh-broker
     printf 'Execution broker secret rotated; pending operations revoked.\n'

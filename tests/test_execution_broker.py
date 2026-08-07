@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -128,6 +129,47 @@ class BrokerPolicyTest(unittest.TestCase):
             store.cancel_generation("2")
             with self.assertRaises(CapabilityError):
                 store.consume(nonce=revoked, feature="local", digest="e", user_id="1", session="s", generation="2")
+
+    def test_capability_waits_for_independent_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CapabilityStore(Path(directory) / "state.sqlite3")
+            nonce = store.issue(feature="local", digest="d", request="{}", user_id="1",
+                                session="s", generation="1")
+
+            def approve_later():
+                time.sleep(0.05)
+                store.approve(nonce=nonce, feature="local", digest="d", user_id="1",
+                              session="s", generation="1")
+
+            thread = threading.Thread(target=approve_later)
+            thread.start()
+            result = store.consume(nonce=nonce, feature="local", digest="d", user_id="1",
+                                   session="s", generation="1", wait_seconds=1)
+            thread.join()
+            self.assertEqual(result["digest"], "d")
+            with self.assertRaises(CapabilityError):
+                store.consume(nonce=nonce, feature="local", digest="d", user_id="1",
+                              session="s", generation="1", wait_seconds=0.01)
+
+    def test_capability_wait_stops_on_denial(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CapabilityStore(Path(directory) / "state.sqlite3")
+            nonce = store.issue(feature="local", digest="d", request="{}", user_id="1",
+                                session="s", generation="1")
+
+            def deny_later():
+                time.sleep(0.05)
+                store.cancel_bound(nonce=nonce, feature="local", digest="d", user_id="1",
+                                   session="s", generation="1")
+
+            thread = threading.Thread(target=deny_later)
+            thread.start()
+            started = time.monotonic()
+            with self.assertRaises(CapabilityError):
+                store.consume(nonce=nonce, feature="local", digest="d", user_id="1",
+                              session="s", generation="1", wait_seconds=1)
+            thread.join()
+            self.assertLess(time.monotonic() - started, 0.75)
 
     def test_sandbox_has_no_stack_network_or_host_authority(self):
         request = schema.validate_local({"command": "id"})

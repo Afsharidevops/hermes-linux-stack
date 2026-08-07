@@ -107,24 +107,39 @@ class CapabilityStore:
                 )
 
     def consume(self, *, nonce: str, feature: str, digest: str, user_id: str,
-                session: str, generation: str) -> dict[str, Any]:
-        """Atomically claim one independently approved, fully bound capability."""
-        with self._lock:
-            cursor = self._connection.execute(
-                "UPDATE capabilities SET consumed = 1 WHERE nonce = ? AND feature = ?"
-                " AND digest = ? AND user_id = ? AND session = ? AND generation = ?"
-                " AND approved = 1 AND consumed = 0 AND expires_at > ?"
-                " RETURNING feature, digest, request, user_id, session, generation",
-                (nonce, feature, digest, user_id, session, generation, time.time()),
+                session: str, generation: str, wait_seconds: float = 0) -> dict[str, Any]:
+        """Wait for and atomically claim one fully bound, independently approved capability."""
+        deadline = time.monotonic() + max(0, wait_seconds)
+        while True:
+            with self._lock:
+                now = time.time()
+                cursor = self._connection.execute(
+                    "UPDATE capabilities SET consumed = 1 WHERE nonce = ? AND feature = ?"
+                    " AND digest = ? AND user_id = ? AND session = ? AND generation = ?"
+                    " AND approved = 1 AND consumed = 0 AND expires_at > ?"
+                    " RETURNING feature, digest, request, user_id, session, generation",
+                    (nonce, feature, digest, user_id, session, generation, now),
+                )
+                row = cursor.fetchone()
+                if row is not None:
+                    stored_feature, stored_digest, request, _, _, _ = row
+                    return {"feature": stored_feature, "digest": stored_digest,
+                            "request": request}
+                state = self._connection.execute(
+                    "SELECT feature,digest,user_id,session,generation,expires_at,approved,consumed"
+                    " FROM capabilities WHERE nonce = ?", (nonce,),
+                ).fetchone()
+            bound = state is not None and state[:5] == (
+                feature, digest, user_id, session, generation
             )
-            row = cursor.fetchone()
-            if row is None:
+            pending = bound and state[7] == 0 and state[6] == 0 and state[5] > now
+            remaining = deadline - time.monotonic()
+            if not pending or remaining <= 0:
                 raise CapabilityError(
                     "This operation is not independently approved, expired, mismatched, already "
                     "executed, or was cancelled."
                 )
-        stored_feature, digest, request, stored_user, stored_session, stored_generation = row
-        return {"feature": stored_feature, "digest": digest, "request": request}
+            time.sleep(min(0.25, remaining, max(0, state[5] - now)))
 
     def cancel(self, nonce: str) -> None:
         with self._lock:

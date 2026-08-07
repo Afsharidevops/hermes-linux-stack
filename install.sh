@@ -574,23 +574,50 @@ chmod 700 "$ROOT_DIR/data/stack-secrets"
 # execution remains off. manage.sh fills them only after a local opt-in.
 execution_owner_uid="${SUDO_UID:-$(id -u)}"
 execution_owner_gid="${SUDO_GID:-$(id -g)}"
+execution_runtime_uid="$execution_owner_uid"
+execution_runtime_gid="$execution_owner_gid"
+execution_gateway_uid="$execution_owner_uid"
+execution_workspace_uid="$execution_owner_uid"
+execution_workspace_gid="$execution_owner_gid"
+if [[ "$(id -u)" == 0 ]]; then
+  execution_runtime_uid=10003
+  execution_runtime_gid=10003
+  execution_gateway_uid="$(existing_env_value HERMES_UID)"
+  execution_gateway_uid="${execution_gateway_uid:-10000}"
+  [[ "$execution_gateway_uid" =~ ^[1-9][0-9]*$ ]] \
+    || die "HERMES_UID must be a non-root numeric uid."
+  execution_workspace_uid=10002
+  execution_workspace_gid=10002
+fi
 install -d -m 0700 -o "$execution_owner_uid" -g "$execution_owner_gid" \
-  "$ROOT_DIR/data/stack-secrets/execution" \
+  "$ROOT_DIR/data/stack-secrets/execution"
+install -d -m 0700 -o "$execution_runtime_uid" -g "$execution_runtime_gid" \
   "$ROOT_DIR/data/stack-secrets/execution/docker-state" \
   "$ROOT_DIR/data/stack-secrets/execution/ssh-state" \
   "$ROOT_DIR/data/stack-secrets/execution/approver-state" \
   "$ROOT_DIR/data/stack-secrets/execution/ssh"
-for execution_file in control-secret approval-request-secret approval-signing-key.pem approval-public-key.pem approval-bot-token users; do
-  [[ -e "$ROOT_DIR/data/stack-secrets/execution/$execution_file" ]] \
-    || install -m 0600 -o "$execution_owner_uid" -g "$execution_owner_gid" /dev/null \
-      "$ROOT_DIR/data/stack-secrets/execution/$execution_file"
+for execution_file in control-secret users; do
+  execution_path="$ROOT_DIR/data/stack-secrets/execution/$execution_file"
+  [[ -e "$execution_path" ]] \
+    || install -m 0640 -o "$execution_gateway_uid" -g "$execution_runtime_gid" \
+      /dev/null "$execution_path"
+  chown "$execution_gateway_uid:$execution_runtime_gid" "$execution_path"
+  chmod 640 "$execution_path"
 done
-mkdir -p "$ROOT_DIR/data/execution-workspace"
-chmod 700 "$ROOT_DIR/data/execution-workspace"
-# The n8n bootstrap containers run --cap-drop ALL, so a mode-0700 directory owned
-# by anyone other than the operator running manage.sh is unreadable to them.
-chown -R "$execution_owner_uid:$execution_owner_gid" "$ROOT_DIR/data/stack-secrets" 2>/dev/null || true
-chown "$execution_owner_uid:$execution_owner_gid" "$ROOT_DIR/data/execution-workspace" 2>/dev/null || true
+for execution_file in approval-request-secret approval-signing-key.pem approval-public-key.pem approval-bot-token; do
+  execution_path="$ROOT_DIR/data/stack-secrets/execution/$execution_file"
+  [[ -e "$execution_path" ]] \
+    || install -m 0600 -o "$execution_runtime_uid" -g "$execution_runtime_gid" \
+      /dev/null "$execution_path"
+  chown "$execution_runtime_uid:$execution_runtime_gid" "$execution_path"
+  chmod 600 "$execution_path"
+done
+install -d -m 0700 -o "$execution_workspace_uid" -g "$execution_workspace_gid" \
+  "$ROOT_DIR/data/execution-workspace"
+# Root installations assign the isolated runtime IDs. Unprivileged dry runs and
+# fixtures retain their caller's IDs; manage.sh applies runtime ownership before
+# execution can be enabled on a deployed root-managed stack.
+chown "$execution_owner_uid:$execution_owner_gid" "$ROOT_DIR/data/stack-secrets" 2>/dev/null || true
 backup_existing
 
 nine_bind="$(existing_env_value NINEROUTER_BIND_IP)"; nine_bind="${nine_bind:-${lan_ip:-127.0.0.1}}"
@@ -666,9 +693,9 @@ caddy_image="$(existing_env_value CADDY_IMAGE)"; caddy_image="${caddy_image:-cad
 execution_features="$(existing_env_value EXECUTION_FEATURES)"
 execution_generation="$(existing_env_value EXECUTION_POLICY_GENERATION)"; execution_generation="${execution_generation:-0}"
 execution_workspace_generation="$(existing_env_value EXECUTION_WORKSPACE_GENERATION)"; execution_workspace_generation="${execution_workspace_generation:-$execution_generation}"
-execution_broker_image="$(existing_env_value EXECUTION_BROKER_IMAGE)"; execution_broker_image="${execution_broker_image:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}"
+execution_broker_image="$(existing_env_value EXECUTION_BROKER_IMAGE)"; execution_broker_image="${execution_broker_image:-afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed}"
 execution_sandbox_image="$(existing_env_value EXECUTION_SANDBOX_IMAGE)"; execution_sandbox_image="${execution_sandbox_image:-python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419}"
-execution_run_as="$(existing_env_value EXECUTION_RUN_AS)"; execution_run_as="${execution_run_as:-$execution_owner_uid:$execution_owner_gid}"
+execution_run_as="$(existing_env_value EXECUTION_RUN_AS)"; execution_run_as="${execution_run_as:-$execution_runtime_uid:$execution_runtime_gid}"
 execution_docker_gid="$(existing_env_value EXECUTION_DOCKER_GID)"; execution_docker_gid="${execution_docker_gid:-$(stat -c %g /var/run/docker.sock 2>/dev/null || printf 999)}"
 execution_workspace="$(existing_env_value EXECUTION_WORKSPACE_HOST_PATH)"; execution_workspace="${execution_workspace:-$ROOT_DIR/data/execution-workspace}"
 caddy_bind="$(existing_env_value CADDY_BIND_IP)"; caddy_bind="${caddy_bind:-0.0.0.0}"

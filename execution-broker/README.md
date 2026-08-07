@@ -51,4 +51,4 @@ There are deliberately no safe standalone defaults for execution authority: empt
 
 ## Tags and platforms
 
-Use the versioned tag `afsharidevops/hermes-execution-broker:0.1.0` or its immutable manifest digest. `latest` is unsuitable for a security boundary because it is mutable. Version `0.1.0` is published for Linux `amd64`; confirm the tag's manifest before deployment. Source, Compose wiring, operational commands, and security documentation live in the Hermes Linux Stack repository linked above.
+Use the versioned tag `afsharidevops/hermes-execution-broker:0.1.1` or its immutable manifest digest. `latest` is unsuitable for a security boundary because it is mutable. Version `0.1.1` is published for Linux `amd64`; it removes stale Telegram webhooks before long polling and waits for the exact independent decision within the sealed request's TTL. Confirm the tag's manifest before deployment. Source, Compose wiring, operational commands, and security documentation live in the Hermes Linux Stack repository linked above.

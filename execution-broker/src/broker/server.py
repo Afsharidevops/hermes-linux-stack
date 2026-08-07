@@ -136,7 +136,7 @@ def _execute(p):
     if not _enabled(f):return {"error":f"Execution feature '{f}' is not enabled on this stack."}
     if not _slots.acquire(False):return {"error":"Too many execution operations are already running; retry this approval."}
     try:
-        c=_store.consume(nonce=str(p.get("capability","")),feature=f,digest=str(p.get("digest","")),user_id=str(p.get("user_id","")),session=str(p.get("session","")),generation=POLICY_GENERATION);r=json.loads(c["request"]);approval.check_floor(f,r)
+        c=_store.consume(nonce=str(p.get("capability","")),feature=f,digest=str(p.get("digest","")),user_id=str(p.get("user_id","")),session=str(p.get("session","")),generation=POLICY_GENERATION,wait_seconds=300);r=json.loads(c["request"]);approval.check_floor(f,r)
         if approval.canonical_digest(f,r)!=c["digest"]:return {"error":"The stored operation no longer matches its approved digest."}
         if f=="local":
             if r.get("resolved_image_id")!=_engine.resolve_image(SANDBOX_IMAGE) or r.get("workspace_generation")!=WORKSPACE_GENERATION:return {"error":"The sandbox image or workspace changed after approval."}

@@ -222,6 +222,15 @@ class TelegramApprover:
     def run(self) -> None:
         while True:
             try:
+                # Telegram disables getUpdates while a webhook exists. This bot is a
+                # dedicated polling approver, so remove stale webhook configuration
+                # without discarding a callback that may already be queued.
+                self._api("deleteWebhook", {"drop_pending_updates": "false"}, timeout=10)
+                break
+            except ApproverError:
+                time.sleep(2)
+        while True:
+            try:
                 updates = self._api("getUpdates", {"offset": self._offset, "timeout": 25,
                                     "allowed_updates": ["callback_query"]}, timeout=35) or []
                 for update in updates:

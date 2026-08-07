@@ -117,8 +117,8 @@ services:
       - ./data/hermes:/opt/data
       - ./plugins/stack-package-policy:/opt/data/plugins/stack-package-policy:ro
       - ./plugins/stack-execution-policy:/opt/data/plugins/stack-execution-policy:ro
-      # Created as empty mode-0600 files by install.sh. Hermes gets the control
-      # secret and user policy only; never the Docker socket or an SSH key.
+      # Owned by the configured Hermes uid and broker group. Hermes gets only the
+      # control secret and user policy; never the Docker socket or an SSH key.
       - ./data/stack-secrets/execution/control-secret:/run/secrets/execution-control:ro
       - ./data/stack-secrets/execution/users:/run/secrets/execution-users:ro
     environment:
@@ -144,7 +144,7 @@ services:
   # reachable only from Hermes on the internal control network, with the secret.
   execution-docker-broker:
     profiles: ["execution-docker"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed}
     container_name: hermes-execution-docker-broker
     restart: unless-stopped
     # Runs as the local operator so mode-0600 broker state stays unreadable to
@@ -172,7 +172,7 @@ services:
       - ./data/stack-secrets/execution/approval-public-key.pem:/run/secrets/execution-approval-public-key:ro
     read_only: true
     tmpfs:
-      - /tmp:size=16m,mode=1700
+      - /tmp:size=16m,mode=0700,uid=10003,gid=10003
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
@@ -192,7 +192,7 @@ services:
   # No Docker socket. The only service that can read SSH private keys.
   execution-ssh-broker:
     profiles: ["execution-ssh"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed}
     container_name: hermes-execution-ssh-broker
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
@@ -213,7 +213,7 @@ services:
       - ./data/stack-secrets/execution/approval-public-key.pem:/run/secrets/execution-approval-public-key:ro
     read_only: true
     tmpfs:
-      - /tmp:size=16m,mode=1700
+      - /tmp:size=16m,mode=0700,uid=10003,gid=10003
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
@@ -235,7 +235,7 @@ services:
   # Hermes control secret, or execution capability database.
   execution-approver:
     profiles: ["execution-approval"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed}
     container_name: hermes-execution-approver
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
@@ -256,7 +256,7 @@ services:
       - ./data/stack-secrets/execution/users:/run/secrets/execution-approval-users:ro
     read_only: true
     tmpfs:
-      - /tmp:size=16m,mode=1700
+      - /tmp:size=16m,mode=0700,uid=10003,gid=10003
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true

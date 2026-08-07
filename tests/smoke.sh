@@ -71,8 +71,8 @@ test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets")" = 700
 # Capability-dropped bootstrap containers can only traverse mode 700 when the
 # directory belongs to the operator uid/gid that manage.sh runs the container as.
 test "$(stat -c '%u:%g' "$TEST_DIR/stack/data/stack-secrets")" = "$(id -u):$(id -g)"
-test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/control-secret")" = 600
-test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/users")" = 600
+test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/control-secret")" = 640
+test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/users")" = 640
 grep -q '^EXECUTION_FEATURES=$' "$TEST_DIR/stack/.env"
 ! grep -q 'execution-docker\|execution-ssh' < <(sed -n 's/^COMPOSE_PROFILES=//p' "$TEST_DIR/stack/.env")
 grep -q './plugins/stack-package-policy:/opt/data/plugins/stack-package-policy:ro' "$TEST_DIR/stack/docker-compose.yml"
