@@ -824,6 +824,10 @@ run_n8n_verifier() {
   env_file="$(mktemp "$STACK_SECRETS_DIR/n8n-verify.env.tmp.XXXXXX")"
   TEMP_SECRET_FILES+=("$env_file")
   chmod 600 "$env_file"
+  state_dir="$(mktemp -d "$STACK_SECRETS_DIR/n8n-verify-state.tmp.XXXXXX")"
+  TEMP_SECRET_FILES+=("$state_dir")
+  chmod 700 "$state_dir"
+  cp --preserve=mode,timestamps "$N8N_BOOTSTRAP_STATE" "$state_dir/n8n-bootstrap-state.json"
   {
     printf 'N8N_API_URL=http://n8n:5678/api/v1\n'
     [[ -n "$api_key" ]] && printf 'N8N_API_KEY=%s\n' "$api_key"
@@ -847,7 +851,7 @@ run_n8n_verifier() {
     --read-only --cap-drop ALL --security-opt no-new-privileges \
     --tmpfs /tmp:size=16m,mode=1777 \
     -v "$ROOT_DIR/scripts:/stack/scripts:ro" \
-    -v "$STACK_SECRETS_DIR:/state:ro" \
+    -v "$state_dir:/state:ro" \
     --env-file "$env_file" \
     --entrypoint node "$image" \
     /stack/scripts/verify-n8n.mjs; then
@@ -856,6 +860,7 @@ run_n8n_verifier() {
     status=$?
   fi
   rm -f -- "$env_file"
+  rm -rf -- "$state_dir"
   return "$status"
 }
 
@@ -1353,6 +1358,7 @@ case "$command" in
     [[ "$host" =~ ^[A-Za-z0-9._:-]+$ && "$port" =~ ^[0-9]+$ && "$ssh_user" =~ ^[A-Za-z0-9._-]+$ \
       && "$authority" =~ ^(user|root|sudo-nopasswd)$ ]] || { printf 'Invalid profile values.\n' >&2; exit 2; }
     stage="$(mktemp -d "$root/.${name}.tmp.XXXXXX")"; chmod 700 "$stage"
+    TEMP_SECRET_FILES+=("$stage")
     if read -r -p 'Generate a dedicated Ed25519 key? [Y/n] ' answer && [[ "${answer:-y}" =~ ^[Yy]$ ]]; then
       ssh-keygen -q -t ed25519 -N '' -f "$stage/identity"
     else
@@ -1364,7 +1370,8 @@ case "$command" in
     ssh-keyscan -p "$port" -T 10 -- "$host" > "$stage/known_hosts.scan" 2>/dev/null || { rm -rf "$stage"; printf 'Host-key scan failed.\n' >&2; exit 1; }
     read -r -p 'Enter the independently verified SHA256 host fingerprint: ' expected
     [[ "$expected" =~ ^SHA256:[A-Za-z0-9+/]{20,}={0,2}$ ]] || { rm -rf "$stage"; printf 'Invalid host fingerprint.\n' >&2; exit 2; }
-    python3 - "$stage/known_hosts.scan" "$stage/known_hosts" "$expected" <<'PY'
+    status=0
+    python3 - "$stage/known_hosts.scan" "$stage/known_hosts" "$expected" <<'PY' || status=$?
 import subprocess, sys
 source, target, expected = sys.argv[1:]
 matches = []
@@ -1383,7 +1390,7 @@ if len(matches) != 1:
     raise SystemExit("The independently verified fingerprint did not select exactly one scanned host key.")
 open(target, "w", encoding="utf-8").write(matches[0])
 PY
-    status=$?; rm -f "$stage/known_hosts.scan"
+    rm -f "$stage/known_hosts.scan"
     [[ "$status" -eq 0 ]] || { rm -rf "$stage"; printf 'Host fingerprint mismatch or ambiguity.\n' >&2; exit 1; }
     fingerprint="$expected"
     printf 'Pinned independently verified host fingerprint: %s\n' "$fingerprint"
