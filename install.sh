@@ -117,9 +117,10 @@ yaml_quote() {
   printf "'%s'" "$value"
 }
 
-# Emits the installer-owned mcp_servers block, or nothing when the bridge is off.
-# Hermes resolves ${N8N_MCP_*} at connect time from data/hermes/.env, so the
-# bearer token never lands in the world-readable config.yaml.
+# Emits the installer-owned mcp_servers block, or nothing when the selected
+# bridge is off or still waiting for an Instance-level token. Hermes resolves
+# the mode-specific values from data/hermes/.env at connect time, so neither
+# bearer token lands in the world-readable config.yaml.
 render_mcp_block() {
   [[ "${install_n8n_mcp:-false}" == true ]] || return 0
   printf 'mcp_servers:\n'
@@ -128,14 +129,25 @@ render_mcp_block() {
 
 render_mcp_entry() {
   [[ "${install_n8n_mcp:-false}" == true ]] || return 0
-  cat <<'MCP_ENTRY'
-  # >>> hermes-stack n8n mcp (managed) >>>
-  n8n:
-    url: "${N8N_MCP_URL}"
-    headers:
-      Authorization: "Bearer ${N8N_MCP_TOKEN}"
-  # <<< hermes-stack n8n mcp (managed) <<<
-MCP_ENTRY
+  local url_var token_var
+  case "${n8n_mcp_mode:-off}" in
+    instance)
+      url_var='N8N_INSTANCE_MCP_URL'
+      token_var='N8N_INSTANCE_MCP_TOKEN'
+      ;;
+    trigger)
+      url_var='N8N_TRIGGER_MCP_URL'
+      token_var='N8N_TRIGGER_MCP_TOKEN'
+      ;;
+    *) return 0 ;;
+  esac
+  printf '%s\n' \
+    '  # >>> hermes-stack n8n mcp (managed) >>>' \
+    '  n8n:' \
+    "    url: \"\${$url_var}\"" \
+    '    headers:' \
+    "      Authorization: \"Bearer \${$token_var}\"" \
+    '  # <<< hermes-stack n8n mcp (managed) <<<'
 }
 
 ensure_hermes_policy_config() {
@@ -188,53 +200,32 @@ def enforce_fields(name, required):
             insert_at += 1
 
 
-def enforce_disabled_toolsets():
-    bounds = section_bounds("agent")
-    required = ("terminal", "code_execution")
-    if bounds is None:
-        if lines and lines[-1] != "":
-            lines.append("")
-        lines.extend(["agent:", "  disabled_toolsets:", *(f"    - {name}" for name in required)])
-        return
-    start, end = bounds
-    disabled = next((i for i in range(start + 1, end) if re.fullmatch(r"  disabled_toolsets:\s*", lines[i])), None)
-    if disabled is None:
-        lines[end:end] = ["  disabled_toolsets:", *(f"    - {name}" for name in required)]
-        return
-    disabled_end = next(
-        (i for i in range(disabled + 1, end) if re.match(r"^  [^\s#]", lines[i])),
-        end,
-    )
-    present = {
-        match.group(1)
-        for line in lines[disabled + 1:disabled_end]
-        if (match := re.fullmatch(r"    -\s*([A-Za-z0-9_-]+)\s*", line))
-    }
-    for name in required:
-        if name not in present:
-            lines.insert(disabled_end, f"    - {name}")
-            disabled_end += 1
+# Upstream terminal/code_execution enablement is a local operator decision made
+# with ./manage.sh set-upstream-terminal, so the installer neither forces them
+# off nor turns them on: it leaves whatever disabled_toolsets already says.
+# Still validate that the top-level agent map is unambiguous before any rewrite.
+section_bounds("agent")
 
 
-def enable_plugin():
+def enable_plugin(name):
     bounds = section_bounds("plugins")
     if bounds is None:
         if lines and lines[-1] != "":
             lines.append("")
-        lines.extend(["plugins:", "  enabled:", "    - stack-package-policy"])
+        lines.extend(["plugins:", "  enabled:", f"    - {name}"])
         return
     start, end = bounds
-    if any(re.fullmatch(r"\s*-\s*stack-package-policy\s*", line) for line in lines[start + 1:end]):
+    if any(re.fullmatch(rf"\s*-\s*{re.escape(name)}\s*", line) for line in lines[start + 1:end]):
         return
     enabled = next((i for i in range(start + 1, end) if re.fullmatch(r"  enabled:\s*", lines[i])), None)
     if enabled is None:
-        lines[end:end] = ["  enabled:", "    - stack-package-policy"]
+        lines[end:end] = ["  enabled:", f"    - {name}"]
     else:
-        lines.insert(enabled + 1, "    - stack-package-policy")
+        lines.insert(enabled + 1, f"    - {name}")
 
 
-enforce_disabled_toolsets()
-enable_plugin()
+enable_plugin("stack-package-policy")
+enable_plugin("stack-execution-policy")
 enforce_fields("approvals", {"mode": "manual", "timeout": "300", "cron_mode": "deny"})
 enforce_fields("skills", {"write_approval": "true"})
 print("\n".join(lines) + "\n", end="")
@@ -579,9 +570,27 @@ profiles=""
 mkdir -p "$HERMES_DIR" "$NINEROUTER_DIR" "$OPENWEBUI_DIR" "$SMART_ROUTER_DIR" "$N8N_DIR" "$CADDY_DIR"
 mkdir -p "$HERMES_DIR/lazy-packages" "$HERMES_DIR/npm-packages" "$ROOT_DIR/data/stack-secrets"
 chmod 700 "$ROOT_DIR/data/stack-secrets"
+# Empty execution policy files keep the normal Compose profile renderable while
+# execution remains off. manage.sh fills them only after a local opt-in.
+execution_owner_uid="${SUDO_UID:-$(id -u)}"
+execution_owner_gid="${SUDO_GID:-$(id -g)}"
+install -d -m 0700 -o "$execution_owner_uid" -g "$execution_owner_gid" \
+  "$ROOT_DIR/data/stack-secrets/execution" \
+  "$ROOT_DIR/data/stack-secrets/execution/docker-state" \
+  "$ROOT_DIR/data/stack-secrets/execution/ssh-state" \
+  "$ROOT_DIR/data/stack-secrets/execution/approver-state" \
+  "$ROOT_DIR/data/stack-secrets/execution/ssh"
+for execution_file in control-secret approval-request-secret approval-signing-key.pem approval-public-key.pem approval-bot-token users; do
+  [[ -e "$ROOT_DIR/data/stack-secrets/execution/$execution_file" ]] \
+    || install -m 0600 -o "$execution_owner_uid" -g "$execution_owner_gid" /dev/null \
+      "$ROOT_DIR/data/stack-secrets/execution/$execution_file"
+done
+mkdir -p "$ROOT_DIR/data/execution-workspace"
+chmod 700 "$ROOT_DIR/data/execution-workspace"
 # The n8n bootstrap containers run --cap-drop ALL, so a mode-0700 directory owned
 # by anyone other than the operator running manage.sh is unreadable to them.
-chown -R "${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}" "$ROOT_DIR/data/stack-secrets" 2>/dev/null || true
+chown -R "$execution_owner_uid:$execution_owner_gid" "$ROOT_DIR/data/stack-secrets" 2>/dev/null || true
+chown "$execution_owner_uid:$execution_owner_gid" "$ROOT_DIR/data/execution-workspace" 2>/dev/null || true
 backup_existing
 
 nine_bind="$(existing_env_value NINEROUTER_BIND_IP)"; nine_bind="${nine_bind:-${lan_ip:-127.0.0.1}}"
@@ -654,6 +663,14 @@ nine_image="$(existing_env_value NINEROUTER_IMAGE)"; nine_image="${nine_image:-d
 hermes_image="$(existing_env_value HERMES_IMAGE)"; hermes_image="${hermes_image:-nousresearch/hermes-agent:latest}"
 openwebui_image="$(existing_env_value OPENWEBUI_IMAGE)"; openwebui_image="${openwebui_image:-ghcr.io/open-webui/open-webui:main}"
 caddy_image="$(existing_env_value CADDY_IMAGE)"; caddy_image="${caddy_image:-caddy:2-alpine}"
+execution_features="$(existing_env_value EXECUTION_FEATURES)"
+execution_generation="$(existing_env_value EXECUTION_POLICY_GENERATION)"; execution_generation="${execution_generation:-0}"
+execution_workspace_generation="$(existing_env_value EXECUTION_WORKSPACE_GENERATION)"; execution_workspace_generation="${execution_workspace_generation:-$execution_generation}"
+execution_broker_image="$(existing_env_value EXECUTION_BROKER_IMAGE)"; execution_broker_image="${execution_broker_image:-hermes-execution-broker:0.1.0}"
+execution_sandbox_image="$(existing_env_value EXECUTION_SANDBOX_IMAGE)"; execution_sandbox_image="${execution_sandbox_image:-python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419}"
+execution_run_as="$(existing_env_value EXECUTION_RUN_AS)"; execution_run_as="${execution_run_as:-$execution_owner_uid:$execution_owner_gid}"
+execution_docker_gid="$(existing_env_value EXECUTION_DOCKER_GID)"; execution_docker_gid="${execution_docker_gid:-$(stat -c %g /var/run/docker.sock 2>/dev/null || printf 999)}"
+execution_workspace="$(existing_env_value EXECUTION_WORKSPACE_HOST_PATH)"; execution_workspace="${execution_workspace:-$ROOT_DIR/data/execution-workspace}"
 caddy_bind="$(existing_env_value CADDY_BIND_IP)"; caddy_bind="${caddy_bind:-0.0.0.0}"
 n8n_image="$(existing_env_value N8N_IMAGE)"; n8n_image="${n8n_image:-n8nio/n8n:latest}"
 n8n_bind="$(existing_env_value N8N_BIND_IP)"; n8n_bind="${n8n_bind:-${lan_ip:-127.0.0.1}}"
@@ -669,12 +686,27 @@ n8n_version_notifications="$(existing_env_value N8N_VERSION_NOTIFICATIONS_ENABLE
 # Never regenerate: rotating this key makes every stored n8n credential undecryptable.
 existing_n8n_key="$(existing_env_value N8N_ENCRYPTION_KEY)"
 n8n_encryption_key="${existing_n8n_key:-$(random_hex 32)}"
-# The managed n8n workflow owns the fixed production path /mcp/hermes.
-n8n_mcp_path="hermes"
-n8n_mcp_token="$(existing_hermes_env_value N8N_MCP_TOKEN)"
+# Existing generic variables came from the workflow-trigger-only implementation.
+# Infer that mode so upgrades preserve the old endpoint until the operator selects
+# another one, then migrate the secret into its unambiguous mode-specific key.
+legacy_n8n_mcp_token="$(existing_hermes_env_value N8N_MCP_TOKEN)"
+n8n_trigger_mcp_token="$(existing_hermes_env_value N8N_TRIGGER_MCP_TOKEN)"
+n8n_trigger_mcp_token="${n8n_trigger_mcp_token:-$legacy_n8n_mcp_token}"
+n8n_instance_mcp_token="$(existing_hermes_env_value N8N_INSTANCE_MCP_TOKEN)"
+n8n_mcp_mode="$(existing_env_value N8N_MCP_MODE)"
+if [[ -z "$n8n_mcp_mode" ]]; then
+  if [[ -n "$n8n_trigger_mcp_token" ]]; then n8n_mcp_mode=trigger; else n8n_mcp_mode=off; fi
+fi
+[[ "$n8n_mcp_mode" == instance || "$n8n_mcp_mode" == trigger || "$n8n_mcp_mode" == off ]] \
+  || die "N8N_MCP_MODE must be instance, trigger, or off."
+n8n_mcp_previous_mode="$n8n_mcp_mode"
 n8n_mcp_was_enabled=false
-[[ -n "$n8n_mcp_token" ]] && n8n_mcp_was_enabled=true
-install_n8n_mcp="$n8n_mcp_was_enabled"
+[[ "$n8n_mcp_mode" != off ]] && n8n_mcp_was_enabled=true
+install_n8n_mcp=false
+case "$n8n_mcp_mode" in
+  trigger) [[ -n "$n8n_trigger_mcp_token" ]] && install_n8n_mcp=true ;;
+  instance) [[ -n "$n8n_instance_mcp_token" ]] && install_n8n_mcp=true ;;
+esac
 
 if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; then
   printf '\nHermes Smart Router settings\n'
@@ -715,22 +747,51 @@ if [[ "$configure_n8n" == true && "$install_n8n" == true ]]; then
   fi
 fi
 
-# The MCP bridge only makes sense when Hermes and n8n are both present.
+# The MCP bridge only makes sense when Hermes and n8n are both present. Instance
+# mode is intentionally explicit because its user-bound token has much broader
+# n8n management authority than the workflow-scoped trigger mode.
 if [[ "$install_hermes" == true && "$install_n8n" == true ]]; then
-  if [[ "$install_n8n_mcp" == true ]]; then
+  choose_n8n_mcp=false
+  if [[ "$n8n_mcp_mode" != off ]]; then
     if [[ "$configure_n8n" == true || "$configure_hermes" == true ]]; then
-      confirm "Keep the Hermes MCP connection to n8n?" y || install_n8n_mcp=false
+      confirm "Keep the Hermes MCP connection to n8n?" y || { n8n_mcp_mode=off; choose_n8n_mcp=true; }
     fi
-  elif confirm "Let Hermes call n8n workflows as tools over MCP?" n; then
-    install_n8n_mcp=true
+  elif confirm "Let Hermes connect to n8n over MCP?" n; then
+    choose_n8n_mcp=true
   fi
-  if [[ "$install_n8n_mcp" == true ]]; then
-    if [[ -z "$n8n_mcp_token" ]]; then
-      n8n_mcp_token="$(random_hex 32)"
-      info "Generated an MCP bearer token for the managed n8n credential."
-    fi
+  if [[ "$choose_n8n_mcp" == true && "$n8n_mcp_mode" != off ]] \
+    || [[ "$choose_n8n_mcp" == true && "$n8n_mcp_previous_mode" == off ]]; then
+    printf '%s\n' '1) Instance-level MCP (broad n8n workflow-management access)'
+    printf '%s\n' '2) MCP Server Trigger (only explicitly connected workflow tools)'
+    while true; do
+      n8n_mcp_selection="$(prompt "Choose n8n MCP mode" "1")"
+      case "$n8n_mcp_selection" in
+        1) n8n_mcp_mode=instance; break ;;
+        2) n8n_mcp_mode=trigger; break ;;
+        *) warn "Choose 1 or 2." >&2 ;;
+      esac
+    done
   fi
+  case "$n8n_mcp_mode" in
+    trigger)
+      if [[ -z "$n8n_trigger_mcp_token" ]]; then
+        n8n_trigger_mcp_token="$(random_hex 32)"
+        info "Generated a bearer token for the managed MCP Server Trigger credential."
+      fi
+      install_n8n_mcp=true
+      ;;
+    instance)
+      if [[ -n "$n8n_instance_mcp_token" ]]; then
+        install_n8n_mcp=true
+      else
+        install_n8n_mcp=false
+        warn "Instance-level MCP is selected but pending. After owner setup, generate its token in n8n and run ./manage.sh set-n8n-instance-mcp-token."
+      fi
+      ;;
+    off) install_n8n_mcp=false ;;
+  esac
 else
+  n8n_mcp_mode=off
   install_n8n_mcp=false
 fi
 
@@ -972,6 +1033,14 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'HERMES_DASHBOARD=%s\n' "$hermes_dashboard"
   printf 'HERMES_UID=%s\n' "$hermes_uid"
   printf 'HERMES_GID=%s\n' "$hermes_gid"
+  printf 'EXECUTION_FEATURES=%s\n' "$execution_features"
+  printf 'EXECUTION_POLICY_GENERATION=%s\n' "$execution_generation"
+  printf 'EXECUTION_WORKSPACE_GENERATION=%s\n' "$execution_workspace_generation"
+  printf 'EXECUTION_BROKER_IMAGE=%s\n' "$execution_broker_image"
+  printf 'EXECUTION_SANDBOX_IMAGE=%s\n' "$execution_sandbox_image"
+  printf 'EXECUTION_RUN_AS=%s\n' "$execution_run_as"
+  printf 'EXECUTION_DOCKER_GID=%s\n' "$execution_docker_gid"
+  printf 'EXECUTION_WORKSPACE_HOST_PATH=%s\n' "$execution_workspace"
   printf 'SMART_ROUTER_IMAGE=%s\n' "$smart_router_image"
   printf 'SMART_ROUTER_MODE=%s\n' "$smart_router_mode"
   printf 'SMART_ROUTER_HMAC_SECRET=%s\n' "$smart_router_secret"
@@ -999,6 +1068,7 @@ tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
   printf 'OPENWEBUI_OPENAI_API_KEY=%s\n' "$(dotenv_quote "$openwebui_api_key")"
   printf 'OPENWEBUI_ENABLE_SIGNUP=%s\n' "$openwebui_signup"
   printf 'N8N_IMAGE=%s\n' "$n8n_image"
+  printf 'N8N_MCP_MODE=%s\n' "$n8n_mcp_mode"
   printf 'N8N_BIND_IP=%s\n' "$n8n_bind"
   printf 'N8N_PORT=%s\n' "$n8n_port"
   printf 'N8N_HOSTNAME=%s\n' "$n8n_hostname"
@@ -1040,11 +1110,10 @@ if [[ "$configure_hermes" == true ]]; then
       printf 'API_SERVER_KEY=%s\n' "$api_key"
       printf 'API_SERVER_CORS_ORIGINS=[]\n'
     fi
-    if [[ "$install_n8n_mcp" == true ]]; then
-      printf 'N8N_MCP_PATH=%s\n' "$n8n_mcp_path"
-      printf 'N8N_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp/$n8n_mcp_path")"
-      printf 'N8N_MCP_TOKEN=%s\n' "$n8n_mcp_token"
-    fi
+    [[ -n "$n8n_trigger_mcp_token" ]] && printf 'N8N_TRIGGER_MCP_TOKEN=%s\n' "$n8n_trigger_mcp_token"
+    [[ -n "$n8n_instance_mcp_token" ]] && printf 'N8N_INSTANCE_MCP_TOKEN=%s\n' "$n8n_instance_mcp_token"
+    printf 'N8N_TRIGGER_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp/hermes")"
+    printf 'N8N_INSTANCE_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp-server/http")"
   } > "$HERMES_DIR/.env"
   chmod 600 "$HERMES_DIR/.env"
   chmod 640 "$HERMES_DIR/config.yaml"
@@ -1056,7 +1125,8 @@ fi
 if [[ "$configure_hermes" != true && -f "$HERMES_DIR/config.yaml" \
   && ( "$configure_n8n" == true \
     || "$n8n_was_enabled" != "$install_n8n" \
-    || "$n8n_mcp_was_enabled" != "$install_n8n_mcp" ) ]]; then
+    || "$n8n_mcp_was_enabled" != "$install_n8n_mcp" \
+    || "$n8n_mcp_previous_mode" != "$n8n_mcp_mode" ) ]]; then
   tmp_config="$(mktemp "$HERMES_DIR/config.yaml.tmp.XXXXXX")"
   top_open_count="$(grep -c '^# >>> hermes-stack n8n mcp (managed) >>>$' "$HERMES_DIR/config.yaml" || true)"
   top_close_count="$(grep -c '^# <<< hermes-stack n8n mcp (managed) <<<$' "$HERMES_DIR/config.yaml" || true)"
@@ -1109,14 +1179,13 @@ if [[ "$configure_hermes" != true && -f "$HERMES_DIR/config.yaml" \
 
   if [[ -f "$HERMES_DIR/.env" ]]; then
     tmp_hermes_env="$(mktemp "$HERMES_DIR/.env.tmp.XXXXXX")"
-    grep -v '^N8N_MCP_' "$HERMES_DIR/.env" > "$tmp_hermes_env" || true
-    if [[ "$install_n8n_mcp" == true ]]; then
-      {
-        printf 'N8N_MCP_PATH=%s\n' "$n8n_mcp_path"
-        printf 'N8N_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp/$n8n_mcp_path")"
-        printf 'N8N_MCP_TOKEN=%s\n' "$n8n_mcp_token"
-      } >> "$tmp_hermes_env"
-    fi
+    grep -v -E '^N8N_(MCP_|TRIGGER_MCP_|INSTANCE_MCP_)' "$HERMES_DIR/.env" > "$tmp_hermes_env" || true
+    {
+      printf 'N8N_TRIGGER_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp/hermes")"
+      printf 'N8N_INSTANCE_MCP_URL=%s\n' "$(dotenv_quote "http://n8n:5678/mcp-server/http")"
+      [[ -n "$n8n_trigger_mcp_token" ]] && printf 'N8N_TRIGGER_MCP_TOKEN=%s\n' "$n8n_trigger_mcp_token"
+      [[ -n "$n8n_instance_mcp_token" ]] && printf 'N8N_INSTANCE_MCP_TOKEN=%s\n' "$n8n_instance_mcp_token"
+    } >> "$tmp_hermes_env"
     chmod 600 "$tmp_hermes_env"
     chown "$hermes_uid:$hermes_gid" "$tmp_hermes_env"
     mv "$tmp_hermes_env" "$HERMES_DIR/.env"
@@ -1392,12 +1461,19 @@ if [[ "$install_n8n" == true ]]; then
   printf 'n8n: %s\n' "$n8n_public_url"
   printf '%s\n' 'n8n: the first visitor claims the owner account; create it now.'
   printf '%s\n' 'n8n encryption key: stored in .env as N8N_ENCRYPTION_KEY (back it up with data/n8n).'
-  if [[ "$install_n8n_mcp" == true ]]; then
-    printf 'Hermes MCP endpoint: http://n8n:5678/mcp/%s\n' "$n8n_mcp_path"
-    printf '%s\n' 'After owner setup, create an n8n API key, then run:'
-    printf '%s\n' '  ./manage.sh set-n8n-api-key'
-    printf '%s\n' '  ./manage.sh bootstrap-n8n'
-  fi
+  case "$n8n_mcp_mode" in
+    instance)
+      printf '%s\n' 'Hermes n8n MCP mode: Instance-level (http://n8n:5678/mcp-server/http)'
+      printf '%s\n' 'In n8n Settings -> Instance-level MCP, enable access and generate a token, then run:'
+      printf '%s\n' '  ./manage.sh set-n8n-instance-mcp-token'
+      ;;
+    trigger)
+      printf '%s\n' 'Hermes n8n MCP mode: MCP Server Trigger (http://n8n:5678/mcp/hermes)'
+      ;;
+  esac
+  printf '%s\n' 'For managed hosted chat and Trigger-mode reconciliation, create an n8n API key, then run:'
+  printf '%s\n' '  ./manage.sh set-n8n-api-key'
+  printf '%s\n' '  ./manage.sh bootstrap-n8n'
 fi
 if [[ "$install_caddy" == true ]]; then
   [[ -n "$caddy_nine_domain" ]] && printf '9router HTTPS: https://%s\n' "$caddy_nine_domain"

@@ -11,11 +11,17 @@ custom_providers:
 
 __MCP_SERVERS_BLOCK__
 agent:
-  max_turns: 30
-  # Arbitrary local execution would bypass the package broker's one-time gate.
-  disabled_toolsets:
-    - terminal
-    - code_execution
+  # Upstream's recommended general budget. Reaching it stops the turn safely and
+  # asks for a summary; ./manage.sh set-agent-max-turns adjusts it locally.
+  max_turns: 90
+  # Upstream terminal and code_execution are enabled by local operator decision.
+  # They run as the gateway uid inside hermes-agent, which holds /opt/data/.env
+  # (Telegram token, 9router key, API server key, n8n Instance token). Every call
+  # still passes approval.py's hardline floor and the manual approval prompt
+  # below, but an approved command can read those secrets. The stack execution
+  # tools remain the isolated path: sandbox container, SSH, and Docker, each
+  # sealed and approved exactly once.
+  disabled_toolsets: []
 
 terminal:
   backend: local
@@ -31,6 +37,7 @@ skills:
 plugins:
   enabled:
     - stack-package-policy
+    - stack-execution-policy
 
 tool_loop_guardrails:
   hard_stop_enabled: true

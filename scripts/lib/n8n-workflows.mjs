@@ -14,6 +14,7 @@ export const CREDENTIAL_TYPES = Object.freeze({
 
 export const MCP_PATH = "hermes";
 export const SMART_ROUTER_BASE_URL = "http://smart-router:8080/v1";
+export const NINEROUTER_BASE_URL = "http://nine-router:20128/v1";
 
 const MCP_TRIGGER_NAME = "MCP Server Trigger";
 const CALCULATOR_NAME = "Calculator";
@@ -68,7 +69,7 @@ export function buildMcpWorkflow(mcpCredential) {
   };
 }
 
-export function buildHostedChatWorkflow(routerCredential) {
+export function buildHostedChatWorkflow(routerCredential, model = "auto") {
   return {
     name: MANAGED_NAMES.chatWorkflow,
     nodes: [
@@ -100,7 +101,7 @@ export function buildHostedChatWorkflow(routerCredential) {
       },
       {
         parameters: {
-          model: { mode: "id", value: "auto" },
+          model: { mode: "id", value: model },
           options: {},
         },
         type: "@n8n/n8n-nodes-langchain.lmChatOpenAi",
@@ -125,7 +126,11 @@ export function buildHostedChatWorkflow(routerCredential) {
   };
 }
 
-export function buildCredentialSpecs({ mcpToken, routerApiKey }) {
+export function buildCredentialSpecs({
+  mcpToken,
+  routerApiKey,
+  routerBaseUrl = SMART_ROUTER_BASE_URL,
+}) {
   if (!mcpToken || !routerApiKey) throw new TypeError("Both credential secrets are required");
   return {
     mcp: {
@@ -136,7 +141,7 @@ export function buildCredentialSpecs({ mcpToken, routerApiKey }) {
     router: {
       name: MANAGED_NAMES.routerCredential,
       type: CREDENTIAL_TYPES.router,
-      data: { apiKey: routerApiKey, url: SMART_ROUTER_BASE_URL },
+      data: { apiKey: routerApiKey, url: routerBaseUrl },
     },
   };
 }

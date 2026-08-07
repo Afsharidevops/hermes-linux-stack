@@ -44,6 +44,23 @@ function requireValue(value, name) {
   return value;
 }
 
+function requireHttpUrl(value, name) {
+  requireValue(value, name);
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ReconcileError(`${name} must be a valid HTTP(S) URL`, { code: "CONFIG_ERROR" });
+  }
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new ReconcileError(
+      `${name} must be an HTTP(S) URL without credentials, query, or fragment`,
+      { code: "CONFIG_ERROR" },
+    );
+  }
+  return url;
+}
+
 function sanitizedText(value, secrets) {
   let result = String(value ?? "");
   for (const secret of secrets) {
@@ -293,25 +310,34 @@ function activeVersionId(workflow) {
   return workflow?.activeVersion?.versionId || workflow?.activeVersionId || null;
 }
 
-async function publishAndVerifyWorkflow(client, result, desired, journal) {
+async function setAndVerifyPublication(client, result, desired, journal, shouldPublish) {
   const workflow = result.workflow;
   const desiredFingerprint = workflowFingerprint(desired);
   let status = result.status;
-  if (activeVersionId(workflow) !== workflow.versionId || workflow.active !== true) {
+  const isPublished = workflow.active === true || Boolean(activeVersionId(workflow));
+  const currentVersionPublished =
+    workflow.active === true && activeVersionId(workflow) === workflow.versionId;
+  if ((shouldPublish && !currentVersionPublished) || (!shouldPublish && isPublished)) {
     const previousVersionId = activeVersionId(workflow);
     journal.push({ kind: "publication", id: workflow.id, previousVersionId });
-    await client.publishWorkflow(workflow.id, workflow.versionId);
-    status = status === "unchanged" ? "published" : status;
+    if (shouldPublish) await client.publishWorkflow(workflow.id, workflow.versionId);
+    else await client.unpublishWorkflow(workflow.id);
+    status = status === "unchanged" ? (shouldPublish ? "published" : "unpublished") : status;
   }
   const verified = await client.getWorkflow(workflow.id);
-  if (!verified) throw new ReconcileError(`Workflow ${workflow.id} disappeared after publication`);
+  const action = shouldPublish ? "publication" : "unpublication";
+  if (!verified) throw new ReconcileError(`Workflow ${workflow.id} disappeared after ${action}`);
   if (verified.name !== desired.name || workflowFingerprint(verified) !== desiredFingerprint) {
-    throw new ReconcileError(`Workflow ${workflow.id} did not verify after publication`, {
+    throw new ReconcileError(`Workflow ${workflow.id} did not verify after ${action}`, {
       code: "VERIFY_FAILED",
     });
   }
-  if (verified.active !== true && !activeVersionId(verified)) {
-    throw new ReconcileError(`Workflow ${workflow.id} is not published`, { code: "VERIFY_FAILED" });
+  const verifiedPublished = verified.active === true || Boolean(activeVersionId(verified));
+  if (shouldPublish !== verifiedPublished) {
+    throw new ReconcileError(
+      `Workflow ${workflow.id} is ${shouldPublish ? "not published" : "still published"}`,
+      { code: "VERIFY_FAILED" },
+    );
   }
   return { workflow: verified, status, fingerprint: desiredFingerprint };
 }
@@ -347,11 +373,26 @@ async function rollbackMutations(client, journal, rollbackState) {
   return { failures, stateNeedsWrite };
 }
 
-function publicUrls(apiUrl, mcpWorkflow, chatWorkflow) {
+function requireMcpMode(value) {
+  const mode = value || "trigger";
+  if (!["instance", "trigger", "off"].includes(mode)) {
+    throw new ReconcileError("N8N_MCP_MODE must be instance, trigger, or off", {
+      code: "CONFIG_ERROR",
+    });
+  }
+  return mode;
+}
+
+function publicUrls(apiUrl, mcpMode, chatWorkflow) {
   const base = new URL(apiUrl);
   base.pathname = base.pathname.replace(/\/api\/v1\/?$/, "/");
-  const mcpPath = new URL("mcp/hermes", base).toString();
   const webhookId = hostedChatWebhookId(workflowComparable(chatWorkflow));
+  const mcpPath =
+    mcpMode === "trigger"
+      ? new URL("mcp/hermes", base).toString()
+      : mcpMode === "instance"
+        ? new URL("mcp-server/http", base).toString()
+        : null;
   return {
     mcp: mcpPath,
     hostedChat: webhookId ? new URL(`webhook/${webhookId}/chat`, base).toString() : null,
@@ -361,14 +402,19 @@ function publicUrls(apiUrl, mcpWorkflow, chatWorkflow) {
 export async function reconcileN8n({
   apiUrl,
   apiKey,
+  mcpMode = "trigger",
   mcpToken,
   routerApiKey,
+  routerBaseUrl = "http://smart-router:8080/v1",
+  routerModel = "auto",
   previousMcpToken = mcpToken,
   previousRouterApiKey = routerApiKey,
+  previousRouterBaseUrl = routerBaseUrl,
   stateFile,
   fetchImpl = globalThis.fetch,
   stateWriter = writeStateAtomic,
 } = {}) {
+  const mode = requireMcpMode(mcpMode);
   const secrets = [
     apiKey,
     mcpToken,
@@ -377,8 +423,14 @@ export async function reconcileN8n({
     previousRouterApiKey,
   ].filter(Boolean);
   requireValue(apiKey, "N8N_API_KEY");
-  requireValue(mcpToken, "N8N_MCP_TOKEN");
+  if (mode === "trigger") requireValue(mcpToken, "N8N_TRIGGER_MCP_TOKEN");
   requireValue(routerApiKey, "NINEROUTER_API_KEY");
+  const selectedRouterUrl = requireHttpUrl(routerBaseUrl, "N8N_ROUTER_BASE_URL").toString().replace(/\/$/, "");
+  const rollbackRouterUrl = requireHttpUrl(
+    previousRouterBaseUrl,
+    "N8N_PREVIOUS_ROUTER_BASE_URL",
+  ).toString().replace(/\/$/, "");
+  requireValue(routerModel, "N8N_CHAT_MODEL");
   const resolvedStateFile = resolve(requireValue(stateFile, "N8N_STATE_FILE"));
   const client = createN8nClient({ apiUrl, apiKey, fetchImpl });
   const { state: priorState, firstRun } = await readState(resolvedStateFile);
@@ -390,42 +442,75 @@ export async function reconcileN8n({
   try {
     await client.listWorkflows("__hermes_connectivity_probe__");
     stage = "credential-schemas";
-    const [mcpSchema, routerSchema, credentialList] = await Promise.all([
-      client.getCredentialSchema(CREDENTIAL_TYPES.mcp),
+    const schemaRequests = [
       client.getCredentialSchema(CREDENTIAL_TYPES.router),
       client.listCredentials(),
-    ]);
-    assertCredentialSchema(mcpSchema, CREDENTIAL_TYPES.mcp);
+    ];
+    if (mode === "trigger") schemaRequests.unshift(client.getCredentialSchema(CREDENTIAL_TYPES.mcp));
+    const schemaResults = await Promise.all(schemaRequests);
+    const mcpSchema = mode === "trigger" ? schemaResults[0] : null;
+    const routerSchema = mode === "trigger" ? schemaResults[1] : schemaResults[0];
+    const credentialList = mode === "trigger" ? schemaResults[2] : schemaResults[1];
+    if (mcpSchema) assertCredentialSchema(mcpSchema, CREDENTIAL_TYPES.mcp);
     assertCredentialSchema(routerSchema, CREDENTIAL_TYPES.router);
-    const credentials = buildCredentialSpecs({ mcpToken, routerApiKey });
-    const rollbackCredentials = buildCredentialSpecs({
-      mcpToken: previousMcpToken,
-      routerApiKey: previousRouterApiKey,
-    });
+    const routerSpec = {
+      name: MANAGED_NAMES.routerCredential,
+      type: CREDENTIAL_TYPES.router,
+      data: { apiKey: routerApiKey, url: selectedRouterUrl },
+    };
+    const rollbackRouterSpec = {
+      ...routerSpec,
+      data: { apiKey: previousRouterApiKey, url: rollbackRouterUrl },
+    };
     const allCredentials = listData(credentialList);
 
-    stage = "mcp-credential";
-    const mcpCredential = await reconcileCredential({
-      client,
-      spec: credentials.mcp,
-      rollbackSpec: rollbackCredentials.mcp,
-      prior: priorState.credentials.mcp,
-      allCredentials,
-      journal,
-    });
-    nextState.credentials.mcp = {
-      id: mcpCredential.reference.id,
-      name: mcpCredential.reference.name,
-      type: credentials.mcp.type,
-      fingerprint: mcpCredential.fingerprint,
-      ...(mcpCredential.updatedAt ? { updatedAt: mcpCredential.updatedAt } : {}),
-    };
+    let mcpCredential = null;
+    let mcpWorkflow = null;
+    if (mode === "trigger") {
+      const credentials = buildCredentialSpecs({
+        mcpToken,
+        routerApiKey,
+        routerBaseUrl: selectedRouterUrl,
+      });
+      const rollbackCredentials = buildCredentialSpecs({
+        mcpToken: previousMcpToken,
+        routerApiKey: previousRouterApiKey,
+        routerBaseUrl: rollbackRouterUrl,
+      });
+      stage = "mcp-credential";
+      mcpCredential = await reconcileCredential({
+        client,
+        spec: credentials.mcp,
+        rollbackSpec: rollbackCredentials.mcp,
+        prior: priorState.credentials.mcp,
+        allCredentials,
+        journal,
+      });
+      nextState.credentials.mcp = {
+        id: mcpCredential.reference.id,
+        name: mcpCredential.reference.name,
+        type: credentials.mcp.type,
+        fingerprint: mcpCredential.fingerprint,
+        ...(mcpCredential.updatedAt ? { updatedAt: mcpCredential.updatedAt } : {}),
+      };
+    } else if (priorState.credentials.mcp?.id) {
+      stage = "mcp-credential";
+      const retained = await client.getCredential(priorState.credentials.mcp.id);
+      if (!retained) throw conflict(`Managed credential ${priorState.credentials.mcp.id} is missing`);
+      if (retained.name !== MANAGED_NAMES.mcpCredential || retained.type !== CREDENTIAL_TYPES.mcp) {
+        throw conflict(`Managed credential ${retained.id} drifted from its expected identity`);
+      }
+      mcpCredential = {
+        reference: { id: retained.id, name: retained.name },
+        status: "retained",
+      };
+    }
 
     stage = "router-credential";
     const routerCredential = await reconcileCredential({
       client,
-      spec: credentials.router,
-      rollbackSpec: rollbackCredentials.router,
+      spec: routerSpec,
+      rollbackSpec: rollbackRouterSpec,
       prior: priorState.credentials.router,
       allCredentials,
       journal,
@@ -433,28 +518,44 @@ export async function reconcileN8n({
     nextState.credentials.router = {
       id: routerCredential.reference.id,
       name: routerCredential.reference.name,
-      type: credentials.router.type,
+      type: routerSpec.type,
       fingerprint: routerCredential.fingerprint,
       ...(routerCredential.updatedAt ? { updatedAt: routerCredential.updatedAt } : {}),
     };
 
-    const mcpDesired = buildMcpWorkflow(mcpCredential.reference);
-    stage = "mcp-workflow";
-    let mcpWorkflow = await reconcileWorkflow({
-      client,
-      desired: mcpDesired,
-      prior: priorState.workflows.mcp,
-      journal,
-    });
-    stage = "mcp-publish";
-    mcpWorkflow = await publishAndVerifyWorkflow(client, mcpWorkflow, mcpDesired, journal);
-    nextState.workflows.mcp = {
-      id: mcpWorkflow.workflow.id,
-      name: mcpDesired.name,
-      fingerprint: mcpWorkflow.fingerprint,
-    };
+    if (mode === "trigger") {
+      const mcpDesired = buildMcpWorkflow(mcpCredential.reference);
+      stage = "mcp-workflow";
+      mcpWorkflow = await reconcileWorkflow({
+        client,
+        desired: mcpDesired,
+        prior: priorState.workflows.mcp,
+        journal,
+      });
+      stage = "mcp-publish";
+      mcpWorkflow = await setAndVerifyPublication(client, mcpWorkflow, mcpDesired, journal, true);
+      nextState.workflows.mcp = {
+        id: mcpWorkflow.workflow.id,
+        name: mcpDesired.name,
+        fingerprint: mcpWorkflow.fingerprint,
+      };
+    } else if (priorState.workflows.mcp?.id) {
+      if (!mcpCredential?.reference) {
+        throw conflict("Managed MCP workflow state exists without its retained credential");
+      }
+      const mcpDesired = buildMcpWorkflow(mcpCredential.reference);
+      stage = "mcp-workflow";
+      mcpWorkflow = await reconcileWorkflow({
+        client,
+        desired: mcpDesired,
+        prior: priorState.workflows.mcp,
+        journal,
+      });
+      stage = "mcp-unpublish";
+      mcpWorkflow = await setAndVerifyPublication(client, mcpWorkflow, mcpDesired, journal, false);
+    }
 
-    const chatDesired = buildHostedChatWorkflow(routerCredential.reference);
+    const chatDesired = buildHostedChatWorkflow(routerCredential.reference, routerModel);
     stage = "chat-workflow";
     let chatWorkflow = await reconcileWorkflow({
       client,
@@ -463,7 +564,7 @@ export async function reconcileN8n({
       journal,
     });
     stage = "chat-publish";
-    chatWorkflow = await publishAndVerifyWorkflow(client, chatWorkflow, chatDesired, journal);
+    chatWorkflow = await setAndVerifyPublication(client, chatWorkflow, chatDesired, journal, true);
     nextState.workflows.chat = {
       id: chatWorkflow.workflow.id,
       name: chatDesired.name,
@@ -472,20 +573,32 @@ export async function reconcileN8n({
 
     stage = "state";
     nextState.version = STATE_VERSION;
+    nextState.mcpMode = mode;
+    nextState.routerBaseUrl = selectedRouterUrl;
+    nextState.routerModel = routerModel;
     nextState.updatedAt = new Date().toISOString();
     await stateWriter(resolvedStateFile, nextState);
 
     return {
       status: "ok",
+      mcpMode: mode,
       credentials: {
-        mcp: { id: mcpCredential.reference.id, status: mcpCredential.status },
+        ...(mcpCredential ? { mcp: { id: mcpCredential.reference.id, status: mcpCredential.status } } : {}),
         router: { id: routerCredential.reference.id, status: routerCredential.status },
       },
       workflows: {
-        mcp: { id: mcpWorkflow.workflow.id, status: mcpWorkflow.status, published: true },
+        ...(mcpWorkflow
+          ? {
+              mcp: {
+                id: mcpWorkflow.workflow.id,
+                status: mcpWorkflow.status,
+                published: mode === "trigger",
+              },
+            }
+          : {}),
         chat: { id: chatWorkflow.workflow.id, status: chatWorkflow.status, published: true },
       },
-      urls: publicUrls(apiUrl, mcpWorkflow.workflow, chatWorkflow.workflow),
+      urls: publicUrls(apiUrl, mode, chatWorkflow.workflow),
       stateFile: resolvedStateFile,
     };
   } catch (error) {
@@ -518,10 +631,17 @@ export function configFromEnv(env = process.env) {
   return {
     apiUrl: env.N8N_API_URL,
     apiKey: env.N8N_API_KEY,
-    mcpToken: env.N8N_MCP_TOKEN,
+    mcpMode: env.N8N_MCP_MODE || "trigger",
+    mcpToken: env.N8N_TRIGGER_MCP_TOKEN || env.N8N_MCP_TOKEN,
     routerApiKey: env.NINEROUTER_API_KEY,
-    previousMcpToken: env.N8N_PREVIOUS_MCP_TOKEN || env.N8N_MCP_TOKEN,
+    previousMcpToken:
+      env.N8N_PREVIOUS_TRIGGER_MCP_TOKEN || env.N8N_PREVIOUS_MCP_TOKEN ||
+      env.N8N_TRIGGER_MCP_TOKEN || env.N8N_MCP_TOKEN,
     previousRouterApiKey: env.N8N_PREVIOUS_NINEROUTER_API_KEY || env.NINEROUTER_API_KEY,
+    routerBaseUrl: env.N8N_ROUTER_BASE_URL || "http://smart-router:8080/v1",
+    routerModel: env.N8N_CHAT_MODEL || "auto",
+    previousRouterBaseUrl:
+      env.N8N_PREVIOUS_ROUTER_BASE_URL || env.N8N_ROUTER_BASE_URL || "http://smart-router:8080/v1",
     stateFile: env.N8N_STATE_FILE,
   };
 }
@@ -535,8 +655,10 @@ async function main() {
       { status: "error", code: error.code, stage: error.stage, message: error.message },
       [
         process.env.N8N_API_KEY,
+        process.env.N8N_TRIGGER_MCP_TOKEN,
         process.env.N8N_MCP_TOKEN,
         process.env.NINEROUTER_API_KEY,
+        process.env.N8N_PREVIOUS_TRIGGER_MCP_TOKEN,
         process.env.N8N_PREVIOUS_MCP_TOKEN,
         process.env.N8N_PREVIOUS_NINEROUTER_API_KEY,
       ],

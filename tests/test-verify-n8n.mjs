@@ -73,7 +73,9 @@ async function fixture(t, options = {}) {
 
     if (options.httpFailure === url.pathname) return send(response, 503, { error: "failure" });
     if (request.method === "GET" && url.pathname === "/healthz") return send(response, 200, { status: "ok" });
-    if (request.method === "GET" && url.pathname === "/ready") return send(response, 200, { status: "ready" });
+    if (request.method === "GET" && ["/ready", "/api/health"].includes(url.pathname)) {
+      return send(response, 200, { status: "ready" });
+    }
     if (url.pathname === `/webhook/${WEBHOOK_ID}/chat`) {
       // n8n serves the static chat shell to anonymous GETs by design and only
       // enforces authentication on the message POST, so the verifier must probe
@@ -100,21 +102,28 @@ async function fixture(t, options = {}) {
         id,
         name: options.wrongWorkflowName && id === "workflow-chat" ? "wrong" : workflow.name,
         ...(options.workflowDrift && id === "workflow-chat" ? { settings: { executionOrder: "v0" } } : {}),
-        active: options.unpublished && id === "workflow-chat" ? false : true,
-        activeVersion: options.unpublished && id === "workflow-chat" ? null : { versionId: `version-${id}` },
+        active:
+          (options.unpublished && id === "workflow-chat") || (options.unpublishedMcp && id === "workflow-mcp")
+            ? false
+            : true,
+        activeVersion:
+          (options.unpublished && id === "workflow-chat") || (options.unpublishedMcp && id === "workflow-mcp")
+            ? null
+            : { versionId: `version-${id}` },
       });
     }
-    if (request.method === "DELETE" && url.pathname === "/mcp/hermes") {
+    if (request.method === "DELETE" && ["/mcp/hermes", "/mcp-server/http"].includes(url.pathname)) {
       assert.equal(request.headers.authorization, `Bearer ${MCP_TOKEN}`);
       assert.equal(request.headers["mcp-session-id"], SESSION_ID);
       response.writeHead(options.closeFailure ? 500 : 200);
       return response.end();
     }
-    if (request.method === "POST" && url.pathname === "/mcp/hermes") {
+    if (request.method === "POST" && ["/mcp/hermes", "/mcp-server/http"].includes(url.pathname)) {
+      const isInstance = url.pathname === "/mcp-server/http";
       if (request.headers.authorization !== `Bearer ${MCP_TOKEN}`) {
         return send(response, options.acceptUnauthenticated ? 200 : 401, { error: "unauthorized" });
       }
-      if (body?.method !== "initialize") {
+      if (!options.noSession && body?.method !== "initialize") {
         assert.equal(request.headers["mcp-session-id"], SESSION_ID);
       }
       if (body?.method === "notifications/initialized") {
@@ -133,22 +142,49 @@ async function fixture(t, options = {}) {
         toolsCallCount += 1;
         if (options.protocolFailure === "tools-list") payload = { jsonrpc: "2.0", id: 999, result: {} };
         else if (options.rpcFailure === "tools-list") payload = { jsonrpc: "2.0", id: body.id, error: { code: -1, message: `${MCP_TOKEN} failure` } };
-        else payload = rpcResult(body.id, { tools: options.missingCalculator ? [] : [{ name: "Calculator", inputSchema: { type: "object" } }] });
+        else if (isInstance) {
+          const names = [
+            "search_workflows",
+            "get_workflow_details",
+            "execute_workflow",
+            "publish_workflow",
+            "unpublish_workflow",
+            "list_credentials",
+            "search_executions",
+          ].filter((name) => name !== options.missingInstanceTool);
+          payload = rpcResult(body.id, { tools: names.map((name) => ({ name, inputSchema: { type: "object" } })) });
+        } else {
+          payload = rpcResult(body.id, { tools: options.missingCalculator ? [] : [{ name: "Calculator", inputSchema: { type: "object" } }] });
+        }
       } else if (body?.method === "tools/call") {
-        assert.deepEqual(body.params, { name: "Calculator", arguments: { input: "2+3" } });
-        payload = rpcResult(
-          body.id,
-          options.toolFailure
-            ? { isError: true, content: [{ type: "text", text: `${MCP_TOKEN} failed` }] }
-            : options.emptyCalculator
-              ? { content: [] }
-              : { content: [{ type: "text", text: "5" }] },
-        );
+        if (isInstance) {
+          assert.deepEqual(body.params, {
+            name: "search_workflows",
+            arguments: { limit: 1, query: MANAGED_NAMES.chatWorkflow, sortBy: "updatedAt:desc" },
+          });
+          const search = options.invalidInstanceSearch
+            ? { data: "invalid", count: 1 }
+            : { data: [{ id: "workflow-chat", name: MANAGED_NAMES.chatWorkflow }], count: 1 };
+          payload = rpcResult(body.id, {
+            structuredContent: search,
+            content: [{ type: "text", text: JSON.stringify(search) }],
+          });
+        } else {
+          assert.deepEqual(body.params, { name: "Calculator", arguments: { input: "2+3" } });
+          payload = rpcResult(
+            body.id,
+            options.toolFailure
+              ? { isError: true, content: [{ type: "text", text: `${MCP_TOKEN} failed` }] }
+              : options.emptyCalculator
+                ? { content: [] }
+                : { content: [{ type: "text", text: "5" }] },
+          );
+        }
       } else {
         return send(response, 404, { error: "unhandled" });
       }
 
-      const headers = body?.method === "initialize" ? { "Mcp-Session-Id": SESSION_ID } : {};
+      const headers = body?.method === "initialize" && !options.noSession ? { "Mcp-Session-Id": SESSION_ID } : {};
       if (transport === "sse") {
         return send(response, 200, `event: message\ndata: ${JSON.stringify(payload)}\n\n`, "text/event-stream", headers);
       }
@@ -208,6 +244,98 @@ test("supports SSE MCP responses", async (t) => {
   const server = await fixture(t, { transport: "sse" });
   const result = await verifyN8n(input(server, await stateFile(t)));
   assert.equal(result.checks.mcp, "ok");
+});
+
+test("supports a direct 9router health endpoint", async (t) => {
+  const server = await fixture(t);
+  const result = await verifyN8n(
+    input(server, await stateFile(t), {
+      smartRouterUrl: undefined,
+      routerHealthUrl: `${server.baseUrl}/api/health`,
+    }),
+  );
+  assert.equal(result.checks.modelRouter, "ok");
+  assert.ok(server.calls.some((call) => call.path === "/api/health"));
+  assert.equal(server.calls.some((call) => call.path === "/ready"), false);
+});
+
+test("verifies Instance MCP with only a bounded read-only workflow search", async (t) => {
+  const server = await fixture(t, { unpublishedMcp: true });
+  const result = await verifyN8n(
+    input(server, await stateFile(t), {
+      mcpMode: "instance",
+      mcpUrl: `${server.baseUrl}/mcp-server/http`,
+    }),
+  );
+
+  assert.equal(result.checks.mcp, "ok");
+  const toolCalls = server.calls.filter((call) => call.body?.method === "tools/call");
+  assert.equal(toolCalls.length, 1);
+  assert.equal(toolCalls[0].body.params.name, "search_workflows");
+  assert.deepEqual(toolCalls[0].body.params.arguments, {
+    limit: 1,
+    query: MANAGED_NAMES.chatWorkflow,
+    sortBy: "updatedAt:desc",
+  });
+});
+
+test("supports Instance MCP without a server session", async (t) => {
+  const server = await fixture(t, { unpublishedMcp: true, noSession: true });
+  const result = await verifyN8n(
+    input(server, await stateFile(t), {
+      mcpMode: "instance",
+      mcpUrl: `${server.baseUrl}/mcp-server/http`,
+    }),
+  );
+  assert.equal(result.checks.mcpSession, "not supplied");
+  assert.equal(server.calls.filter((call) => call.method === "DELETE").length, 0);
+});
+
+test("fails when required Instance MCP tools or search results are invalid", async (t) => {
+  for (const options of [
+    { unpublishedMcp: true, missingInstanceTool: "get_workflow_details" },
+    { unpublishedMcp: true, invalidInstanceSearch: true },
+  ]) {
+    await t.test(Object.keys(options).at(-1), async (t) => {
+      const server = await fixture(t, options);
+      await assert.rejects(
+        verifyN8n(
+          input(server, await stateFile(t), {
+            mcpMode: "instance",
+            mcpUrl: `${server.baseUrl}/mcp-server/http`,
+          }),
+        ),
+        (error) => error.code === "VERIFY_FAILED" && error.check === "mcp",
+      );
+    });
+  }
+});
+
+test("off mode skips MCP and requires retained trigger state to be unpublished", async (t) => {
+  const server = await fixture(t, { unpublishedMcp: true });
+  const result = await verifyN8n(input(server, await stateFile(t), { mcpMode: "off", mcpUrl: undefined, mcpToken: undefined }));
+  assert.equal(result.checks.mcp, "skipped (N8N_MCP_MODE=off)");
+  assert.equal(server.calls.filter((call) => call.path.startsWith("/mcp")).length, 0);
+
+  const published = await fixture(t);
+  await assert.rejects(
+    verifyN8n(input(published, await stateFile(t), { mcpMode: "off", mcpUrl: undefined, mcpToken: undefined })),
+    (error) => error.code === "VERIFY_FAILED" && error.check === "workflows",
+  );
+});
+
+test("Instance and off modes require the API key to prove retained trigger unpublication", async (t) => {
+  const server = await fixture(t, { unpublishedMcp: true });
+  await assert.rejects(
+    verifyN8n(
+      input(server, await stateFile(t), {
+        apiKey: undefined,
+        mcpMode: "instance",
+        mcpUrl: `${server.baseUrl}/mcp-server/http`,
+      }),
+    ),
+    (error) => error.code === "CONFIG_ERROR" && error.check === "workflows",
+  );
 });
 
 test("allows the public workflow API check to be skipped", async (t) => {

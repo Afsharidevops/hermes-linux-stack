@@ -11,7 +11,12 @@ import {
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const REQUEST_TIMEOUT_MS = 15_000;
-const SECRET_ENV_KEYS = ["N8N_API_KEY", "N8N_MCP_TOKEN"];
+const SECRET_ENV_KEYS = [
+  "N8N_API_KEY",
+  "N8N_TRIGGER_MCP_TOKEN",
+  "N8N_INSTANCE_MCP_TOKEN",
+  "N8N_MCP_TOKEN",
+];
 
 export class VerifyError extends Error {
   constructor(message, { code = "VERIFY_FAILED", check } = {}) {
@@ -114,10 +119,8 @@ async function readManagedState(stateFile) {
     });
   }
 
-  const expected = {
-    mcp: MANAGED_NAMES.mcpWorkflow,
-    chat: MANAGED_NAMES.chatWorkflow,
-  };
+  const expected = { chat: MANAGED_NAMES.chatWorkflow };
+  if (state.workflows.mcp) expected.mcp = MANAGED_NAMES.mcpWorkflow;
   const workflows = {};
   for (const [key, expectedName] of Object.entries(expected)) {
     const item = state.workflows[key];
@@ -135,7 +138,7 @@ async function readManagedState(stateFile) {
     }
     workflows[key] = { id: item.id, name: expectedName, fingerprint: item.fingerprint };
   }
-  if (workflows.mcp.id === workflows.chat.id) {
+  if (workflows.mcp?.id === workflows.chat.id) {
     throw new VerifyError("managed workflow IDs must be distinct", {
       code: "STATE_ERROR",
       check: "state",
@@ -148,7 +151,7 @@ function isPublished(workflow) {
   return workflow?.active === true || Boolean(workflow?.activeVersion?.versionId || workflow?.activeVersionId);
 }
 
-async function verifyManagedWorkflows({ fetchImpl, apiUrl, apiKey, workflows }) {
+async function verifyManagedWorkflows({ fetchImpl, apiUrl, apiKey, workflows, mcpMode }) {
   if (!apiKey) return "skipped (N8N_API_KEY not set)";
   const origin = apiUrl.origin;
   for (const item of Object.values(workflows)) {
@@ -186,11 +189,12 @@ async function verifyManagedWorkflows({ fetchImpl, apiUrl, apiKey, workflows }) 
         check: "workflows",
       });
     }
-    if (!isPublished(workflow)) {
-      throw new VerifyError(`managed ${item === workflows.mcp ? "mcp" : "chat"} workflow is not published`, {
-        code: "VERIFY_FAILED",
-        check: "workflows",
-      });
+    const shouldPublish = item !== workflows.mcp || mcpMode === "trigger";
+    if (isPublished(workflow) !== shouldPublish) {
+      throw new VerifyError(
+        `managed ${item === workflows.mcp ? "mcp" : "chat"} workflow has the wrong publication state`,
+        { code: "VERIFY_FAILED", check: "workflows" },
+      );
     }
   }
   return "ok";
@@ -277,9 +281,53 @@ function calculatorSucceeded(result) {
   return /(^|\D)5(?:\.0+)?(\D|$)/.test(text);
 }
 
-export async function verifyMcp({ fetchImpl = globalThis.fetch, mcpUrl, mcpToken }) {
-  const url = httpUrl(mcpUrl, "N8N_MCP_URL");
-  requireValue(mcpToken, "N8N_MCP_TOKEN");
+function instanceSearchResult(result) {
+  if (!result || result.isError === true) return null;
+  let payload = result.structuredContent;
+  if (!payload && Array.isArray(result.content)) {
+    const text = result.content.find((item) => item?.type === "text" && typeof item.text === "string")?.text;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        return null;
+      }
+    }
+  }
+  if (!payload || !Array.isArray(payload.data) || !Number.isInteger(payload.count) || payload.count < 0) {
+    return null;
+  }
+  if (payload.data.length > 1 || payload.count < payload.data.length) return null;
+  for (const workflow of payload.data) {
+    if (!workflow || typeof workflow.id !== "string" || !workflow.id ||
+        (workflow.name !== null && typeof workflow.name !== "string")) return null;
+  }
+  return payload;
+}
+
+function requireMcpMode(value) {
+  const mode = value || "trigger";
+  if (!["instance", "trigger", "off"].includes(mode)) {
+    throw new VerifyError("N8N_MCP_MODE must be instance, trigger, or off", {
+      code: "CONFIG_ERROR",
+      check: "configuration",
+    });
+  }
+  return mode;
+}
+
+export async function verifyMcp({
+  fetchImpl = globalThis.fetch,
+  mcpUrl,
+  mcpToken,
+  mode = "trigger",
+}) {
+  const selectedMode = requireMcpMode(mode);
+  if (selectedMode === "off") return { status: "skipped (N8N_MCP_MODE=off)", session: "not applicable" };
+  const urlName = selectedMode === "instance" ? "N8N_INSTANCE_MCP_URL" : "N8N_TRIGGER_MCP_URL";
+  const tokenName = selectedMode === "instance" ? "N8N_INSTANCE_MCP_TOKEN" : "N8N_TRIGGER_MCP_TOKEN";
+  const url = httpUrl(mcpUrl, urlName);
+  requireValue(mcpToken, tokenName);
   const accept = "application/json, text/event-stream";
   const commonHeaders = { Accept: accept, "Content-Type": "application/json" };
   const initialize = {
@@ -349,27 +397,64 @@ export async function verifyMcp({ fetchImpl = globalThis.fetch, mcpUrl, mcpToken
         check: "mcp",
       });
     }
-    if (!tools.tools.some((tool) => tool?.name === "Calculator")) {
-      throw new VerifyError("MCP Calculator tool is missing", {
-        code: "VERIFY_FAILED",
-        check: "mcp",
-      });
-    }
-
-    const calculation = await post(
-      {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: { name: "Calculator", arguments: { input: "2+3" } },
-      },
-      3,
-    );
-    if (!calculatorSucceeded(calculation)) {
-      throw new VerifyError("MCP Calculator did not successfully evaluate the readiness input", {
-        code: "VERIFY_FAILED",
-        check: "mcp",
-      });
+    const toolNames = new Set(tools.tools.map((tool) => tool?.name).filter((name) => typeof name === "string"));
+    if (selectedMode === "instance") {
+      for (const requiredName of [
+        "search_workflows",
+        "get_workflow_details",
+        "execute_workflow",
+        "publish_workflow",
+        "unpublish_workflow",
+        "list_credentials",
+        "search_executions",
+      ]) {
+        if (!toolNames.has(requiredName)) {
+          throw new VerifyError(`Instance MCP ${requiredName} tool is missing`, {
+            code: "VERIFY_FAILED",
+            check: "mcp",
+          });
+        }
+      }
+      const search = await post(
+        {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: {
+            name: "search_workflows",
+            arguments: { limit: 1, query: MANAGED_NAMES.chatWorkflow, sortBy: "updatedAt:desc" },
+          },
+        },
+        3,
+      );
+      if (!instanceSearchResult(search)) {
+        throw new VerifyError("Instance MCP search_workflows returned an invalid result", {
+          code: "VERIFY_FAILED",
+          check: "mcp",
+        });
+      }
+    } else {
+      if (!toolNames.has("Calculator")) {
+        throw new VerifyError("MCP Calculator tool is missing", {
+          code: "VERIFY_FAILED",
+          check: "mcp",
+        });
+      }
+      const calculation = await post(
+        {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "Calculator", arguments: { input: "2+3" } },
+        },
+        3,
+      );
+      if (!calculatorSucceeded(calculation)) {
+        throw new VerifyError("MCP Calculator did not successfully evaluate the readiness input", {
+          code: "VERIFY_FAILED",
+          check: "mcp",
+        });
+      }
     }
     verificationSucceeded = true;
     return { status: "ok", session: sessionId ? "established" : "not supplied" };
@@ -400,17 +485,22 @@ export async function verifyMcp({ fetchImpl = globalThis.fetch, mcpUrl, mcpToken
 export async function verifyN8n({
   apiUrl,
   apiKey,
+  mcpMode = "trigger",
   mcpUrl,
   mcpToken,
   stateFile,
-  smartRouterUrl = "http://smart-router:8080",
+  routerHealthUrl = "http://smart-router:8080/ready",
+  smartRouterUrl,
   fetchImpl = globalThis.fetch,
 } = {}) {
   const secrets = [apiKey, mcpToken].filter(Boolean);
   try {
     if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl must be a function");
+    const selectedMode = requireMcpMode(mcpMode);
     const parsedApiUrl = httpUrl(apiUrl, "N8N_API_URL");
-    const parsedRouterUrl = httpUrl(smartRouterUrl, "SMART_ROUTER_URL");
+    const selectedHealthUrl = smartRouterUrl
+      ? endpoint(httpUrl(smartRouterUrl, "SMART_ROUTER_URL"), "ready")
+      : httpUrl(routerHealthUrl, "N8N_ROUTER_HEALTH_URL");
     const workflows = await readManagedState(stateFile);
     const base = serviceBaseUrl(parsedApiUrl);
     const webhookId = hostedChatWebhookId(buildHostedChatWorkflow({ id: "verification", name: "verification" }));
@@ -424,9 +514,9 @@ export async function verifyN8n({
     await requireOk(fetchImpl, endpoint(base, "healthz"), { headers: { Accept: "application/json" } }, "n8n healthz");
     await requireOk(
       fetchImpl,
-      endpoint(parsedRouterUrl, "ready"),
+      selectedHealthUrl,
       { headers: { Accept: "application/json" } },
-      "Smart Router ready",
+      "n8n model router health",
     );
     // GET on the chat webhook serves only the static chat shell, which n8n
     // returns to anonymous callers by design. Authentication is enforced on the
@@ -449,20 +539,27 @@ export async function verifyN8n({
       });
     }
 
+    if (selectedMode !== "trigger" && workflows.mcp && !apiKey) {
+      throw new VerifyError(
+        "N8N_API_KEY is required to verify that the retained MCP Server Trigger is unpublished",
+        { code: "CONFIG_ERROR", check: "workflows" },
+      );
+    }
     const workflowStatus = await verifyManagedWorkflows({
       fetchImpl,
       apiUrl: parsedApiUrl,
       apiKey,
       workflows,
+      mcpMode: selectedMode,
     });
-    const mcp = await verifyMcp({ fetchImpl, mcpUrl, mcpToken });
+    const mcp = await verifyMcp({ fetchImpl, mcpUrl, mcpToken, mode: selectedMode });
 
     return {
       status: "ok",
       checks: {
         state: "ok",
         healthz: "ok",
-        smartRouter: "ok",
+        modelRouter: "ok",
         hostedChat: "ok",
         workflows: workflowStatus,
         mcp: mcp.status,
@@ -479,13 +576,26 @@ export async function verifyN8n({
 }
 
 export function configFromEnv(env = process.env) {
+  const mcpMode = env.N8N_MCP_MODE || (env.N8N_MCP_TOKEN ? "trigger" : "off");
   return {
     apiUrl: env.N8N_API_URL,
     apiKey: env.N8N_API_KEY,
-    mcpUrl: env.N8N_MCP_URL,
-    mcpToken: env.N8N_MCP_TOKEN,
+    mcpMode,
+    mcpUrl:
+      mcpMode === "instance"
+        ? env.N8N_INSTANCE_MCP_URL
+        : mcpMode === "trigger"
+          ? env.N8N_TRIGGER_MCP_URL || env.N8N_MCP_URL
+          : undefined,
+    mcpToken:
+      mcpMode === "instance"
+        ? env.N8N_INSTANCE_MCP_TOKEN
+        : mcpMode === "trigger"
+          ? env.N8N_TRIGGER_MCP_TOKEN || env.N8N_MCP_TOKEN
+          : undefined,
     stateFile: env.N8N_STATE_FILE,
-    smartRouterUrl: env.SMART_ROUTER_URL || "http://smart-router:8080",
+    routerHealthUrl: env.N8N_ROUTER_HEALTH_URL || "http://smart-router:8080/ready",
+    ...(env.SMART_ROUTER_URL ? { smartRouterUrl: env.SMART_ROUTER_URL } : {}),
   };
 }
 

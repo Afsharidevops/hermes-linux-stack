@@ -12,7 +12,7 @@ Never commit or publish:
 - 9router endpoint or provider keys
 - Open WebUI signing secrets
 - n8n's `N8N_ENCRYPTION_KEY`, persisted `data/n8n/` state, and workflow credentials
-- the Hermes-to-n8n MCP Bearer token in `data/hermes/.env`
+- the Trigger and Instance-level Hermes-to-n8n MCP tokens in `data/hermes/.env`
 - Smart Router HMAC secrets and SQLite state
 
 The repository `.gitignore` excludes runtime secrets and persistent data. Check
@@ -47,40 +47,66 @@ restore the key and directory together. Rotating or losing the key makes existin
 stored credentials undecryptable; neither item is a useful complete recovery on
 its own.
 
-Hermes reaches the fixed managed MCP URL (`http://n8n:5678/mcp/hermes`)
-over the private Docker network, not through n8n's public host/LAN port. The MCP
-Server Trigger uses Bearer authentication. The token is never printed by a
-management command: `./manage.sh rotate-n8n-token` updates n8n's encrypted
-credential, updates Hermes, recreates it, verifies the new token, and restores the
-prior credential on failure.
+Hermes uses one explicit n8n MCP mode over the private Docker network, never the
+public host/LAN port:
 
-The owner-created n8n API key used by `set-n8n-api-key` is stored only in
-mode-`0600` `data/stack-secrets/n8n-bootstrap.env`. Bootstrap passes all secrets
-to its restricted ephemeral container through a temporary mode-`0600` env file,
-not command arguments. Remove the stored owner key after successful bootstrap if
-ongoing reconciliation is unnecessary:
+- **Trigger** (`http://n8n:5678/mcp/hermes`) uses a stack-generated Bearer token
+  and exposes only tools connected to the managed MCP Server Trigger workflow.
+  The generated workflow contains only Calculator.
+- **Instance** (`http://n8n:5678/mcp-server/http`) uses a personal token generated
+  in n8n **Settings → Instance-level MCP → Connection details**. Its authority is
+  bound to that n8n user and includes broad workflow, execution, credential-
+  metadata, and data-table management. Workflow availability in Instance MCP and
+  the user's project/workflow permissions still apply.
+- **off** removes Hermes's managed connection. It does not disable Instance-level
+  MCP globally because other clients may use it.
+
+Never put either token in chat or argv. The stack never generates an Instance
+token; `set-n8n-instance-mcp-token` reads it silently, first proves anonymous
+rejection, then validates authenticated initialization and expected tools before
+writing mode-`0600` `data/hermes/.env`. Regenerating the token in n8n immediately
+revokes the previous token, so there is no server-side rollback to that revoked
+value. Paste the replacement through the same command. Remove a stored token only
+while Instance mode is inactive with `remove-n8n-instance-mcp-token`; this does
+not disable Instance MCP in n8n.
+
+Trigger-token rotation has a different lifecycle: `rotate-n8n-trigger-token`
+(the `rotate-n8n-token` compatibility alias) transactionally updates n8n's
+encrypted credential and Hermes, verifies it, and restores the prior Trigger
+credential on failure. When switching to Instance or off mode, the managed Trigger
+workflow is unpublished but its encrypted credential, IDs, fingerprint, and token
+are retained for safe republishing. An unpublished Trigger endpoint is unavailable,
+but retention is not a substitute for protecting its token.
+
+The owner-created n8n API key used by `set-n8n-api-key` is a third, separate secret.
+It is stored only in mode-`0600` `data/stack-secrets/n8n-bootstrap.env` and is used
+by the public-API reconciler for hosted chat and Trigger publication changes; it is
+not an MCP credential. Bootstrap passes secrets to restricted ephemeral containers
+through temporary mode-`0600` env files, not command arguments. Remove the stored
+owner key after bootstrap only if later reconciliation, publication changes, and
+Trigger rotation are unnecessary:
 
 ```bash
 ./manage.sh remove-n8n-bootstrap-key
 ```
 
-The non-secret state file retains managed IDs and fingerprints. Re-enter a valid
-owner API key before later reconciliation or rotation. The reconciler updates
-only persisted IDs, fails closed on managed-name collisions or manual drift, and
-never accesses n8n's SQLite database. The verifier rechecks workflow definitions
-and publication, requires anonymous hosted-chat requests to be rejected, invokes
-Calculator through authenticated MCP, and closes established MCP sessions. Clone
-generated workflows before customizing them.
+The non-secret state file retains managed IDs, fingerprints, and router metadata.
+The reconciler updates only persisted IDs, fails closed on managed-name collisions
+or manual drift, and never accesses n8n's SQLite database. Mode-specific
+verification rechecks workflow definitions/publication and hosted-chat access.
+Instance verification lists management tools but invokes only a bounded read-only
+workflow search; Trigger verification invokes Calculator; established MCP sessions
+are closed. Clone generated workflows before customizing them.
 
 The generated hosted chat uses n8n user authentication. Operators must be signed
 in to n8n to use it; do not weaken the Chat Trigger to anonymous access when the
-editor is LAN- or Internet-reachable.
+editor is LAN- or Internet-reachable. Its model credential targets Smart Router
+`auto` when installed or direct 9router model `ai` otherwise.
 
-Publishing a workflow exposes every connected MCP tool to anyone holding that
-token. The generated workflow intentionally contains only Calculator. Scope n8n
-credentials and downstream accounts to the minimum operations and data required,
-and review cloned workflows for prompt-derived arguments before production use.
-An unpublished MCP Server Trigger is unavailable rather than a security control.
+Publishing a Trigger workflow exposes every connected MCP tool to anyone holding
+its token. Scope all n8n credentials and downstream accounts to the minimum
+operations and data required, and review cloned workflows for prompt-derived
+arguments before production use.
 
 The n8n container is distributed under the n8n Sustainable Use License. Review
 its terms before deployment or redistribution.
@@ -94,18 +120,55 @@ approvals. npm lifecycle scripts are disabled and Python installation accepts
 binary wheels only. Review the displayed source, package, exact version,
 destination, and normalized command before approving.
 
-The managed Hermes config disables `terminal` and `code_execution`; this is the
-primary boundary that prevents shell or dynamic-code indirection from bypassing
-the broker. Keep both toolsets disabled. Plugin command-pattern checks are only
-defense in depth and are not a complete sandbox for arbitrary execution.
+By local operator decision, the managed Hermes config enables upstream
+`terminal` and `code_execution`. They execute as the gateway uid and therefore
+can read `/opt/data/.env`, including Telegram, backend, API-server, and n8n
+credentials. Manual approval and upstream hardline patterns reduce accidental
+execution but are not a filesystem sandbox and do not make a reusable approval
+safe. Disable them with `./manage.sh set-upstream-terminal disabled` when that
+risk is not acceptable. Plugin command-pattern checks are defense in depth only.
 
-Do not bypass this boundary with raw `pip`, `uv`, `npm`, `yarn`, `pnpm`, OS
-package managers, shell indirection, or direct writes to the managed package
-targets. Hermes remains unprivileged without a Docker socket, host root mount,
-`sudo`, or OS package installation. Package preparation and execution require
-manual approval mode; smart/model-mediated, YOLO, cron, and background contexts
-fail closed. Skills must use Hermes's staged diff approval; a package approval
-does not authorize a skill write or any later installation.
+The separate stack execution tools are the isolation boundary for routine local,
+SSH, and Docker work. Each capability is bound to one numeric Telegram execution
+user, one interactive session, one feature, one canonical digest, one five-minute
+nonce, and approval choice `once`. API, dashboard, MCP, cron/background, smart,
+and bypass contexts fail closed. The Docker socket is mounted only into the
+Docker broker; SSH keys only into the SSH broker; local sandboxes receive neither
+and never join `agent-net`.
+
+Execution also requires an independent decision from `execution-approver`. It
+recomputes the exact digest and complete summary, sends them through a separately
+configured Telegram bot to the matching authorized private numeric chat, and
+accepts a one-time inline approval or denial. The approver alone holds that bot
+token and an Ed25519 private signing key. Brokers hold only the public verification
+key and persist the exact signed grant before atomic consumption. Hermes holds
+neither key nor the approval bot token, so its broker control secret cannot approve
+or execute by itself. A separate request-authentication secret permits sealed
+broker-to-approver submissions but cannot forge decisions.
+
+Execution is off until `./manage.sh set-execution-approval-bot-token` reads a token
+silently, creates the approval keys, execution users are configured, and a feature
+is explicitly enabled. Never pass that token in argv or reuse the main Hermes bot.
+The approver has Telegram egress but no Docker socket or SSH profiles; brokers and
+Hermes have no access to its token or private key. Keep all execution services
+unpublished and preserve the internal execution-control network.
+
+The broker denial floor rejects protected service names and resolved immutable IDs,
+including inspect/log/remove operations; execution-control network names and IDs;
+and host binds equal to, beneath, or ancestral to execution-authority paths. Docker
+inspect output omits environment values, labels, and mounts. Local requests bind a
+digest-pinned resolved image, workspace generation, and normalized `/workspace`
+workdir. SSH requests bind host, port, user, authority, key fingerprints and file
+digests, and known-host fingerprints and file digests. Any change after approval
+fails closed.
+
+The Docker socket and approved privileged/host-mounted containers are
+host-root-equivalent. Root and passwordless-sudo SSH profiles are
+remote-root-equivalent. Approval authorizes an effect; it does not make it safe
+or reversible. Disabling execution revokes pending operations but cannot undo
+remote changes, revoke a remote public key, or clean up already-created Docker
+objects. Skills must still use staged diff approval, and package approvals never
+authorize later execution.
 
 9router URL/key aliases do not grant web-search capability by themselves. Configure
 a supported search provider separately, and install search skills only through

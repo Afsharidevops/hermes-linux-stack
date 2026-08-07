@@ -8,6 +8,7 @@ import {
   CREDENTIAL_TYPES,
   MANAGED_NAMES,
   MCP_PATH,
+  NINEROUTER_BASE_URL,
   SMART_ROUTER_BASE_URL,
   buildHostedChatWorkflow,
   buildMcpWorkflow,
@@ -228,6 +229,7 @@ function input(server, stateFile) {
   return {
     apiUrl: server.apiUrl,
     apiKey: API_KEY,
+    mcpMode: "trigger",
     mcpToken: MCP_TOKEN,
     routerApiKey: ROUTER_KEY,
     stateFile,
@@ -270,6 +272,10 @@ test("workflow builders emit the approved exact node contracts", () => {
     options: { responseMode: "streaming" },
   });
   assert.deepEqual(chat.nodes[2].parameters.model, { mode: "id", value: "auto" });
+  assert.deepEqual(
+    buildHostedChatWorkflow({ id: "openai-id", name: "OpenAI" }, "ai").nodes[2].parameters.model,
+    { mode: "id", value: "ai" },
+  );
   assert.deepEqual(chat.nodes[2].credentials.openAiApi, { id: "openai-id", name: "OpenAI" });
   assert.equal(chat.connections["When chat message received"].main[0][0].node, "AI Agent");
   assert.equal(chat.connections["OpenAI Chat Model"].ai_languageModel[0][0].type, "ai_languageModel");
@@ -303,6 +309,49 @@ test("clean run discovers schemas, creates credentials/workflows, publishes, ver
   assert.equal(state.workflows.chat.id, result.workflows.chat.id);
 });
 
+test("direct 9router mode provisions its URL and ai model", async (t) => {
+  const server = await fixture(t);
+  const stateFile = await tempState(t);
+  const result = await reconcileN8n({
+    ...input(server, stateFile),
+    routerBaseUrl: NINEROUTER_BASE_URL,
+    routerModel: "ai",
+  });
+
+  const routerCredential = [...server.credentials.values()].find(
+    (item) => item.type === CREDENTIAL_TYPES.router,
+  );
+  const chat = [...server.workflows.values()].find((item) => item.name === MANAGED_NAMES.chatWorkflow);
+  assert.deepEqual(routerCredential.data, { apiKey: ROUTER_KEY, url: NINEROUTER_BASE_URL });
+  assert.deepEqual(chat.nodes[2].parameters.model, { mode: "id", value: "ai" });
+  const state = JSON.parse(await readFile(stateFile, "utf8"));
+  assert.equal(state.routerBaseUrl, NINEROUTER_BASE_URL);
+  assert.equal(state.routerModel, "ai");
+  assert.equal(result.workflows.chat.published, true);
+});
+
+test("router transition updates the same credential and workflow with proven prior URL", async (t) => {
+  const server = await fixture(t);
+  const stateFile = await tempState(t);
+  const first = await reconcileN8n(input(server, stateFile));
+  const routerId = first.credentials.router.id;
+  const chatId = first.workflows.chat.id;
+
+  const changed = await reconcileN8n({
+    ...input(server, stateFile),
+    routerBaseUrl: NINEROUTER_BASE_URL,
+    routerModel: "ai",
+    previousRouterBaseUrl: SMART_ROUTER_BASE_URL,
+  });
+
+  assert.equal(changed.credentials.router.id, routerId);
+  assert.equal(changed.credentials.router.status, "updated");
+  assert.equal(changed.workflows.chat.id, chatId);
+  assert.equal(changed.workflows.chat.status, "updated");
+  assert.equal(server.credentials.size, 2);
+  assert.equal(server.workflows.size, 2);
+});
+
 test("second run is a no-op and creates no duplicates", async (t) => {
   const server = await fixture(t);
   const stateFile = await tempState(t);
@@ -316,6 +365,85 @@ test("second run is a no-op and creates no duplicates", async (t) => {
   assert.equal(rerunCalls.filter((call) => ["POST", "PUT", "PATCH", "DELETE"].includes(call.method)).length, 0);
   assert.equal(server.credentials.size, 2);
   assert.equal(server.workflows.size, 2);
+});
+
+test("instance mode creates only hosted chat and reports the Instance endpoint", async (t) => {
+  const server = await fixture(t);
+  const stateFile = await tempState(t);
+  const result = await reconcileN8n({ ...input(server, stateFile), mcpMode: "instance", mcpToken: undefined });
+
+  assert.equal(result.mcpMode, "instance");
+  assert.match(result.urls.mcp, /\/mcp-server\/http$/);
+  assert.deepEqual(Object.keys(result.credentials), ["router"]);
+  assert.deepEqual(Object.keys(result.workflows), ["chat"]);
+  assert.equal(server.credentials.size, 1);
+  assert.equal(server.workflows.size, 1);
+  assert.equal(countCalls(server, "GET", "/credentials/schema/httpBearerAuth"), 0);
+  assert.equal(countCalls(server, "POST", "/publish"), 1);
+  const state = JSON.parse(await readFile(stateFile, "utf8"));
+  assert.equal(state.mcpMode, "instance");
+  assert.equal(state.credentials.mcp, undefined);
+  assert.equal(state.workflows.mcp, undefined);
+});
+
+test("switching trigger to instance unpublishes and retains managed objects", async (t) => {
+  const server = await fixture(t);
+  const stateFile = await tempState(t);
+  const trigger = await reconcileN8n(input(server, stateFile));
+  const credentialId = trigger.credentials.mcp.id;
+  const workflowId = trigger.workflows.mcp.id;
+
+  const instance = await reconcileN8n({
+    ...input(server, stateFile),
+    mcpMode: "instance",
+    mcpToken: undefined,
+  });
+  assert.equal(instance.credentials.mcp.id, credentialId);
+  assert.equal(instance.credentials.mcp.status, "retained");
+  assert.equal(instance.workflows.mcp.id, workflowId);
+  assert.equal(instance.workflows.mcp.published, false);
+  assert.equal(server.workflows.get(workflowId).active, false);
+  assert.equal(server.credentials.size, 2);
+  assert.equal(server.workflows.size, 2);
+
+  const restored = await reconcileN8n(input(server, stateFile));
+  assert.equal(restored.credentials.mcp.id, credentialId);
+  assert.equal(restored.workflows.mcp.id, workflowId);
+  assert.equal(restored.workflows.mcp.published, true);
+  assert.equal(server.workflows.get(workflowId).active, true);
+  assert.equal(server.credentials.size, 2);
+  assert.equal(server.workflows.size, 2);
+});
+
+test("off mode unpublishes retained trigger objects and has no MCP URL", async (t) => {
+  const server = await fixture(t);
+  const stateFile = await tempState(t);
+  const trigger = await reconcileN8n(input(server, stateFile));
+  const result = await reconcileN8n({
+    ...input(server, stateFile),
+    mcpMode: "off",
+    mcpToken: undefined,
+  });
+  assert.equal(result.urls.mcp, null);
+  assert.equal(result.workflows.mcp.id, trigger.workflows.mcp.id);
+  assert.equal(result.workflows.mcp.published, false);
+  assert.equal(server.workflows.get(trigger.workflows.mcp.id).active, false);
+});
+
+test("retained trigger drift fails closed during an instance switch", async (t) => {
+  const server = await fixture(t);
+  const stateFile = await tempState(t);
+  const trigger = await reconcileN8n(input(server, stateFile));
+  server.workflows.get(trigger.workflows.mcp.id).nodes[1].position = [999, 999];
+  await assert.rejects(
+    reconcileN8n({ ...input(server, stateFile), mcpMode: "instance", mcpToken: undefined }),
+    (error) => {
+      assert.equal(error.code, "CONFLICT");
+      assert.equal(error.stage, "mcp-workflow");
+      return true;
+    },
+  );
+  assert.equal(server.workflows.get(trigger.workflows.mcp.id).active, true);
 });
 
 test("changed secret updates only its persisted credential ID", async (t) => {

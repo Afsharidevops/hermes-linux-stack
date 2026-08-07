@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+_PLUGIN_DIR = Path(__file__).resolve().parent
+# npm 10.11+ refuses to load one path as both "user" and "global" config, so the
+# two neutralising files must be distinct. They ship read-only with the plugin.
+_NPM_USER_CONFIG = _PLUGIN_DIR / "npm-user.npmrc"
+_NPM_GLOBAL_CONFIG = _PLUGIN_DIR / "npm-global.npmrc"
+
 _PYTHON_TARGET = Path(os.environ.get("HERMES_LAZY_INSTALL_TARGET", "/opt/data/lazy-packages"))
 _NPM_PREFIX = Path(os.environ.get("NPM_CONFIG_PREFIX", "/opt/data/npm-packages"))
 _PYTHON_REGISTRY = "https://pypi.org/simple"
@@ -35,6 +41,16 @@ _NPM_SPEC_RE = re.compile(
     r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$"
 )
 _FORBIDDEN_TEXT_RE = re.compile(r"[\n\r\t;&|`$<>\\]|://|(?:^|\s)-(?:e|r|f|-)")
+
+# Interpreter-injection variables must not reach an installer subprocess.
+_STRIPPED_ENV = frozenset({
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "NPM_TOKEN",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSTARTUP",
+})
 
 _PACKAGE_COMMAND_RE = re.compile(
     r"(?ix)"
@@ -269,13 +285,13 @@ def _install(args: dict[str, Any], *, ecosystem: str) -> str:
     env = os.environ.copy()
     for key in list(env):
         upper = key.upper()
-        if upper.startswith(("PIP_", "UV_", "NPM_CONFIG_")):
+        if upper.startswith(("PIP_", "UV_", "NPM_CONFIG_")) or upper in _STRIPPED_ENV:
             env.pop(key, None)
     env.update({
         "PIP_CONFIG_FILE": os.devnull,
         "UV_NO_CONFIG": "1",
-        "NPM_CONFIG_USERCONFIG": os.devnull,
-        "NPM_CONFIG_GLOBALCONFIG": os.devnull,
+        "NPM_CONFIG_USERCONFIG": str(_NPM_USER_CONFIG),
+        "NPM_CONFIG_GLOBALCONFIG": str(_NPM_GLOBAL_CONFIG),
         "NPM_CONFIG_IGNORE_SCRIPTS": "true",
         "NPM_CONFIG_AUDIT": "false",
         "NPM_CONFIG_FUND": "false",

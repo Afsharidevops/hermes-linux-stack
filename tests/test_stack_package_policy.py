@@ -174,6 +174,81 @@ class PackagePolicyTest(unittest.TestCase):
         )
         self.assertIsNone(self.plugin._pre_tool_call("terminal", {"command": "ls -la"}))
 
+    def test_installer_env_uses_distinct_npm_configs_and_strips_injection(self):
+        with tempfile.TemporaryDirectory() as prefix:
+            original_prefix = self.plugin._NPM_PREFIX
+            self.plugin._NPM_PREFIX = Path(prefix)
+            try:
+                prepared = self.prepare_npm()
+            finally:
+                self.plugin._NPM_PREFIX = original_prefix
+        pending_id = prepared["pending_id"]
+        self.plugin._pre_tool_call("stack_install_npm_package", {"pending_id": pending_id})
+        ambient = {
+            "NPM_CONFIG_REGISTRY": "https://evil.example/",
+            "NPM_CONFIG_IGNORE_SCRIPTS": "false",
+            "PIP_INDEX_URL": "https://evil.example/simple",
+            "UV_INDEX_URL": "https://evil.example/simple",
+            "NODE_OPTIONS": "--require /tmp/evil.js",
+            "NODE_PATH": "/tmp/evil",
+            "PYTHONPATH": "/tmp/evil",
+            "PYTHONHOME": "/tmp/evil",
+            "PYTHONSTARTUP": "/tmp/evil.py",
+        }
+        completed = types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
+        with mock.patch.dict(os.environ, ambient, clear=False):
+            with mock.patch("subprocess.run", return_value=completed) as run:
+                self.plugin._install_npm({"pending_id": pending_id})
+        env = run.call_args.kwargs["env"]
+
+        user_config = env["NPM_CONFIG_USERCONFIG"]
+        global_config = env["NPM_CONFIG_GLOBALCONFIG"]
+        # npm 10.11+ aborts when one path is loaded as both user and global.
+        self.assertNotEqual(user_config, global_config)
+        self.assertNotEqual(user_config, os.devnull)
+        self.assertNotEqual(global_config, os.devnull)
+        self.assertTrue(Path(user_config).is_file())
+        self.assertTrue(Path(global_config).is_file())
+
+        self.assertEqual(env["NPM_CONFIG_IGNORE_SCRIPTS"], "true")
+        self.assertNotIn("NPM_CONFIG_REGISTRY", env)
+        self.assertNotIn("PIP_INDEX_URL", env)
+        self.assertNotIn("UV_INDEX_URL", env)
+        self.assertEqual(env["PIP_CONFIG_FILE"], os.devnull)
+        for key in ("NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"):
+            self.assertNotIn(key, env)
+
+    @unittest.skipUnless(
+        subprocess.run(["sh", "-c", "command -v npm"], capture_output=True).returncode == 0,
+        "npm is unavailable",
+    )
+    def test_real_npm_install_accepts_the_stack_config_pair(self):
+        """Regression for: double-loading config "/dev/null" as "global"."""
+        env = os.environ.copy()
+        for key in list(env):
+            if key.upper().startswith("NPM_CONFIG_") or key.upper() in self.plugin._STRIPPED_ENV:
+                env.pop(key, None)
+        env.update({
+            "NPM_CONFIG_USERCONFIG": str(self.plugin._NPM_USER_CONFIG),
+            "NPM_CONFIG_GLOBALCONFIG": str(self.plugin._NPM_GLOBAL_CONFIG),
+            "NPM_CONFIG_IGNORE_SCRIPTS": "true",
+            "NPM_CONFIG_AUDIT": "false",
+            "NPM_CONFIG_FUND": "false",
+        })
+        with tempfile.TemporaryDirectory() as prefix:
+            env["HOME"] = prefix
+            completed = subprocess.run(
+                [
+                    "npm", "install", "--global", "--prefix", prefix,
+                    "--registry", self.plugin._NPM_REGISTRY,
+                    "--ignore-scripts", "--no-audit", "--no-fund", "--dry-run",
+                    "is-number@7.0.0",
+                ],
+                capture_output=True, text=True, env=env, timeout=180, check=False,
+            )
+        self.assertNotIn("double-loading config", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+
     def test_registration_exposes_no_generic_command_argument(self):
         class Context:
             def __init__(self):

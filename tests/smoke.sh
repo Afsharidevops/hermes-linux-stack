@@ -31,7 +31,7 @@ printf '%s\n' \
   '' '' test-password '' n \
   '' '' '' '' \
   '' '' '' '' \
-  y '' \
+  y 2 \
   '' '' y "$test_token" 946652372,7264771088 '' n n \
   '' '' '' y \
   y '' admin@example.com y router.example.com y chat.example.com y n8n.example.com \
@@ -61,16 +61,22 @@ grep -q '^  cron_mode: deny$' "$TEST_DIR/stack/data/hermes/config.yaml"
 grep -q '^skills:$' "$TEST_DIR/stack/data/hermes/config.yaml"
 grep -q '^  write_approval: true$' "$TEST_DIR/stack/data/hermes/config.yaml"
 grep -q '^    - stack-package-policy$' "$TEST_DIR/stack/data/hermes/config.yaml"
-grep -q '^  disabled_toolsets:$' "$TEST_DIR/stack/data/hermes/config.yaml"
-grep -q '^    - terminal$' "$TEST_DIR/stack/data/hermes/config.yaml"
-grep -q '^    - code_execution$' "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q '^    - stack-execution-policy$' "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q '^  disabled_toolsets: \[\]$' "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q '^  backend: local$' "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q '^  max_turns: 90$' "$TEST_DIR/stack/data/hermes/config.yaml"
 test -d "$TEST_DIR/stack/data/hermes/lazy-packages"
 test -d "$TEST_DIR/stack/data/hermes/npm-packages"
 test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets")" = 700
 # Capability-dropped bootstrap containers can only traverse mode 700 when the
 # directory belongs to the operator uid/gid that manage.sh runs the container as.
 test "$(stat -c '%u:%g' "$TEST_DIR/stack/data/stack-secrets")" = "$(id -u):$(id -g)"
+test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/control-secret")" = 600
+test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/users")" = 600
+grep -q '^EXECUTION_FEATURES=$' "$TEST_DIR/stack/.env"
+! grep -q 'execution-docker\|execution-ssh' < <(sed -n 's/^COMPOSE_PROFILES=//p' "$TEST_DIR/stack/.env")
 grep -q './plugins/stack-package-policy:/opt/data/plugins/stack-package-policy:ro' "$TEST_DIR/stack/docker-compose.yml"
+grep -q './plugins/stack-execution-policy:/opt/data/plugins/stack-execution-policy:ro' "$TEST_DIR/stack/docker-compose.yml"
 grep -q '^[[:space:]]*WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678}$' "$TEST_DIR/stack/docker-compose.yml"
 ! grep -q '^[[:space:]]*N8N_WEBHOOK_URL:' "$TEST_DIR/stack/docker-compose.yml"
 ! grep -q "custom:'9router'" "$TEST_DIR/stack/data/hermes/config.yaml"
@@ -85,12 +91,15 @@ grep -q '^N8N_PROTOCOL=https$' "$TEST_DIR/stack/.env"
 grep -q '^N8N_SECURE_COOKIE=true$' "$TEST_DIR/stack/.env"
 grep -q '^n8n.example.com {$' "$TEST_DIR/stack/data/caddy/Caddyfile"
 grep -q '^[[:space:]]*reverse_proxy n8n:5678$' "$TEST_DIR/stack/data/caddy/Caddyfile"
-# The MCP bearer token belongs in the mode-0600 Hermes env file, never in config.yaml.
-grep -q '^N8N_MCP_TOKEN=[0-9a-f]\{64\}$' "$TEST_DIR/stack/data/hermes/.env"
-grep -q '^N8N_MCP_URL="http://n8n:5678/mcp/hermes"$' "$TEST_DIR/stack/data/hermes/.env"
+# Mode-specific MCP tokens belong in the mode-0600 Hermes env file, never in config.yaml.
+grep -q '^N8N_MCP_MODE=trigger$' "$TEST_DIR/stack/.env"
+grep -q '^N8N_TRIGGER_MCP_TOKEN=[0-9a-f]\{64\}$' "$TEST_DIR/stack/data/hermes/.env"
+grep -q '^N8N_TRIGGER_MCP_URL="http://n8n:5678/mcp/hermes"$' "$TEST_DIR/stack/data/hermes/.env"
+grep -q '^N8N_INSTANCE_MCP_URL="http://n8n:5678/mcp-server/http"$' "$TEST_DIR/stack/data/hermes/.env"
+! grep -q '^N8N_MCP_\(TOKEN\|URL\|PATH\)=' "$TEST_DIR/stack/data/hermes/.env"
 ! grep -q '[0-9a-f]\{64\}' "$TEST_DIR/stack/data/hermes/config.yaml"
 test "$(grep -c '^mcp_servers:$' "$TEST_DIR/stack/data/hermes/config.yaml")" = 1
-grep -q 'Bearer \${N8N_MCP_TOKEN}' "$TEST_DIR/stack/data/hermes/config.yaml"
+grep -q 'Bearer \${N8N_TRIGGER_MCP_TOKEN}' "$TEST_DIR/stack/data/hermes/config.yaml"
 test "$(stat -c '%a' "$TEST_DIR/stack/data/hermes/.env")" = 600
 expected_hermes_uid="$(id -u)"; expected_hermes_gid="$(id -g)"
 if [[ "$expected_hermes_uid" == 0 ]]; then
@@ -109,16 +118,16 @@ if [[ "${CADDY_VALIDATE_WITH_DOCKER:-false}" == true ]]; then
     caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 fi
 
-# Reconfiguring n8n must preserve the encryption key and MCP token and must not
-# duplicate the installer-owned config block.
+# Reconfiguring n8n must preserve the encryption key and Trigger token and must
+# not duplicate the installer-owned config block.
 n8n_key="$(sed -n 's/^N8N_ENCRYPTION_KEY=//p' "$TEST_DIR/stack/.env")"
-n8n_token="$(sed -n 's/^N8N_MCP_TOKEN=//p' "$TEST_DIR/stack/data/hermes/.env")"
+n8n_token="$(sed -n 's/^N8N_TRIGGER_MCP_TOKEN=//p' "$TEST_DIR/stack/data/hermes/.env")"
 printf '%s\n' \
   n n n y n y y n \
   '' '' '' '' y '' n \
   | "$TEST_DIR/stack/install.sh" --dry-run >/dev/null
 test "$n8n_key" = "$(sed -n 's/^N8N_ENCRYPTION_KEY=//p' "$TEST_DIR/stack/.env")"
-test "$n8n_token" = "$(sed -n 's/^N8N_MCP_TOKEN=//p' "$TEST_DIR/stack/data/hermes/.env")"
+test "$n8n_token" = "$(sed -n 's/^N8N_TRIGGER_MCP_TOKEN=//p' "$TEST_DIR/stack/data/hermes/.env")"
 test "$(grep -c '^mcp_servers:$' "$TEST_DIR/stack/data/hermes/config.yaml")" = 1
 
 # Existing policy sections are reconciled field-by-field without removing
@@ -178,7 +187,7 @@ test "$n8n_key" = "$(sed -n 's/^N8N_ENCRYPTION_KEY=//p' "$TEST_DIR/n8n-disabled/
 grep -q '^mcp_servers:$' "$TEST_DIR/n8n-disabled/data/hermes/config.yaml"
 grep -q '^  existing:$' "$TEST_DIR/n8n-disabled/data/hermes/config.yaml"
 ! grep -q '^  n8n:$' "$TEST_DIR/n8n-disabled/data/hermes/config.yaml"
-! grep -q '^N8N_MCP_' "$TEST_DIR/n8n-disabled/data/hermes/.env"
+! grep -q '^N8N_\(MCP_\|TRIGGER_MCP_\|INSTANCE_MCP_\)' "$TEST_DIR/n8n-disabled/data/hermes/.env"
 test -d "$TEST_DIR/n8n-disabled/data/n8n"
 
 # Enabling only the MCP bridge on an otherwise unchanged installation must
@@ -186,16 +195,31 @@ test -d "$TEST_DIR/n8n-disabled/data/n8n"
 cp -a "$TEST_DIR/n8n-disabled" "$TEST_DIR/mcp-transition"
 sed -i 's/^COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,caddy$/COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,n8n,caddy/' \
   "$TEST_DIR/mcp-transition/.env"
-printf '%s\n' n n n y n y n n y n \
+printf '%s\n' n n n y n y n n y 2 n \
   | "$TEST_DIR/mcp-transition/install.sh" --dry-run \
     > "$TEST_DIR/mcp-transition.out"
-grep -q '^N8N_MCP_PATH=hermes$' "$TEST_DIR/mcp-transition/data/hermes/.env"
-grep -q '^N8N_MCP_URL="http://n8n:5678/mcp/hermes"$' "$TEST_DIR/mcp-transition/data/hermes/.env"
-test "$(grep -c '^N8N_MCP_TOKEN=[0-9a-f]\{64\}$' "$TEST_DIR/mcp-transition/data/hermes/.env")" = 1
+grep -q '^N8N_MCP_MODE=trigger$' "$TEST_DIR/mcp-transition/.env"
+grep -q '^N8N_TRIGGER_MCP_URL="http://n8n:5678/mcp/hermes"$' "$TEST_DIR/mcp-transition/data/hermes/.env"
+grep -q '^N8N_INSTANCE_MCP_URL="http://n8n:5678/mcp-server/http"$' "$TEST_DIR/mcp-transition/data/hermes/.env"
+test "$(grep -c '^N8N_TRIGGER_MCP_TOKEN=[0-9a-f]\{64\}$' "$TEST_DIR/mcp-transition/data/hermes/.env")" = 1
 test "$(grep -c '^  n8n:$' "$TEST_DIR/mcp-transition/data/hermes/config.yaml")" = 1
 test "$(grep -c '^  # >>> hermes-stack n8n mcp (managed) >>>$' "$TEST_DIR/mcp-transition/data/hermes/config.yaml")" = 1
-transition_token="$(sed -n 's/^N8N_MCP_TOKEN=//p' "$TEST_DIR/mcp-transition/data/hermes/.env")"
+transition_token="$(sed -n 's/^N8N_TRIGGER_MCP_TOKEN=//p' "$TEST_DIR/mcp-transition/data/hermes/.env")"
 ! grep -Fq "$transition_token" "$TEST_DIR/mcp-transition.out"
+
+# Selecting Instance-level MCP without a UI-generated personal token records a
+# pending mode but must not render an unusable Hermes MCP entry or invent a token.
+cp -a "$TEST_DIR/n8n-disabled" "$TEST_DIR/instance-pending"
+sed -i 's/^COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,caddy$/COMPOSE_PROFILES=9router,smart-router,hermes,open-webui,n8n,caddy/' \
+  "$TEST_DIR/instance-pending/.env"
+printf '%s\n' n n n y n y n n y 1 n \
+  | "$TEST_DIR/instance-pending/install.sh" --dry-run \
+    > "$TEST_DIR/instance-pending.out"
+grep -q '^N8N_MCP_MODE=instance$' "$TEST_DIR/instance-pending/.env"
+grep -q '^N8N_INSTANCE_MCP_URL="http://n8n:5678/mcp-server/http"$' "$TEST_DIR/instance-pending/data/hermes/.env"
+! grep -q '^N8N_INSTANCE_MCP_TOKEN=' "$TEST_DIR/instance-pending/data/hermes/.env"
+! grep -q '^  n8n:$' "$TEST_DIR/instance-pending/data/hermes/config.yaml"
+grep -q 'Instance-level MCP is selected but pending' "$TEST_DIR/instance-pending.out"
 
 copy_fixture "$TEST_DIR/no-caddy"
 rm -f "$TEST_DIR/no-caddy/.env"

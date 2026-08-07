@@ -4,19 +4,26 @@
 
 - The opt-in `n8n` Compose profile runs `n8nio/n8n:latest`, persists state in
   `data/n8n/`, and supports localhost, trusted-LAN, or Caddy HTTPS editor access.
-- After owner setup, the operator can store an n8n API key silently and use the
-  public API reconciler to create encrypted credentials plus two published,
-  stack-owned workflows: authenticated MCP Calculator tools and n8n-user-
-  authenticated hosted chat routed through Smart Router with model `auto`.
+- Hermes-to-n8n MCP has explicit `instance`, `trigger`, and `off` modes. Trigger
+  mode publishes a narrow Calculator workflow; Instance mode uses an n8n-generated
+  user-bound personal token for broad management tools; switching away unpublishes
+  but retains the managed Trigger workflow and credential.
+- After owner setup, the operator can store a separate n8n API key silently and use
+  the public API reconciler to provision n8n-user-authenticated hosted chat through
+  Smart Router model `auto` or direct 9router model `ai` when Smart Router is absent.
 - Reconciliation persists managed IDs/fingerprints, is idempotent, fails closed on
-  name collisions or manual drift, supports transactional token rotation, and
-  permits removing the stored owner API key after bootstrap. Runtime verification
-  checks fingerprints, access policy, Calculator output, and MCP session closure.
+  name collisions or manual drift, and supports transactional Trigger-token
+  rotation. Mode-specific verification checks fingerprints, publication/access
+  policy, a bounded read-only Instance search or Trigger Calculator output, and MCP
+  session closure.
 - Hermes can install reviewed skills and exact-version unprivileged Python/npm
-  packages through staged or one-time manual Telegram approvals. Generic terminal
-  and code-execution toolsets are disabled so the broker is the only local package
-  path; OS installs, privileged execution, Docker access, and reusable or smart
-  package approval are blocked.
+  packages through staged or one-time manual Telegram approvals. Stack execution
+  brokers add exact one-time-approved sandbox, pinned-profile SSH, and structured
+  host Docker operations while keeping the Docker socket and SSH keys out of
+  Hermes. Execution is locally opt-in with an operator allowlist and persistent
+  anti-replay nonces. Upstream terminal/code-execution are also enabled by explicit
+  operator choice, with the documented consequence that they can read Hermes
+  credentials after manual approval.
 - Disabling n8n stops and removes its containers while preserving workflow data.
   Backups must keep `N8N_ENCRYPTION_KEY` coupled with `data/n8n/` and should retain
   `data/stack-secrets/n8n-bootstrap-state.json` for managed-object ownership.

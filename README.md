@@ -322,12 +322,32 @@ not this repository's MIT license. Review that license for your use case.
 
 ### Bootstrap the managed MCP and hosted-chat workflows
 
-When Hermes, n8n, 9router, and Smart Router are selected, opt in when the wizard
-asks whether Hermes may call n8n tools. Hermes uses the fixed private endpoint
-`http://n8n:5678/mcp/hermes`; the public editor URL and host/LAN port are not used
-for this connection.
+When Hermes, n8n, and 9router are selected, the installer can connect Hermes to
+n8n in one of three explicit modes:
 
-After claiming the n8n owner account, create an API key in n8n. Capture it through
+- **Instance-level MCP** uses `http://n8n:5678/mcp-server/http`. It carries the
+  permissions of the n8n user who generated the personal token and exposes broad
+  workflow, execution, credential-metadata, and data-table management tools.
+- **MCP Server Trigger** uses `http://n8n:5678/mcp/hermes` and exposes only tools
+  explicitly connected in the managed workflow (Calculator by default).
+- **off** removes only the stack-managed Hermes MCP entry.
+
+Both endpoints stay on the private Docker network; the public editor URL and
+host/LAN port are not used by Hermes. Selecting Instance mode on a fresh install
+is initially pending: the stack never generates this personal token. Claim the
+owner account, then use **Settings → Instance-level MCP → Connection details** to
+enable access and generate/copy its token. Paste it only into the silent prompt:
+
+```bash
+./manage.sh set-n8n-instance-mcp-token
+```
+
+Never paste an Instance token in chat or pass it as a command argument. Regenerating
+it in n8n immediately revokes the previous token; after regeneration, run the same
+command to validate, store, and activate the replacement.
+
+Hosted-chat reconciliation and Trigger workflow publication use a separate n8n
+owner API key. Create it after claiming the owner account, then capture it through
 a silent prompt so it does not enter shell history or process arguments:
 
 ```bash
@@ -335,41 +355,50 @@ a silent prompt so it does not enter shell history or process arguments:
 ./manage.sh bootstrap-n8n
 ```
 
-The bootstrap command uses n8n's public API to create encrypted credentials and
-publish two stack-owned workflows:
+The public-API reconciler always creates or updates **Hermes Hosted Chat
+(managed)**: an n8n-user-authenticated Chat Trigger → AI Agent → OpenAI Chat Model
+using a dedicated n8n 9router key. With Smart Router installed it targets
+`http://smart-router:8080/v1` and model `auto`; without Smart Router it targets
+`http://nine-router:20128/v1` and model `ai`. Anonymous chat requests are rejected.
 
-- **Hermes MCP Tools (managed)**: authenticated MCP Server Trigger at `hermes`
-  with a harmless Calculator tool.
-- **Hermes Hosted Chat (managed)**: n8n-user-authenticated hosted Chat Trigger →
-  AI Agent → OpenAI Chat Model `auto` at `http://smart-router:8080/v1` using a
-  dedicated n8n 9router key. Open it while signed in to n8n; anonymous requests
-  are rejected.
+In Trigger mode the reconciler also creates/publishes **Hermes MCP Tools
+(managed)** with an encrypted Bearer credential and Calculator. In Instance or off
+mode, an existing managed Trigger workflow is unpublished but retained together
+with its encrypted credential, stable IDs, fingerprint, and Trigger token. Switching
+back to Trigger republishes the same objects rather than creating duplicates. The
+stack does not globally disable Instance-level MCP when switching away because
+other n8n clients may use it.
 
-Model `auto` is interpreted by Smart Router and routed to `combo-fast`,
-`combo-standard`, or `combo-strong`; no 9router combo named `auto` is needed.
-The command persists only managed IDs and fingerprints in
-`data/stack-secrets/n8n-bootstrap-state.json`, restarts Hermes after publication,
-and verifies the integration. Verification checks both managed workflow
-fingerprints and publication state, proves anonymous hosted-chat access is denied,
-invokes Calculator through authenticated MCP, and closes the established MCP
-session. It never prints the owner API key, MCP token, or router key. Rerunning
-`./manage.sh reconcile-n8n` is idempotent. Name collisions or manual edits to
-stack-owned objects fail closed; clone a managed workflow before customizing it.
+The command persists only non-secret managed IDs, fingerprints, and routing
+metadata in `data/stack-secrets/n8n-bootstrap-state.json`, recreates Hermes, and
+runs mode-specific verification. Instance verification lists expected management
+tools but invokes only a bounded read-only workflow search. Trigger verification
+invokes Calculator with `2+3`; off mode skips MCP protocol probing. All modes verify
+hosted-chat authentication and managed publication state. Name collisions or
+manual edits to stack-owned objects fail closed; clone a managed workflow before
+customizing it.
 
 Useful lifecycle commands are:
 
 ```bash
+./manage.sh set-n8n-mcp-mode instance
+./manage.sh set-n8n-mcp-mode trigger
+./manage.sh set-n8n-mcp-mode off
+./manage.sh set-n8n-instance-mcp-token
+./manage.sh remove-n8n-instance-mcp-token
 ./manage.sh verify-n8n
 ./manage.sh reconcile-n8n
-./manage.sh rotate-n8n-token
+./manage.sh rotate-n8n-trigger-token
 ./manage.sh remove-n8n-bootstrap-key
 ```
 
-Removing the bootstrap API key retains IDs and fingerprints, but later API
-reconciliation and rotation require storing a valid key again. Keep the Bearer
-token secret; Hermes stores it only in mode-`0600` `data/hermes/.env`, while
-`config.yaml` contains environment references. n8n stores its copy in the
-encrypted managed credential.
+The compatibility alias `./manage.sh rotate-n8n-token` rotates only the retained
+Trigger credential. Removing the owner API key retains managed IDs/fingerprints,
+but later reconciliation, publication changes, and Trigger rotation require a valid
+key again. Both mode-specific MCP tokens are stored only in mode-`0600`
+`data/hermes/.env`; `config.yaml` contains environment references. The owner API
+key is stored separately in mode-`0600`
+`data/stack-secrets/n8n-bootstrap.env`.
 
 If Caddy publishes n8n, the generated `/mcp*` route disables compression and sets
 `flush_interval -1` so MCP SSE/streaming responses are not buffered. Hermes still
@@ -521,10 +550,13 @@ reconfiguration without exposing another web administration service.
 ./manage.sh logs caddy
 ./manage.sh restart-hermes
 ./manage.sh set-n8n-api-key
+./manage.sh set-n8n-instance-mcp-token
+./manage.sh remove-n8n-instance-mcp-token
+./manage.sh set-n8n-mcp-mode instance|trigger|off
 ./manage.sh bootstrap-n8n
 ./manage.sh reconcile-n8n
 ./manage.sh verify-n8n
-./manage.sh rotate-n8n-token
+./manage.sh rotate-n8n-trigger-token
 ./manage.sh remove-n8n-bootstrap-key
 ./manage.sh configure
 ```
@@ -564,11 +596,13 @@ request and requires a fresh approval from an interactive Telegram session while
 `approvals.mode` is `manual`. A session-wide, permanent, smart/model-mediated,
 YOLO, cron, or background authorization cannot approve a package operation.
 
-To make the broker the only local installation path, the managed Hermes config
-disables the generic `terminal` and `code_execution` toolsets. This is the primary
-confinement boundary; the plugin's raw-command checks remain defense in depth.
-Hermes can still use ordinary non-execution tools, staged skills, MCP tools, and
-the four package-broker tools.
+The managed Hermes config enables upstream `terminal` and `code_execution` by
+explicit operator choice. They run as the Hermes gateway uid and can read
+`/opt/data/.env`; manual approval remains mandatory. Use
+`./manage.sh set-upstream-terminal disabled` to remove them. The isolated stack
+execution tools below are preferred for routine work because they seal and
+approve each exact operation once. The package plugin's raw-command checks are
+defense in depth, not isolation from an approved local terminal command.
 
 Supported package specifications are deliberately narrow:
 
@@ -583,6 +617,78 @@ package, exact version, destination, and normalized command. Packages persist in
 root access, Docker access, or additional host mounts. Run `./manage.sh doctor`
 to check that the policy plugin is enabled and mounted read-only.
 
+### Approved terminal, SSH, and Docker execution
+
+Execution brokers are off by default. Use a second BotFather bot dedicated only
+to execution approval; do not reuse the Hermes bot. Configure its token through
+silent input, select Telegram operators, then enable only the desired capabilities:
+
+```bash
+./manage.sh set-execution-approval-bot-token
+./manage.sh set-execution-users 123456789
+./manage.sh enable-execution sandbox
+./manage.sh enable-execution ssh
+./manage.sh enable-execution docker
+./manage.sh execution-status
+```
+
+`set-execution-users` accepts only numeric IDs already present in
+`TELEGRAM_ALLOWED_USERS`. Every sandbox, SSH, and Docker operation is prepared and
+sealed to that user, Telegram session, policy generation, and canonical digest.
+The independent `execution-approver` recomputes the complete summary and digest,
+sends them to the matching private numeric chat through its dedicated bot, and
+accepts one inline approval or denial. The broker persists and atomically consumes
+that exact signed grant once. This independent signed decision is the broker's
+trust root. Hermes's native approval prompt remains defense in depth and accepts
+only `once`; it is not an independently enforced boundary against compromised
+code already running inside Hermes.
+
+Hermes cannot read the approval bot token or private signing key. Brokers hold only
+the public verification key; the approver has no control secret, Docker socket, SSH
+profiles, or capability database. All three services have no published ports. The
+approval bot setup also creates a separate broker-to-approver request secret, which
+cannot sign grants. Execution remains off until token, keys, users, and a feature
+are explicitly configured.
+
+- **Sandbox:** short-lived non-root container; only `data/execution-workspace`
+  persists; network is off unless the exact operation requests egress; `NET_RAW`
+  is separate.
+- **SSH:** `./manage.sh add-ssh-profile NAME` creates/imports a dedicated key and
+  requires an independently verified host fingerprint. Host, user, port, key,
+  and SSH flags are never model-controlled. Use `verify-ssh-profile` after
+  installing the displayed public key remotely.
+- **Docker:** only `hermes-execution-docker-broker` receives the host socket.
+  Hermes, n8n, SSH broker, approver, and sandboxes never receive it. Images must
+  be digest-pinned or immutable local IDs. Privileged mode, host namespaces,
+  devices, capabilities, ports, and every bind mount appear in the approval.
+  Protected stack containers cannot be inspected, logged, changed, or removed by
+  name or resolved ID; authority-path binds and the execution-control network are
+  denied. Inspect returns a redacted view without environment values, mounts, or
+  labels.
+
+Docker socket authority is host-root-equivalent, and an SSH `root` or
+`sudo-nopasswd` profile is remote-root-equivalent. Exact approval controls when
+an action runs; it does not make an approved action harmless or reversible.
+Disablement revokes pending capabilities but does not undo remote commands,
+container effects, or remove a public key from remote `authorized_keys`.
+
+Other management commands:
+
+```bash
+./manage.sh add-execution-user ID
+./manage.sh remove-execution-user ID
+./manage.sh disable-execution all
+./manage.sh rotate-execution-broker-secret
+./manage.sh remove-ssh-profile NAME
+./manage.sh purge-execution
+./manage.sh set-agent-max-turns 90
+```
+
+When Telegram reports `Iteration budget exhausted`, the turn stopped safely.
+Send another message to continue from its summary, or raise the bounded budget
+with `set-agent-max-turns`; that increases tool/model cost but grants no extra
+execution authority.
+
 ### 9router web search
 
 The installer writes the aliases expected by compatible 9router search skills:
@@ -593,9 +699,11 @@ operator configures a supported provider such as Tavily, Exa, Brave, or Serper
 in 9router. Install any web-search skill only through the staged skill review
 flow above.
 
-The generated n8n MCP workflow intentionally exposes only Calculator, and the
-hosted-chat workflow has no search tool. Clone a managed workflow before adding
-custom n8n tools; direct edits to a stack-owned workflow are detected as drift.
+The generated n8n Trigger-mode MCP workflow intentionally exposes only
+Calculator, and the hosted-chat workflow has no search tool. Instance-level MCP
+is broader and exposes n8n management tools permitted to its token's n8n user.
+Clone a managed workflow before adding custom Trigger tools; direct edits to a
+stack-owned workflow are detected as drift.
 
 ### Backend key
 

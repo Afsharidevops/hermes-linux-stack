@@ -22,20 +22,35 @@ jobs:
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("scripts").glob("*.py")]'
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("plugins").rglob("*.py")]'
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("smart-router/src").rglob("*.py")]'
+          python3 -c 'import ast, pathlib; [ast.parse(path.read_text(), filename=str(path)) for path in pathlib.Path("execution-broker/src").rglob("*.py")]'
       - name: Test stack integrations
         run: |
-          python3 -m unittest -v tests/test_stack_package_policy.py
+          python3 -m unittest -v tests/test_stack_package_policy.py tests/test_stack_execution_policy.py tests/test_execution_broker.py
           node --test tests/test-bootstrap-n8n.mjs
           node --test tests/test-verify-n8n.mjs
+          tests/test-manage-n8n.sh
       - name: Test Smart Router
         run: |
           python3 -m venv /tmp/smart-router-venv
           /tmp/smart-router-venv/bin/pip install -r smart-router/requirements-dev.txt
           PYTHONPATH=smart-router/src /tmp/smart-router-venv/bin/pytest -q smart-router/tests
-      - name: Build Smart Router image
-        run: docker build -t hermes-smart-router:test smart-router
-      - name: Validate Compose
-        run: cp .env.example .env && docker compose config --quiet
+      - name: Build stack-owned images
+        run: |
+          docker build -t hermes-smart-router:test smart-router
+          docker build -t hermes-execution-broker:test execution-broker
+      - name: Validate Compose execution boundaries
+        run: |
+          cp .env.example .env
+          mkdir -p data/stack-secrets/execution/{docker-state,ssh-state,ssh} data/execution-workspace
+          touch data/stack-secrets/execution/{control-secret,users}
+          sed -i "s|EXECUTION_WORKSPACE_HOST_PATH=.*|EXECUTION_WORKSPACE_HOST_PATH=$PWD/data/execution-workspace|" .env
+          docker compose config --quiet
+          rendered="$(docker compose --profile execution-docker --profile execution-ssh config)"
+          test "$(grep -c '/var/run/docker.sock:/var/run/docker.sock' <<<"$rendered")" -eq 1
+          ! grep -A25 '^  hermes:' <<<"$rendered" | grep -q docker.sock
+          ! grep -A45 '^  execution-ssh-broker:' <<<"$rendered" | grep -q docker.sock
+          ! grep -A45 '^  execution-docker-broker:' <<<"$rendered" | grep -q 'published:'
+          ! grep -A45 '^  execution-ssh-broker:' <<<"$rendered" | grep -q 'published:'
       - name: Test interactive installer
         run: tests/smoke.sh
       - name: Ensure secrets are ignored
