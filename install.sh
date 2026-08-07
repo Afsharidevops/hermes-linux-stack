@@ -666,7 +666,7 @@ caddy_image="$(existing_env_value CADDY_IMAGE)"; caddy_image="${caddy_image:-cad
 execution_features="$(existing_env_value EXECUTION_FEATURES)"
 execution_generation="$(existing_env_value EXECUTION_POLICY_GENERATION)"; execution_generation="${execution_generation:-0}"
 execution_workspace_generation="$(existing_env_value EXECUTION_WORKSPACE_GENERATION)"; execution_workspace_generation="${execution_workspace_generation:-$execution_generation}"
-execution_broker_image="$(existing_env_value EXECUTION_BROKER_IMAGE)"; execution_broker_image="${execution_broker_image:-hermes-execution-broker:0.1.0}"
+execution_broker_image="$(existing_env_value EXECUTION_BROKER_IMAGE)"; execution_broker_image="${execution_broker_image:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}"
 execution_sandbox_image="$(existing_env_value EXECUTION_SANDBOX_IMAGE)"; execution_sandbox_image="${execution_sandbox_image:-python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419}"
 execution_run_as="$(existing_env_value EXECUTION_RUN_AS)"; execution_run_as="${execution_run_as:-$execution_owner_uid:$execution_owner_gid}"
 execution_docker_gid="$(existing_env_value EXECUTION_DOCKER_GID)"; execution_docker_gid="${execution_docker_gid:-$(stat -c %g /var/run/docker.sock 2>/dev/null || printf 999)}"

@@ -144,9 +144,7 @@ services:
   # reachable only from Hermes on the internal control network, with the secret.
   execution-docker-broker:
     profiles: ["execution-docker"]
-    image: ${EXECUTION_BROKER_IMAGE:-hermes-execution-broker:0.1.0}
-    build:
-      context: ./execution-broker
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}
     container_name: hermes-execution-docker-broker
     restart: unless-stopped
     # Runs as the local operator so mode-0600 broker state stays unreadable to
@@ -194,9 +192,7 @@ services:
   # No Docker socket. The only service that can read SSH private keys.
   execution-ssh-broker:
     profiles: ["execution-ssh"]
-    image: ${EXECUTION_BROKER_IMAGE:-hermes-execution-broker:0.1.0}
-    build:
-      context: ./execution-broker
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}
     container_name: hermes-execution-ssh-broker
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
@@ -239,9 +235,7 @@ services:
   # Hermes control secret, or execution capability database.
   execution-approver:
     profiles: ["execution-approval"]
-    image: ${EXECUTION_BROKER_IMAGE:-hermes-execution-broker:0.1.0}
-    build:
-      context: ./execution-broker
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.0@sha256:8b2bec79cd958339808469b378673285ba30b67910d3a15558b986efedf5c6a5}
     container_name: hermes-execution-approver
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"

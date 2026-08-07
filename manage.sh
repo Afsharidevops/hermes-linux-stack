@@ -274,6 +274,42 @@ PY
   mv "$tmp" "$file"
 }
 
+enable_hermes_execution_plugin() {
+  local file="$ROOT_DIR/data/hermes/config.yaml" tmp
+  [[ -f "$file" ]] || { printf 'Hermes config is missing.\n' >&2; return 1; }
+  tmp="$(mktemp "$file.tmp.XXXXXX")"
+  if ! python3 - "$file" > "$tmp" <<'PY'
+import re
+import sys
+
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+starts = [i for i, line in enumerate(lines) if re.fullmatch(r"plugins:\s*", line)]
+if len(starts) > 1:
+    raise SystemExit("Duplicate top-level plugins sections are unsafe")
+if not starts:
+    if lines and lines[-1]:
+        lines.append("")
+    lines.extend(["plugins:", "  enabled:", "    - stack-execution-policy"])
+else:
+    start = starts[0]
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r"^[^\s#]", lines[i])), len(lines))
+    if not any(re.fullmatch(r"\s*-\s*stack-execution-policy\s*", line) for line in lines[start + 1:end]):
+        enabled = next((i for i in range(start + 1, end) if re.fullmatch(r"  enabled:\s*", lines[i])), None)
+        if enabled is None:
+            lines[end:end] = ["  enabled:", "    - stack-execution-policy"]
+        else:
+            lines.insert(enabled + 1, "    - stack-execution-policy")
+print("\n".join(lines) + "\n", end="")
+PY
+  then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  chmod --reference="$file" "$tmp" || { rm -f -- "$tmp"; return 1; }
+  chown --reference="$file" "$tmp" || { rm -f -- "$tmp"; return 1; }
+  mv "$tmp" "$file"
+}
+
 restart_hermes() {
   compose up -d --no-deps --force-recreate hermes
 }
@@ -469,9 +505,11 @@ ensure_execution_paths() {
   local root file
   ensure_stack_secrets_dir || return 1
   root="$(execution_root)"
-  for file in "$root" "$root/docker-state" "$root/ssh-state" "$root/approver-state" "$root/ssh"; do
+  [[ ! -L "$root" ]] || { printf 'Refusing unsafe execution symlink: %s\n' "$root" >&2; return 1; }
+  install -d -m 0700 "$root"
+  for file in "$root/docker-state" "$root/ssh-state" "$root/approver-state" "$root/ssh"; do
     [[ ! -L "$file" ]] || { printf 'Refusing unsafe execution symlink: %s\n' "$file" >&2; return 1; }
-    install -d -m 0700 "$file"
+    install -d -o 10003 -g 10003 -m 0700 "$file"
   done
   for file in "$root/control-secret" "$root/approval-request-secret" \
     "$root/approval-signing-key.pem" "$root/approval-public-key.pem" \
@@ -479,10 +517,11 @@ ensure_execution_paths() {
     [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
       printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
     }
-    [[ -e "$file" ]] || install -m 0600 /dev/null "$file"
+    [[ -e "$file" ]] || install -o 10003 -g 10003 -m 0600 /dev/null "$file"
+    chown 10003:10003 "$file"
     chmod 600 "$file"
   done
-  install -d -m 0700 "$ROOT_DIR/data/execution-workspace"
+  install -d -o 10002 -g 10002 -m 0700 "$ROOT_DIR/data/execution-workspace"
 }
 
 execution_features() { env_value "$ENV_FILE" EXECUTION_FEATURES; }
@@ -509,6 +548,7 @@ write_execution_users() {
   root="$(execution_root)"
   tmp="$(mktemp "$root/users.tmp.XXXXXX")"
   printf '%s\n' "$users" > "$tmp"
+  chown 10003:10003 "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$root/users"
 }
@@ -541,9 +581,9 @@ apply_execution_features() {
   rotate_execution_generation
   sync_execution_profiles
   if [[ -n "$features" ]]; then
-    compose build execution-approver execution-docker-broker execution-ssh-broker
+    compose pull execution-approver execution-docker-broker execution-ssh-broker
   fi
-  compose up -d --remove-orphans
+  compose up -d --no-build --remove-orphans
 }
 
 set_execution_feature() {
@@ -1017,10 +1057,27 @@ case "$command" in
           printf 'WARNING: execution users are not a subset of TELEGRAM_ALLOWED_USERS.\n'
         fi
         rendered="$(compose config 2>/dev/null || true)"
-        socket_count="$(grep -c '/var/run/docker.sock:/var/run/docker.sock' <<< "$rendered" || true)"
-        [[ "$socket_count" == 1 ]] \
-          && printf 'Docker socket boundary: mounted once, Docker broker only\n' \
-          || printf 'WARNING: expected exactly one Docker socket mount; found %s.\n' "$socket_count"
+        rendered_json="$(compose config --format json 2>/dev/null || true)"
+        socket_owners="$(python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except (json.JSONDecodeError, TypeError):
+    raise SystemExit(0)
+for name, service in (data.get("services") or {}).items():
+    for volume in service.get("volumes") or []:
+        source = volume.get("source", "") if isinstance(volume, dict) else str(volume).split(":", 1)[0]
+        target = volume.get("target", "") if isinstance(volume, dict) else ""
+        if source == "/var/run/docker.sock" or target == "/var/run/docker.sock":
+            print(name)
+' <<< "$rendered_json")"
+        socket_count="$(grep -c . <<< "$socket_owners" || true)"
+        if [[ "$socket_count" == 1 && "$socket_owners" == execution-docker-broker ]]; then
+          printf 'Docker socket boundary: mounted once, Docker broker only\n'
+        else
+          printf 'WARNING: expected exactly one Docker socket mount on Docker broker; found %s (%s).\n' \
+            "$socket_count" "${socket_owners:-none}"
+        fi
         if grep -A35 '^  hermes:' <<< "$rendered" | grep -q docker.sock; then
           printf 'WARNING: Hermes has the Docker socket; remove it immediately.\n'
         fi
@@ -1283,22 +1340,31 @@ case "$command" in
     printf 'Execution user %s removed; pending operations revoked.\n' "$user"
     ;;
   enable-execution|disable-execution)
-    feature="${2:-}"
-    [[ -z "${3:-}" && "$feature" =~ ^(sandbox|ssh|docker|all)$ ]] || {
+    requested_feature="${2:-}"
+    [[ -z "${3:-}" && "$requested_feature" =~ ^(sandbox|ssh|docker|all)$ ]] || {
       printf 'Usage: ./manage.sh %s sandbox|ssh|docker|all\n' "$1" >&2; exit 2;
     }
+    if [[ "$1" == enable-execution ]]; then
+      features="$(set_execution_feature "$requested_feature" true)"
+    else
+      features="$(set_execution_feature "$requested_feature" false)"
+    fi
     ensure_execution_paths
     if [[ "$1" == enable-execution ]]; then
       [[ -n "$(execution_users)" ]] || { printf 'Set execution users first.\n' >&2; exit 1; }
-      [[ -s "$(execution_root)/approval-bot-token" \
+      [[ -s "$(execution_root)/control-secret" \
+        && -s "$(execution_root)/approval-bot-token" \
         && -s "$(execution_root)/approval-request-secret" \
         && -s "$(execution_root)/approval-signing-key.pem" \
         && -s "$(execution_root)/approval-public-key.pem" ]] || {
         printf 'Configure the dedicated approval bot first: ./manage.sh set-execution-approval-bot-token\n' >&2; exit 1;
       }
-      features="$(set_execution_feature "$feature" true)"
-    else
-      features="$(set_execution_feature "$feature" false)"
+      enable_hermes_execution_plugin
+      replace_env_value "$ENV_FILE" EXECUTION_DOCKER_GID "$(stat -c %g /var/run/docker.sock 2>/dev/null || printf 999)"
+      replace_env_value "$ENV_FILE" EXECUTION_WORKSPACE_HOST_PATH "$ROOT_DIR/data/execution-workspace"
+      [[ -n "$(env_value "$ENV_FILE" EXECUTION_SANDBOX_IMAGE)" ]] || \
+        replace_env_value "$ENV_FILE" EXECUTION_SANDBOX_IMAGE \
+          'python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419'
     fi
     apply_execution_features "$features"
     printf 'Execution features now: %s\n' "${features:-off}"
@@ -1318,16 +1384,21 @@ case "$command" in
     }
     root="$(execution_root)"
     tmp="$(mktemp "$root/approval-bot-token.tmp.XXXXXX")"
-    printf '%s\n' "$token" > "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/approval-bot-token"
+    printf '%s\n' "$token" > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/approval-bot-token"
+    if [[ ! -s "$root/control-secret" ]]; then
+      tmp="$(mktemp "$root/control-secret.tmp.XXXXXX")"
+      random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/control-secret"
+    fi
     if [[ ! -s "$root/approval-request-secret" ]]; then
       tmp="$(mktemp "$root/approval-request-secret.tmp.XXXXXX")"
-      random_hex 32 > "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/approval-request-secret"
+      random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/approval-request-secret"
     fi
     if [[ ! -s "$root/approval-signing-key.pem" || ! -s "$root/approval-public-key.pem" ]]; then
       private_tmp="$(mktemp "$root/approval-signing-key.tmp.XXXXXX")"
       public_tmp="$(mktemp "$root/approval-public-key.tmp.XXXXXX")"
       openssl genpkey -algorithm ED25519 -out "$private_tmp" >/dev/null 2>&1
       openssl pkey -in "$private_tmp" -pubout -out "$public_tmp" >/dev/null 2>&1
+      chown 10003:10003 "$private_tmp" "$public_tmp"
       chmod 600 "$private_tmp" "$public_tmp"
       mv "$private_tmp" "$root/approval-signing-key.pem"
       mv "$public_tmp" "$root/approval-public-key.pem"
@@ -1340,7 +1411,7 @@ case "$command" in
     ensure_execution_paths
     secret_file="$(execution_root)/control-secret"
     tmp="$(mktemp "$(execution_root)/control-secret.tmp.XXXXXX")"
-    random_hex 32 > "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$secret_file"
+    random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$secret_file"
     rotate_execution_generation
     compose up -d --force-recreate hermes execution-approver execution-docker-broker execution-ssh-broker
     printf 'Execution broker secret rotated; pending operations revoked.\n'
@@ -1399,7 +1470,9 @@ import json, sys
 path, host, port, user, authority, fingerprint = sys.argv[1:]
 open(path, "w", encoding="utf-8").write(json.dumps({"host": host, "port": int(port), "user": user, "authority": authority, "fingerprint": fingerprint}, indent=2) + "\n")
 PY
-    chmod 600 "$stage/profile.json" "$stage/known_hosts"
+    chown -R 10003:10003 "$stage"
+    chmod 700 "$stage"
+    chmod 600 "$stage/profile.json" "$stage/known_hosts" "$stage/identity" "$stage/identity.pub"
     printf 'Install this public key on %s@%s, then verify:\n' "$ssh_user" "$host"
     cat "$stage/identity.pub"
     mv "$stage" "$target"
