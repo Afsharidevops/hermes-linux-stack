@@ -19,6 +19,7 @@ APPROVAL_PRIVATE_KEY_PATH=Path(os.environ.get("APPROVER_SIGNING_KEY_FILE","/run/
 APPROVAL_PUBLIC_KEY_PATH=Path(os.environ.get("BROKER_APPROVAL_PUBLIC_KEY_FILE","/run/secrets/execution-approval-public-key"))
 APPROVAL_BOT_TOKEN_PATH=Path(os.environ.get("EXECUTION_APPROVAL_BOT_TOKEN_FILE","/run/secrets/execution-approval-bot-token"))
 APPROVAL_USERS_PATH=Path(os.environ.get("EXECUTION_APPROVAL_USERS_FILE","/run/secrets/execution-approval-users"))
+SSH_INTEGRITY_SECRET_PATH=Path(os.environ.get("BROKER_SSH_PROFILE_INTEGRITY_SECRET_FILE","/run/secrets/execution-ssh-profile-integrity"))
 APPROVER_URL=os.environ.get("BROKER_APPROVER_URL","http://execution-approver:8751")
 CALLBACK_URLS={"docker":os.environ.get("APPROVER_DOCKER_CALLBACK_URL","http://execution-docker-broker:8750/approval-grant"),"ssh":os.environ.get("APPROVER_SSH_CALLBACK_URL","http://execution-ssh-broker:8750/approval-grant")}
 SANDBOX_IMAGE=os.environ.get("SANDBOX_IMAGE",""); WORKSPACE_SOURCE=os.environ.get("EXECUTION_WORKSPACE",""); WORKSPACE_GENERATION=os.environ.get("EXECUTION_WORKSPACE_GENERATION","")
@@ -89,7 +90,7 @@ def _prepare(p):
     try:
         r=schema.validate(f,p.get("request"))
         if f=="local": r.update(resolved_image_id=_engine.resolve_image(SANDBOX_IMAGE),workspace_generation=WORKSPACE_GENERATION)
-        elif f=="ssh": r["sealed_profile"]=ssh_module.seal_profile(ssh_module.load_profile(r["profile"]))
+        elif f=="ssh": r["sealed_profile"]=ssh_module.seal_profile(ssh_module.load_profile(r["profile"],integrity_key=ssh_module.read_integrity_secret(SSH_INTEGRITY_SECRET_PATH)))
         elif f=="docker" and r["action"]=="run":
             r["resolved_image_id"]=_engine.resolve_image(r["image"])
             if r["network"]!="none":r["resolved_network_id"]=_engine.resolve_network(r["network"])["id"]
@@ -142,8 +143,8 @@ def _execute(p):
             if r.get("resolved_image_id")!=_engine.resolve_image(SANDBOX_IMAGE) or r.get("workspace_generation")!=WORKSPACE_GENERATION:return {"error":"The sandbox image or workspace changed after approval."}
             result=run_sandbox(_engine,r,image=r["resolved_image_id"],workspace_source=WORKSPACE_SOURCE,egress_network=EGRESS_NETWORK);action="local"
         elif f=="ssh":
-            profile=ssh_module.load_profile(r["profile"])
-            if not ssh_module.profile_matches(profile,r.get("sealed_profile",{})):return {"error":"The SSH target, host key, or identity changed after approval."}
+            profile=ssh_module.load_profile(r["profile"],integrity_key=ssh_module.read_integrity_secret(SSH_INTEGRITY_SECRET_PATH))
+            if not ssh_module.profile_matches(profile,r.get("sealed_profile",{})):return {"error":"The SSH target, host key, or credential changed after approval."}
             result=ssh_module.run_ssh(r,profile);action="ssh:"+r["profile"]
         else:
             _refresh_protected_ids();approval.check_floor(f,r)
@@ -198,13 +199,13 @@ def _run_container(r,start):
     return {"returncode":code,"output":out[-schema.MAX_OUTPUT_CHARS:],"container":cid[:12],"truncated":len(out)>schema.MAX_OUTPUT_CHARS,"timed_out":timed,"duration":round(time.monotonic()-start,3)}
 def _cancel(p):_store.cancel(str(p.get("capability","")));return {"status":"cancelled"}
 def _discover(p):
-    if p.get("kind")=="ssh_profiles" and _enabled("ssh"):return {"status":"ok","profiles":ssh_module.list_profiles()}
+    if p.get("kind")=="ssh_profiles" and _enabled("ssh"):return {"status":"ok","profiles":ssh_module.list_profiles(integrity_key=ssh_module.read_integrity_secret(SSH_INTEGRITY_SECRET_PATH))}
     if p.get("kind")=="docker_containers" and _enabled("docker"):return {"status":"ok","containers":_engine.list_containers(all_containers=True,timeout=30)}
     return {"error":"That discovery kind is not available."}
 def _health(_):
     problem=_runtime();checks={"mode":MODE,"features":list(ENABLED_FEATURES)}
     if MODE=="docker":checks["engine"]="ok" if _engine.ping() else "unreachable"
-    elif MODE=="ssh":checks["profiles"]=len(ssh_module.list_profiles())
+    elif MODE=="ssh":checks["profiles"]=len(ssh_module.list_profiles(integrity_key=ssh_module.read_integrity_secret(SSH_INTEGRITY_SECRET_PATH)))
     else:checks["bot"]="configured" if _telegram and _telegram.configured() else "missing"
     return {"status":"error","error":problem,"checks":checks} if problem else {"status":"ok","checks":checks}
 ROUTES={"/prepare":_prepare,"/execute":_execute,"/cancel":_cancel,"/discover":_discover,"/approval-grant":_accept,"/request":_request}

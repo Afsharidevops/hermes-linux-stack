@@ -48,6 +48,7 @@ Commands:
   remove-execution-user ID      Remove one execution user
   add-ssh-profile NAME          Create/import and pin one SSH profile
   verify-ssh-profile NAME       Verify pinned host key and SSH access
+  set-ssh-profile-password NAME Rotate one password profile credential
   remove-ssh-profile NAME       Remove one local SSH profile
   set-execution-approval-bot-token Silently configure the dedicated approval bot token
   rotate-execution-broker-secret Rotate control secret and revoke pending operations
@@ -534,7 +535,8 @@ ensure_execution_paths() {
     chmod 640 "$file"
   done
   for file in "$root/approval-request-secret" "$root/approval-signing-key.pem" \
-    "$root/approval-public-key.pem" "$root/approval-bot-token"; do
+    "$root/approval-public-key.pem" "$root/approval-bot-token" \
+    "$root/ssh-profile-integrity-secret"; do
     [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
       printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
     }
@@ -1076,7 +1078,7 @@ case "$command" in
         done
         for execution_file in "$(execution_root)/approval-request-secret" \
           "$(execution_root)/approval-signing-key.pem" "$(execution_root)/approval-public-key.pem" \
-          "$(execution_root)/approval-bot-token"; do
+          "$(execution_root)/approval-bot-token" "$(execution_root)/ssh-profile-integrity-secret"; do
           if [[ -f "$execution_file" && ! -L "$execution_file" && "$(stat -c %a "$execution_file")" == 600 ]]; then
             printf 'Execution policy %s: safe private mode 600\n' "${execution_file##*/}"
           else
@@ -1126,9 +1128,13 @@ for name, service in (data.get("services") or {}).items():
           printf 'WARNING: Hermes has independent approval authority; disable execution immediately.\n'
         fi
         approver_block="$(grep -A55 '^  execution-approver:' <<< "$rendered")"
-        if grep -q 'docker.sock\|/profiles' <<< "$approver_block"; then
+        if grep -q 'docker.sock\|/profiles\|execution-ssh-profile-integrity' <<< "$approver_block"; then
           printf 'WARNING: the approver has Docker or SSH execution authority.\n'
         fi
+        ssh_integrity_count="$(grep -c '/run/secrets/execution-ssh-profile-integrity' <<< "$rendered" || true)"
+        [[ "$ssh_integrity_count" == 2 ]] \
+          && printf 'SSH password integrity boundary: SSH broker mount and environment only\n' \
+          || printf 'WARNING: SSH password integrity secret wiring count is unexpected: %s.\n' "$ssh_integrity_count"
         if grep -q '^[[:space:]]*- stack-execution-policy[[:space:]]*$' "$ROOT_DIR/data/hermes/config.yaml"; then
           printf 'Hermes execution policy plugin: enabled in config\n'
         else
@@ -1338,7 +1344,12 @@ for name, service in (data.get("services") or {}).items():
       found=false
       for profile_dir in "$(execution_root)/ssh"/*; do
         [[ -d "$profile_dir" && ! -L "$profile_dir" ]] || continue
-        printf ' %s' "${profile_dir##*/}"; found=true
+        profile_auth="$(python3 - "$profile_dir/profile.json" <<'PY' 2>/dev/null || printf invalid
+import json,sys
+print(json.load(open(sys.argv[1], encoding="utf-8")).get("auth", "publickey"))
+PY
+)"
+        printf ' %s(%s)' "${profile_dir##*/}" "$profile_auth"; found=true
       done
       [[ "$found" == true ]] || printf ' none'
       printf '\n'
@@ -1392,6 +1403,11 @@ for name, service in (data.get("services") or {}).items():
         && -s "$(execution_root)/approval-public-key.pem" ]] || {
         printf 'Configure the dedicated approval bot first: ./manage.sh set-execution-approval-bot-token\n' >&2; exit 1;
       }
+      if [[ ",$features," == *,ssh,* && ! -s "$(execution_root)/ssh-profile-integrity-secret" ]]; then
+        tmp="$(mktemp "$(execution_root)/ssh-profile-integrity-secret.tmp.XXXXXX")"
+        random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"
+        mv "$tmp" "$(execution_root)/ssh-profile-integrity-secret"
+      fi
       enable_hermes_execution_plugin
       replace_env_value "$ENV_FILE" EXECUTION_DOCKER_GID "$(stat -c %g /var/run/docker.sock 2>/dev/null || printf 999)"
       replace_env_value "$ENV_FILE" EXECUTION_WORKSPACE_HOST_PATH "$ROOT_DIR/data/execution-workspace"
@@ -1434,6 +1450,10 @@ for name, service in (data.get("services") or {}).items():
       tmp="$(mktemp "$root/approval-request-secret.tmp.XXXXXX")"
       random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/approval-request-secret"
     fi
+    if [[ ! -s "$root/ssh-profile-integrity-secret" ]]; then
+      tmp="$(mktemp "$root/ssh-profile-integrity-secret.tmp.XXXXXX")"
+      random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/ssh-profile-integrity-secret"
+    fi
     if [[ ! -s "$root/approval-signing-key.pem" || ! -s "$root/approval-public-key.pem" ]]; then
       private_tmp="$(mktemp "$root/approval-signing-key.tmp.XXXXXX")"
       public_tmp="$(mktemp "$root/approval-public-key.tmp.XXXXXX")"
@@ -1453,6 +1473,9 @@ for name, service in (data.get("services") or {}).items():
     secret_file="$(execution_root)/control-secret"
     tmp="$(mktemp "$(execution_root)/control-secret.tmp.XXXXXX")"
     random_hex 32 > "$tmp"; chown "$(execution_hermes_uid):10003" "$tmp"; chmod 640 "$tmp"; mv "$tmp" "$secret_file"
+    secret_file="$(execution_root)/ssh-profile-integrity-secret"
+    tmp="$(mktemp "$(execution_root)/ssh-profile-integrity-secret.tmp.XXXXXX")"
+    random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$secret_file"
     rotate_execution_generation
     compose up -d --force-recreate hermes execution-approver execution-docker-broker execution-ssh-broker
     printf 'Execution broker secret rotated; pending operations revoked.\n'
@@ -1461,24 +1484,35 @@ for name, service in (data.get("services") or {}).items():
     name="${2:-}"
     [[ -z "${3:-}" && "$name" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] || { printf 'Use a lowercase safe profile name.\n' >&2; exit 2; }
     ensure_execution_paths
+    integrity_secret="$(execution_root)/ssh-profile-integrity-secret"
+    if [[ ! -s "$integrity_secret" ]]; then
+      tmp="$(mktemp "$(execution_root)/ssh-profile-integrity-secret.tmp.XXXXXX")"
+      random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$integrity_secret"
+    fi
     root="$(execution_root)/ssh"; target="$root/$name"
     [[ ! -e "$target" && ! -L "$target" ]] || { printf 'Profile already exists.\n' >&2; exit 1; }
     read -r -p 'SSH host: ' host
     read -r -p 'SSH port [22]: ' port; port="${port:-22}"
     read -r -p 'SSH user: ' ssh_user
     read -r -p 'Authority [user|root|sudo-nopasswd]: ' authority
-    [[ "$host" =~ ^[A-Za-z0-9._:-]+$ && "$port" =~ ^[0-9]+$ && "$ssh_user" =~ ^[A-Za-z0-9._-]+$ \
-      && "$authority" =~ ^(user|root|sudo-nopasswd)$ ]] || { printf 'Invalid profile values.\n' >&2; exit 2; }
+    read -r -p 'Authentication [publickey|password]: ' auth
+    auth="${auth:-publickey}"
+    [[ "$host" =~ ^[A-Za-z0-9._:-]+$ && "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 \
+      && "$ssh_user" =~ ^[A-Za-z0-9._-]+$ && "$authority" =~ ^(user|root|sudo-nopasswd)$ \
+      && "$auth" =~ ^(publickey|password)$ ]] || { printf 'Invalid profile values.\n' >&2; exit 2; }
+    [[ "$ssh_user" != root || "$authority" == root ]] || { printf 'The root SSH user must use authority root.\n' >&2; exit 2; }
     stage="$(mktemp -d "$root/.${name}.tmp.XXXXXX")"; chmod 700 "$stage"
     TEMP_SECRET_FILES+=("$stage")
-    if read -r -p 'Generate a dedicated Ed25519 key? [Y/n] ' answer && [[ "${answer:-y}" =~ ^[Yy]$ ]]; then
-      ssh-keygen -q -t ed25519 -N '' -f "$stage/identity"
-    else
-      printf 'Paste private key, then Ctrl-D:\n' >&2
-      umask 077; cat > "$stage/identity"
-      ssh-keygen -y -f "$stage/identity" > "$stage/identity.pub"
+    if [[ "$auth" == publickey ]]; then
+      if read -r -p 'Generate a dedicated Ed25519 key? [Y/n] ' answer && [[ "${answer:-y}" =~ ^[Yy]$ ]]; then
+        ssh-keygen -q -t ed25519 -N '' -f "$stage/identity"
+      else
+        printf 'Paste an unencrypted private key, then Ctrl-D:\n' >&2
+        umask 077; cat > "$stage/identity"
+        ssh-keygen -y -f "$stage/identity" > "$stage/identity.pub"
+      fi
+      chmod 600 "$stage/identity" "$stage/identity.pub"
     fi
-    chmod 600 "$stage/identity" "$stage/identity.pub"
     ssh-keyscan -p "$port" -T 10 -- "$host" > "$stage/known_hosts.scan" 2>/dev/null || { rm -rf "$stage"; printf 'Host-key scan failed.\n' >&2; exit 1; }
     read -r -p 'Enter the independently verified SHA256 host fingerprint: ' expected
     [[ "$expected" =~ ^SHA256:[A-Za-z0-9+/]{20,}={0,2}$ ]] || { rm -rf "$stage"; printf 'Invalid host fingerprint.\n' >&2; exit 2; }
@@ -1490,11 +1524,8 @@ matches = []
 for line in open(source, encoding="utf-8"):
     if not line.strip():
         continue
-    completed = subprocess.run(
-        ["ssh-keygen", "-lf", "-", "-E", "sha256"], input=line,
-        text=True, encoding="utf-8", stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL, check=False,
-    )
+    completed = subprocess.run(["ssh-keygen", "-lf", "-", "-E", "sha256"], input=line,
+        text=True, encoding="utf-8", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     fields = completed.stdout.split()
     if completed.returncode == 0 and len(fields) > 1 and fields[1] == expected:
         matches.append(line)
@@ -1504,43 +1535,98 @@ open(target, "w", encoding="utf-8").write(matches[0])
 PY
     rm -f "$stage/known_hosts.scan"
     [[ "$status" -eq 0 ]] || { rm -rf "$stage"; printf 'Host fingerprint mismatch or ambiguity.\n' >&2; exit 1; }
-    fingerprint="$expected"
-    printf 'Pinned independently verified host fingerprint: %s\n' "$fingerprint"
-    python3 - "$stage/profile.json" "$host" "$port" "$ssh_user" "$authority" "$fingerprint" <<'PY'
+    if [[ "$auth" == password ]]; then
+      [[ -r /dev/tty && -w /dev/tty ]] || { rm -rf "$stage"; printf 'A controlling terminal is required for password input.\n' >&2; exit 1; }
+      IFS= read -r -s -p 'SSH password: ' password < /dev/tty; printf '\n' > /dev/tty
+      IFS= read -r -s -p 'Confirm SSH password: ' password_confirm < /dev/tty; printf '\n' > /dev/tty
+      [[ -n "$password" && "$password" == "$password_confirm" && ${#password} -le 1024 \
+        && "$password" != *$'\n'* && "$password" != *$'\r'* ]] || {
+        unset password password_confirm; rm -rf "$stage"; printf 'Passwords are empty, mismatched, or too long.\n' >&2; exit 2;
+      }
+      umask 077; printf '%s' "$password" > "$stage/password"
+      unset password password_confirm
+      chmod 600 "$stage/password"
+    fi
+    revision="$(random_hex 32)"
+    python3 - "$stage/profile.json" "$host" "$port" "$ssh_user" "$authority" "$expected" "$auth" "$revision" <<'PY'
 import json, sys
-path, host, port, user, authority, fingerprint = sys.argv[1:]
-open(path, "w", encoding="utf-8").write(json.dumps({"host": host, "port": int(port), "user": user, "authority": authority, "fingerprint": fingerprint}, indent=2) + "\n")
+path, host, port, user, authority, fingerprint, auth, revision = sys.argv[1:]
+value = {"version": 2, "auth": auth, "credential_revision": revision, "host": host,
+         "port": int(port), "user": user, "authority": authority, "fingerprint": fingerprint}
+open(path, "w", encoding="utf-8").write(json.dumps(value, indent=2) + "\n")
 PY
     chown -R 10003:10003 "$stage"
-    chmod 700 "$stage"
-    chmod 600 "$stage/profile.json" "$stage/known_hosts" "$stage/identity" "$stage/identity.pub"
-    printf 'Install this public key on %s@%s, then verify:\n' "$ssh_user" "$host"
-    cat "$stage/identity.pub"
+    chmod 700 "$stage"; find "$stage" -type f -exec chmod 600 {} +
+    printf 'Pinned independently verified host fingerprint: %s\n' "$expected"
+    if [[ "$auth" == publickey ]]; then
+      printf 'Install this public key on %s@%s, then verify:\n' "$ssh_user" "$host"
+      cat "$stage/identity.pub"
+    else
+      printf 'Password stored only in the protected SSH broker profile.\n'
+    fi
     mv "$stage" "$target"
+    rotate_execution_generation
     printf 'Profile %s stored. Run ./manage.sh verify-ssh-profile %s.\n' "$name" "$name"
     ;;
   verify-ssh-profile)
     name="${2:-}"; target="$(execution_root)/ssh/$name"
     [[ -z "${3:-}" && "$name" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ && -d "$target" && ! -L "$target" ]] || { printf 'Unknown or unsafe profile.\n' >&2; exit 2; }
-    mapfile -t meta < <(python3 - "$target/profile.json" <<'PY'
-import json,sys
-x=json.load(open(sys.argv[1])); print(x["host"]); print(x["port"]); print(x["user"]); print(x["authority"])
-PY
-)
-    probe=id; [[ "${meta[3]}" == sudo-nopasswd ]] && probe='sudo -n true && id'
-    ssh -n -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-      -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o ForwardAgent=no \
-      -o ForwardX11=no -o PermitLocalCommand=no -o ClearAllForwardings=yes -o RequestTTY=no \
-      -o "UserKnownHostsFile=$target/known_hosts" -i "$target/identity" -p "${meta[1]}" \
-      "${meta[2]}@${meta[0]}" -- "$probe"
+    compose exec -T execution-ssh-broker python -m broker.ssh --probe "$name"
     printf 'SSH profile %s verified.\n' "$name"
+    ;;
+  set-ssh-profile-password)
+    name="${2:-}"; target="$(execution_root)/ssh/$name"
+    [[ -z "${3:-}" && "$name" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ && -d "$target" && ! -L "$target" ]] || { printf 'Unknown or unsafe profile.\n' >&2; exit 2; }
+    auth="$(python3 - "$target/profile.json" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1], encoding="utf-8")).get("auth", "publickey"))
+PY
+)"
+    [[ "$auth" == password ]] || { printf 'Only password profiles can use this command.\n' >&2; exit 2; }
+    [[ -r /dev/tty && -w /dev/tty ]] || { printf 'A controlling terminal is required for password input.\n' >&2; exit 1; }
+    IFS= read -r -s -p 'New SSH password: ' password < /dev/tty; printf '\n' > /dev/tty
+    IFS= read -r -s -p 'Confirm new SSH password: ' password_confirm < /dev/tty; printf '\n' > /dev/tty
+    [[ -n "$password" && "$password" == "$password_confirm" && ${#password} -le 1024 \
+      && "$password" != *$'\n'* && "$password" != *$'\r'* ]] || {
+      unset password password_confirm; printf 'Passwords are empty, mismatched, or too long.\n' >&2; exit 2;
+    }
+    root="$(execution_root)/ssh"; stage="$(mktemp -d "$root/.${name}.rotate.XXXXXX")"
+    TEMP_SECRET_FILES+=("$stage"); cp -a "$target/." "$stage/"; chmod 700 "$stage"
+    umask 077; printf '%s' "$password" > "$stage/password"; unset password password_confirm
+    revision="$(random_hex 32)"
+    python3 - "$stage/profile.json" "$revision" <<'PY'
+import json,sys
+path, revision = sys.argv[1:]
+value=json.load(open(path, encoding="utf-8")); value["credential_revision"]=revision
+open(path, "w", encoding="utf-8").write(json.dumps(value, indent=2)+"\n")
+PY
+    chown -R 10003:10003 "$stage"; chmod 700 "$stage"; find "$stage" -type f -exec chmod 600 {} +
+    backup="$root/.${name}.backup.$(random_hex 8)"
+    compose stop execution-ssh-broker >/dev/null 2>&1 || true
+    mv "$target" "$backup"; mv "$stage" "$target"; rotate_execution_generation
+    if compose up -d --force-recreate execution-ssh-broker && compose exec -T execution-ssh-broker python -m broker.ssh --probe "$name"; then
+      rm -rf -- "$backup"; printf 'SSH profile %s password rotated and verified.\n' "$name"
+    else
+      rm -rf -- "$target"; mv "$backup" "$target"; rotate_execution_generation
+      compose up -d --force-recreate execution-ssh-broker || true
+      printf 'Password verification failed; the prior profile was restored.\n' >&2; exit 1
+    fi
     ;;
   remove-ssh-profile)
     name="${2:-}"; target="$(execution_root)/ssh/$name"
     [[ -z "${3:-}" && "$name" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ && -d "$target" && ! -L "$target" ]] || { printf 'Unknown or unsafe profile.\n' >&2; exit 2; }
+    auth="$(python3 - "$target/profile.json" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1], encoding="utf-8")).get("auth", "publickey"))
+PY
+)"
     rm -rf -- "$target"; rotate_execution_generation
     compose up -d --force-recreate execution-ssh-broker hermes
-    printf 'Local profile removed. Revoke its public key from the remote authorized_keys separately.\n'
+    if [[ "$auth" == password ]]; then
+      printf 'Local profile removed. Change or disable the remote account password separately.\n'
+    else
+      printf 'Local profile removed. Revoke its public key from remote authorized_keys separately.\n'
+    fi
     ;;
   purge-execution)
     [[ -z "${2:-}" ]] || { printf 'Usage: ./manage.sh purge-execution\n' >&2; exit 2; }

@@ -59,7 +59,7 @@ class ApprovalRequestStore:
                 "request_json,summary,user_id,session,generation,expires_at)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (payload["capability"], token, payload["target"], payload["feature"],
-                 payload["digest"], json.dumps(payload["request"], sort_keys=True),
+                 payload["digest"], "{}",
                  payload["summary"], payload["user_id"], payload["session"],
                  payload["generation"], time.time() + ttl_seconds),
             )

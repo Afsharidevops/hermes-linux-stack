@@ -158,16 +158,30 @@ including inspect/log/remove operations; execution-control network names and IDs
 and host binds equal to, beneath, or ancestral to execution-authority paths. Docker
 inspect output omits environment values, labels, and mounts. Local requests bind a
 digest-pinned resolved image, workspace generation, and normalized `/workspace`
-workdir. SSH requests bind host, port, user, authority, key fingerprints and file
-digests, and known-host fingerprints and file digests. Any change after approval
-fails closed.
+workdir. SSH requests bind host, port, user, authority, authentication type, and
+known-host fingerprints and file digests, plus key fingerprints and file digests
+for public-key profiles. Any change after approval fails closed.
+
+An SSH profile may authenticate with a dedicated key or a locally configured
+password. Password bytes stay inside the SSH broker's profile directory, which no
+other service mounts, and are handed to OpenSSH only through an image-owned
+askpass helper reading a mode-0600 file on the broker's private `tmpfs`. They are
+never placed in argv, an environment value, a prompt, a Telegram message, a
+broker request, an approval summary, a log, or an audit record, and `sshpass` is
+not installed. What the sealed request binds instead is an HMAC-SHA256 tag over
+the profile name, credential revision, and password, keyed by a secret mounted
+only into the SSH broker. Neither Hermes nor the approver holds that key, so
+neither can test password guesses offline, and a password, revision, or host-key
+change between approval and execution fails closed. Password authentication
+authorizes the SSH session only: keyboard-interactive and MFA are refused, only
+one prompt is allowed, and `sudo-nopasswd` still means only `sudo -n`.
 
 The Docker socket and approved privileged/host-mounted containers are
 host-root-equivalent. Root and passwordless-sudo SSH profiles are
 remote-root-equivalent. Approval authorizes an effect; it does not make it safe
 or reversible. Disabling execution revokes pending operations but cannot undo
-remote changes, revoke a remote public key, or clean up already-created Docker
-objects. Skills must still use staged diff approval, and package approvals never
+remote changes, revoke a remote public key, change a remote password, or clean up
+already-created Docker objects. Skills must still use staged diff approval, and package approvals never
 authorize later execution.
 
 9router URL/key aliases do not grant web-search capability by themselves. Configure

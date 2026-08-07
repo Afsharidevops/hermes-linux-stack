@@ -604,7 +604,7 @@ for execution_file in control-secret users; do
   chown "$execution_gateway_uid:$execution_runtime_gid" "$execution_path"
   chmod 640 "$execution_path"
 done
-for execution_file in approval-request-secret approval-signing-key.pem approval-public-key.pem approval-bot-token; do
+for execution_file in approval-request-secret approval-signing-key.pem approval-public-key.pem approval-bot-token ssh-profile-integrity-secret; do
   execution_path="$ROOT_DIR/data/stack-secrets/execution/$execution_file"
   [[ -e "$execution_path" ]] \
     || install -m 0600 -o "$execution_runtime_uid" -g "$execution_runtime_gid" \

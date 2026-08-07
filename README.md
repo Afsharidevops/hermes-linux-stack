@@ -653,10 +653,12 @@ are explicitly configured.
 - **Sandbox:** short-lived non-root container; only `data/execution-workspace`
   persists; network is off unless the exact operation requests egress; `NET_RAW`
   is separate.
-- **SSH:** `./manage.sh add-ssh-profile NAME` creates/imports a dedicated key and
-  requires an independently verified host fingerprint. Host, user, port, key,
-  and SSH flags are never model-controlled. Use `verify-ssh-profile` after
-  installing the displayed public key remotely.
+- **SSH:** `./manage.sh add-ssh-profile NAME` creates one profile and requires an
+  independently verified host fingerprint. Choose `publickey` (it creates or
+  imports a dedicated key) or `password` (it reads the password twice silently
+  from your terminal). Host, user, port, credential, and SSH flags are never
+  model-controlled. Use `verify-ssh-profile` afterwards; for a key profile,
+  install the displayed public key remotely first.
 - **Docker:** only `hermes-execution-docker-broker` receives the host socket.
   Hermes, n8n, SSH broker, approver, and sandboxes never receive it. Images must
   be digest-pinned or immutable local IDs. Privileged mode, host namespaces,
@@ -666,11 +668,23 @@ are explicitly configured.
   denied. Inspect returns a redacted view without environment values, mounts, or
   labels.
 
+SSH passwords are stored only inside the SSH broker's profile directory, which
+no other service mounts. They never appear in prompts, Telegram messages, broker
+requests, approval summaries, argv, environment values, logs, or audit records.
+The approval shows only `authentication: password (broker-held)`. A password
+profile authenticates the SSH session and nothing else: keyboard-interactive and
+MFA are refused, and `sudo-nopasswd` still means only `sudo -n`. Rotate with
+`./manage.sh set-ssh-profile-password NAME`, which also revokes pending
+operations and rolls back if verification fails. Removing a password profile
+deletes the local copy only — change or disable the remote account password
+separately.
+
 Docker socket authority is host-root-equivalent, and an SSH `root` or
 `sudo-nopasswd` profile is remote-root-equivalent. Exact approval controls when
 an action runs; it does not make an approved action harmless or reversible.
 Disablement revokes pending capabilities but does not undo remote commands,
-container effects, or remove a public key from remote `authorized_keys`.
+container effects, remove a public key from remote `authorized_keys`, or change
+a remote password.
 
 Other management commands:
 
@@ -679,6 +693,7 @@ Other management commands:
 ./manage.sh remove-execution-user ID
 ./manage.sh disable-execution all
 ./manage.sh rotate-execution-broker-secret
+./manage.sh set-ssh-profile-password NAME
 ./manage.sh remove-ssh-profile NAME
 ./manage.sh purge-execution
 ./manage.sh set-agent-max-turns 90

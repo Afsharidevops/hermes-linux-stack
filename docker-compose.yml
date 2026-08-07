@@ -202,6 +202,7 @@ services:
       BROKER_CONTROL_SECRET_FILE: /run/secrets/execution-control
       BROKER_APPROVAL_REQUEST_SECRET_FILE: /run/secrets/execution-approval-request
       BROKER_APPROVAL_PUBLIC_KEY_FILE: /run/secrets/execution-approval-public-key
+      BROKER_SSH_PROFILE_INTEGRITY_SECRET_FILE: /run/secrets/execution-ssh-profile-integrity
       BROKER_APPROVER_URL: http://execution-approver:8751
       EXECUTION_FEATURES: ${EXECUTION_FEATURES:-}
       EXECUTION_POLICY_GENERATION: ${EXECUTION_POLICY_GENERATION:-0}
@@ -211,6 +212,7 @@ services:
       - ./data/stack-secrets/execution/control-secret:/run/secrets/execution-control:ro
       - ./data/stack-secrets/execution/approval-request-secret:/run/secrets/execution-approval-request:ro
       - ./data/stack-secrets/execution/approval-public-key.pem:/run/secrets/execution-approval-public-key:ro
+      - ./data/stack-secrets/execution/ssh-profile-integrity-secret:/run/secrets/execution-ssh-profile-integrity:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=0700,uid=10003,gid=10003

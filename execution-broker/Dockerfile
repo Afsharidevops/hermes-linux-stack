@@ -17,6 +17,7 @@ RUN groupadd --gid 10003 broker \
 
 WORKDIR /app
 COPY src ./src
+COPY --chmod=0555 ssh-askpass.py /usr/local/libexec/hermes-ssh-askpass
 
 USER 10003:10003
 EXPOSE 8750 8751

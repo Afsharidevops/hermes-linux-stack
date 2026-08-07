@@ -10,7 +10,7 @@ Authority is separated by Compose mounts:
 
 - Hermes receives only the broker control secret and execution-user policy.
 - Docker mode alone receives the Docker socket and the approver public verification key.
-- SSH mode alone receives read-only SSH profiles and the approver public verification key.
+- SSH mode alone receives read-only SSH profiles, the SSH password-profile integrity secret, and the approver public verification key.
 - Approver mode alone receives the Telegram approval-bot token and private signing key.
 
 The shared request-authentication secret lets brokers submit sealed requests to the approver. It cannot forge a signed approval. Broker ports are not published.
@@ -18,7 +18,7 @@ The shared request-authentication secret lets brokers submit sealed requests to 
 ## Modes
 
 - `docker`: local sandbox and structured Docker operations. Local execution uses a digest-pinned image, sealed workspace generation, non-root identity, read-only root, dropped capabilities, and no network by default.
-- `ssh`: commands through locally managed profiles with sealed host, user, authority, private-key digest/public fingerprint, and known-hosts digest/fingerprint.
+- `ssh`: commands through locally managed profiles with sealed host, user, authority, authentication type, and known-hosts digest/fingerprint, plus a private-key digest/public fingerprint for public-key profiles or a keyed credential tag for password profiles.
 - `approver`: Telegram long polling, persistent one-time inline approval/denial, and Ed25519 decision signing. It has no Docker socket, SSH profiles, or broker capability database.
 
 All modes use Python standard-library HTTP. The image also contains OpenSSH client for SSH mode and OpenSSL for approval signing/verification.
@@ -42,10 +42,12 @@ Compose supplies these mode-specific settings. Paths are descriptive; secret val
 | Mode | Required environment | Required read-only authority mounts | Writable state |
 |---|---|---|---|
 | docker | `BROKER_MODE=docker`, feature/policy/workspace settings, approver and callback URLs | control secret, approval-request secret, approval public key, Docker socket | capability state |
-| ssh | `BROKER_MODE=ssh`, feature/policy settings, approver and callback URLs | control secret, approval-request secret, approval public key, SSH profiles | capability state |
+| ssh | `BROKER_MODE=ssh`, feature/policy settings, approver and callback URLs | control secret, approval-request secret, approval public key, SSH profiles, SSH password-profile integrity secret | capability state |
 | approver | `BROKER_MODE=approver`, policy generation, bot/users paths, broker callback URLs | approval-request secret, approval private key, approval bot token, numeric users policy | approval state |
 
-Do not mount the private signing key or approval bot token into Hermes or either broker. Do not mount the Docker socket outside Docker mode or SSH profiles outside SSH mode. Do not publish broker/approver ports or attach brokers to the general stack network.
+Do not mount the private signing key or approval bot token into Hermes or either broker. Do not mount the Docker socket outside Docker mode, or SSH profiles and the SSH password-profile integrity secret outside SSH mode. Do not publish broker/approver ports or attach brokers to the general stack network.
+
+An SSH profile authenticates with a dedicated key or a locally configured password. A password reaches OpenSSH only through the image-owned askpass helper at `/usr/local/libexec/hermes-ssh-askpass`, which reads one mode-`0600` file on the broker's private `tmpfs`; `sshpass` is not installed and no password is ever placed in argv, an environment value, an approval summary, or a log. The sealed request binds an HMAC-SHA256 credential tag keyed by the integrity secret, so the approver can detect a changed credential without being able to test password guesses. Password mode disables public-key and keyboard-interactive authentication and permits a single prompt.
 
 There are deliberately no safe standalone defaults for execution authority: empty/missing secrets, keys, users, token, image seal, workspace seal, or feature policy make readiness and operations fail closed.
 

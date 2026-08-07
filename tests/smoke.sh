@@ -73,6 +73,8 @@ test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets")" = 700
 test "$(stat -c '%u:%g' "$TEST_DIR/stack/data/stack-secrets")" = "$(id -u):$(id -g)"
 test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/control-secret")" = 640
 test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/users")" = 640
+# The SSH password-profile integrity key is broker-private, never group-readable.
+test "$(stat -c '%a' "$TEST_DIR/stack/data/stack-secrets/execution/ssh-profile-integrity-secret")" = 600
 grep -q '^EXECUTION_FEATURES=$' "$TEST_DIR/stack/.env"
 ! grep -q 'execution-docker\|execution-ssh' < <(sed -n 's/^COMPOSE_PROFILES=//p' "$TEST_DIR/stack/.env")
 grep -q './plugins/stack-package-policy:/opt/data/plugins/stack-package-policy:ro' "$TEST_DIR/stack/docker-compose.yml"

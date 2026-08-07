@@ -154,17 +154,25 @@ def _render_local(request: dict[str, Any]) -> tuple[list[str], list[str]]:
 def _render_ssh(request: dict[str, Any], profile: dict[str, Any]) -> tuple[list[str], list[str]]:
     sealed = request.get("sealed_profile", profile)
     authority = sealed.get("authority", "unknown")
+    auth = sealed.get("auth", "publickey")
+    authentication = "password (broker-held)" if auth == "password" else "public key"
     lines = [
         "Remote SSH command",
         f"  profile:   {request['profile']}",
         f"  target:    {sealed.get('user', '?')}@{sealed.get('host', '?')}:{sealed.get('port', 22)}",
         f"  authority: {authority}",
         f"  host key:  {sealed.get('fingerprint', 'missing')}",
-        f"  identity:  {sealed.get('identity_fingerprint', 'missing')}",
+        f"  auth:      {authentication}",
+    ]
+    if auth == "publickey":
+        lines.append(f"  identity:  {sealed.get('identity_fingerprint', 'missing')}")
+    lines.extend([
         f"  command:   {request['command']}",
         f"  timeout:   {request['timeout']}s",
-        "  options:   no agent/X11/port forwarding, no TTY, no password auth, pinned host key",
-    ]
+        "  options:   no agent/X11/port forwarding, no TTY, pinned host key",
+    ])
+    if auth == "password":
+        lines.append("  password:  one broker-held prompt; public-key and keyboard-interactive auth disabled")
     warnings = []
     if authority in ("root", "sudo-nopasswd"):
         warnings.append(

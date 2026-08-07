@@ -42,7 +42,7 @@ jobs:
         run: |
           cp .env.example .env
           mkdir -p data/stack-secrets/execution/{docker-state,ssh-state,ssh} data/execution-workspace
-          touch data/stack-secrets/execution/{control-secret,users}
+          touch data/stack-secrets/execution/{control-secret,users,ssh-profile-integrity-secret}
           sed -i "s|EXECUTION_WORKSPACE_HOST_PATH=.*|EXECUTION_WORKSPACE_HOST_PATH=$PWD/data/execution-workspace|" .env
           docker compose config --quiet
           rendered="$(docker compose --profile execution-docker --profile execution-ssh config)"
@@ -51,6 +51,15 @@ jobs:
           ! grep -A45 '^  execution-ssh-broker:' <<<"$rendered" | grep -q docker.sock
           ! grep -A45 '^  execution-docker-broker:' <<<"$rendered" | grep -q 'published:'
           ! grep -A45 '^  execution-ssh-broker:' <<<"$rendered" | grep -q 'published:'
+          # SSH profiles and the password integrity key belong to the SSH broker alone.
+          all="$(docker compose --profile execution-docker --profile execution-ssh --profile execution-approval config)"
+          test "$(grep -c 'target: /profiles$' <<<"$all")" -eq 1
+          test "$(grep -c 'execution-ssh-profile-integrity' <<<"$all")" -eq 2
+          ssh_broker="$(awk '/^  execution-ssh-broker:/,/^networks:/' <<<"$all")"
+          test "$(grep -c 'target: /profiles$' <<<"$ssh_broker")" -eq 1
+          test "$(grep -c 'execution-ssh-profile-integrity' <<<"$ssh_broker")" -eq 2
+      - name: Test SSH profiles against a disposable sshd
+        run: EXECUTION_BROKER_TEST_IMAGE=hermes-execution-broker:test tests/test-ssh-profiles.sh
       - name: Test interactive installer
         run: tests/smoke.sh
       - name: Ensure secrets are ignored
