@@ -1,27 +1,11 @@
-# Security notes
+# Security notes for the calibrated router package
 
-## Network defaults
+Keep `.env`, `data/hermes/.env`, gateway state, `data/smart-router/router.sqlite3`, observations, n8n credentials and execution secrets out of version control.
 
-The OmniRoute dashboard (`20128`), OmniRoute API (`20129`), Hermes (`8642`/`9119`), Open WebUI (`3000`), and n8n (`5678`) bind to `127.0.0.1` by default. Caddy is the component intended to bind public HTTP/HTTPS ports.
+Smart Router v0.2 deliberately keeps capability gates deterministic. A calibrated score can propose a tier but cannot downgrade past declared tool/vision/context requirements. Session identifiers are HMAC-pseudonymized before persistence.
 
-The OmniRoute API is intentionally separate from the dashboard port in this stack. Internal clients use `http://omniroute:20129/v1` over the private Compose network.
+Observation JSONL is designed for derived metadata only. Treat it as operational telemetry anyway: protect it with the same host access controls as other stack state. If you create calibration datasets containing full request bodies, keep those offline and private; prefer derived `features`/`facts` records.
 
-## OmniRoute API authentication
+The router is internal-only in Compose. OmniRoute dashboard/API and Open WebUI default to loopback bindings in `.env.example`. Do not publish them broadly without authentication, TLS/reverse proxy, firewall policy, and gateway-specific hardening.
 
-Fresh installs default to `OMNIROUTE_REQUIRE_API_KEY=false` so OmniRoute can be configured before an endpoint key exists. This is acceptable only while the API host binding stays loopback or otherwise protected.
-
-After adding an endpoint API key in OmniRoute, run:
-
-```bash
-./manage.sh enable-omniroute-api-auth
-```
-
-The command stores the key for Hermes and Open WebUI and enables OmniRoute API-key enforcement. If the OmniRoute API is bound to a LAN/public address, enable API-key enforcement first.
-
-## Secrets
-
-Never commit `.env`, `data/hermes/.env`, OmniRoute data, execution secrets, private SSH keys, n8n credentials, or Caddy state. Back up the generated OmniRoute secrets and `data/omniroute` together. Keep `MACHINE_ID_SALT` unique per deployment; the installer also generates `OMNIROUTE_WS_BRIDGE_SECRET` for production WebSocket bridge authentication.
-
-## Execution isolation
-
-The existing stack execution broker/plugin design remains in Compose. Execution profiles are disabled by default and should not be enabled until their approval/signing/SSH material is configured correctly.
+The optional execution services in the retained Compose file are high-trust features and remain disabled unless their profiles are explicitly selected. Review the upstream security documentation (`SECURITY.upstream.md` when present) before enabling them.

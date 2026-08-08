@@ -1,8 +1,7 @@
-**/__pycache__
-**/*.py[cod]
-.pytest_cache
-.coverage
-htmlcov
-.venv
-tests
-requirements-dev.txt
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.sqlite3
+*.jsonl
+.venv/

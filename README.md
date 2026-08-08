@@ -1,116 +1,83 @@
-# Hermes + OmniRoute + Open WebUI Linux Stack
+# Hermes + OmniRoute + Calibrated Smart Router
 
-Hermes Linux Stack powered by [OmniRoute](https://github.com/diegosouzapw/OmniRoute) as the OpenAI-compatible model routing gateway.
+This is a complete deployment package built from the current Hermes Linux Stack `hermes-omniroute-linux-stack` topology, with **Smart Router v0.2 calibration/evaluation** added. RouteLLM is **not** placed in the runtime request path.
 
 ## Architecture
 
 ```text
-Telegram API
-    ↑ outbound polling
-    │
 Hermes Agent ───┐
-       │        ├──→ optional Hermes Smart Router ──→ OmniRoute ──→ AI providers
-       │        │
-       │        └──→ optional n8n
-Open WebUI ─────┘
-
-Host defaults:
-  OmniRoute dashboard  127.0.0.1:20128
-  OmniRoute /v1 API    127.0.0.1:20129
-  Open WebUI           127.0.0.1:3000
-  Hermes API           127.0.0.1:8642
-  Hermes dashboard     127.0.0.1:9119
-  n8n                   127.0.0.1:5678
+Open WebUI ─────┼──> Hermes Smart Router v0.2 ──> OmniRoute ──> AI providers
+n8n / clients ──┘    capability gates
+                      calibrated/heuristic policy
+                      sticky sessions
+                      output budgets
 ```
 
-Containers use `http://omniroute:20129/v1`. Splitting the dashboard and API ports lets the stack keep the API private by default while still supporting an HTTPS dashboard/reverse proxy.
+The Smart Router answers **what capability/tier does this request need?**. OmniRoute remains the delivery layer for model/provider selection and fallback.
 
-## Major migration changes
+## What is new
 
-- Compose service: `omniroute`
-- Image: `diegosouzapw/omniroute:latest`
-- Persistence: `data/omniroute:/app/data`
-- OmniRoute dashboard: `20128`
-- OpenAI-compatible API: `20129`
-- Hermes provider environment: `OMNIROUTE_API_KEY`
-- Smart Router upstream: `http://omniroute:20129/v1`
-- Fresh route/model default: `auto`
-- All stack router secrets/settings use `OMNIROUTE_*`
+- pluggable `heuristic` and `calibrated` policies
+- deterministic capability gates for tools, vision and context
+- fast/standard/strong sticky-session routing with immediate promotion and delayed demotion
+- request-aware output budgets in route mode
+- privacy-safe JSONL observations (derived features/metadata only)
+- offline `replay`, `calibrate`, and `report` commands
+- local Smart Router Docker build; no unpublished v0.2 image is required
+- Open WebUI defaults to `http://smart-router:8080/v1`
+- Smart Router upstream is `http://omniroute:20129/v1`
+- current default tier models: `auto` for all tiers until you configure distinct OmniRoute endpoint/combo/model names
 
-
-## Install
-
-Requirements: Linux, Bash 4+, Docker Engine, and the Docker Compose plugin.
+## Quick start
 
 ```bash
 chmod +x install.sh manage.sh
 ./install.sh
-```
-
-To generate configuration without starting containers:
-
-```bash
-./install.sh --no-start
-```
-
-The installer generates OmniRoute secrets (including a deployment-specific machine salt and WebSocket bridge secret), Hermes/Open WebUI routing configuration, safe loopback bindings, optional Smart Router/n8n/Caddy profiles, and required mount sources.
-
-## First OmniRoute setup
-
-1. Start the stack and open `http://localhost:20128` (or your configured domain).
-2. Sign in with the initial password selected in the installer.
-3. Add at least one provider in OmniRoute.
-4. Verify the `auto` route or create the endpoint/combo/model names you want.
-5. Test Hermes/Open WebUI.
-6. Optionally create an OmniRoute endpoint API key and run:
-
-```bash
-./manage.sh enable-omniroute-api-auth
-```
-
-Fresh installs have `OMNIROUTE_REQUIRE_API_KEY=false` so first-boot configuration is possible. The API host binding is `127.0.0.1` by default. Enable endpoint-key enforcement before publishing the API beyond a protected host/network.
-
-## Smart Router
-
-The existing Hermes Smart Router remains optional. It speaks OpenAI-compatible HTTP, so the integration change is its upstream and defaults rather than a protocol rewrite.
-
-```bash
-SMART_ROUTER_UPSTREAM_BASE_URL=http://omniroute:20129/v1
-SMART_ROUTER_OBSERVE_MODEL=auto
-SMART_ROUTER_FAIL_OPEN_MODEL=auto
-SMART_ROUTER_FAST_MODEL=auto
-SMART_ROUTER_STANDARD_MODEL=auto
-SMART_ROUTER_STRONG_MODEL=auto
-```
-
-After configuring concrete OmniRoute model/combo names, edit `.env` or use:
-
-```bash
-./manage.sh set-model <name>
-```
-
-## Management
-
-```bash
 ./manage.sh status
-./manage.sh logs omniroute
-./manage.sh doctor
-./manage.sh update
-./manage.sh migration-status
-./manage.sh backup
-./manage.sh set-model auto
-./manage.sh enable-omniroute-api-auth
+./manage.sh router-info
 ```
 
-Run `./manage.sh help` for all commands.
+The packaged default is intentionally **observe + heuristic**. Do not jump straight to calibrated route mode.
 
-## Upgrading an existing repository checkout
-
-This archive also includes a non-destructive overlay helper. If you have a complete upstream checkout and want to preserve all unchanged development/source files:
+## Recommended rollout
 
 ```bash
+# 1. Run real traffic in shadow/observe mode
+./manage.sh router-mode observe
+./manage.sh router-policy heuristic
+
+# 2. Create a labeled workload JSONL, using the example schema
+./manage.sh router-calibrate my-labeled-workload.jsonl
+./manage.sh router-report my-labeled-workload.jsonl
+
+# 3. Review smart-router/policy/calibrated.json, then shadow it
+./manage.sh router-policy calibrated
+
+# 4. After validation, enable enforcement
+./manage.sh router-mode route
 ```
 
+See `IMPLEMENTATION.md` and `smart-router/README.md` for the data format and privacy boundary.
+
+## Router aliases
+
+| Model | Behavior |
+|---|---|
+| `auto` | policy chooses a tier; capability gates may upgrade |
+| `auto-fast` | request fast; capability gates may upgrade |
+| `auto-standard` | request standard; capability gates may upgrade |
+| `auto-strong` | force strong tier |
+| any other model name | pass through explicitly, unchanged |
+
+## Privacy and calibration
+
+Production observations contain pseudonymous session hash, derived request facts, policy score/reasons, selected tier/model and budget metadata. The router does **not** write prompts, response text, tool arguments, credentials, or raw conversation IDs to its observation file.
+
+The bundled `smart-router/policy/calibrated.json` intentionally equals the original heuristic. It is a bootstrap file, **not a trained claim**. Generate your own after labeling representative workloads.
+
+## Included upstream reference
+
+`README.upstream.md` preserves the branch README used as a reference while assembling this package. The existing Compose topology, including optional n8n/Caddy/execution services, is retained; execution profiles remain opt-in.
 
 ## Validation
 
@@ -118,12 +85,8 @@ This archive also includes a non-destructive overlay helper. If you have a compl
 ./tests/smoke.sh
 ```
 
-The smoke test checks shell syntax, migration invariants, required OmniRoute wiring, and (when Docker is available) `docker compose config`.
-
-## Security
-
-Read `SECURITY.md`. In particular, keep `.env`, `data/hermes/.env`, `data/omniroute`, n8n state, and execution secrets out of version control. Existing execution profiles remain disabled by default.
+The smoke test validates shell syntax, Python compilation/tests, Compose YAML structure, gateway wiring, and calibration/report tooling. Docker runtime/provider credentials cannot be exercised inside the package build environment, so perform a real provider smoke test before production cutover.
 
 ## License
 
-MIT for this repository. Third-party images/components retain their own licenses.
+MIT for this repository code; third-party images retain their own licenses.

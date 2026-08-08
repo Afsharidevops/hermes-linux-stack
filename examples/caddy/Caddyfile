@@ -1,17 +1,4 @@
-# Optional example. Telegram polling does not need Caddy or a domain.
-# Replace the domains and uncomment only the services you expose.
-
-# omniroute.example.com {
-#     encode zstd gzip
-#     reverse_proxy omniroute:20128
-# }
-
-# hermes.example.com {
-#     encode zstd gzip
-#     reverse_proxy hermes:9119
-# }
-
-# chat.example.com {
-#     encode zstd gzip
-#     reverse_proxy open-webui:8080
-# }
+# Optional example. Keep the OmniRoute API private unless you intentionally publish it.
+# router.example.com { reverse_proxy omniroute:20128 }
+# hermes.example.com { reverse_proxy hermes:9119 }
+# chat.example.com { reverse_proxy open-webui:8080 }

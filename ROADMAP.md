@@ -1,7 +1,15 @@
-# Roadmap
+# Smart Router v0.2 roadmap
 
-- Add an optional OmniRoute API-assisted bootstrap flow once OmniRoute exposes a stable, documented provisioning API for providers/endpoints/combos.
-- Add migration helpers that export legacy router provider definitions into an operator-reviewed OmniRoute import format.
-- Add CI integration tests against a pinned OmniRoute image in addition to static Compose checks.
-- Add optional Redis-backed OmniRoute deployment profile for larger installations.
-- Keep Smart Router model-tier presets aligned with OmniRoute routing/combo capabilities.
+- [x] capability gates
+- [x] sticky tiers
+- [x] output budgets
+- [x] heuristic policy
+- [x] calibrated policy file
+- [x] privacy-safe observations
+- [x] offline replay/calibrate/report
+- [ ] collect representative shadow-mode dataset
+- [ ] establish per-workload quality labels and tier costs
+- [ ] publish quality-vs-cost curves
+- [ ] tune per-gateway tier capabilities/model names
+- [ ] add regression benchmark to CI before policy changes
+- [ ] consider an optional learned classifier only after calibrated heuristics are measured

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "bootstrap-equivalent-to-heuristic-v1",
+  "description": "Bootstrap only. These values intentionally match heuristic-v1 until you calibrate against your own labeled workload.",
+  "weights": {
+    "context_gt_8k": 2.0,
+    "context_gt_25k": 2.0,
+    "context_gt_50k": 3.0,
+    "tools_present": 1.0,
+    "large_tool_schema": 1.0,
+    "large_tool_results": 1.0,
+    "multiple_code_blocks": 1.0,
+    "many_referenced_files": 2.0,
+    "structured_output": 1.0,
+    "complex_language": 2.0,
+    "simple_language": -2.0,
+    "failure_language": 2.0
+  },
+  "thresholds": {
+    "fast_max": 0.0,
+    "standard_max": 5.0
+  }
+}

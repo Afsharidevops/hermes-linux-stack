@@ -1,43 +1,24 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-
-bash -n "$ROOT/install.sh"
-bash -n "$ROOT/manage.sh"
-python3 -m py_compile "$ROOT/smart-router/src/smart_router/config.py"
-
-grep -q '^name: hermes-omniroute-stack$' "$ROOT/docker-compose.yml"
-grep -q '^  omniroute:$' "$ROOT/docker-compose.yml"
-grep -q 'http://omniroute:20129/v1' "$ROOT/docker-compose.yml"
-grep -q 'DATA_DIR: /app/data' "$ROOT/docker-compose.yml"
-grep -q 'API_PORT: "20129"' "$ROOT/docker-compose.yml"
-grep -q 'STORAGE_ENCRYPTION_KEY:' "$ROOT/docker-compose.yml"
-grep -q 'MACHINE_ID_SALT:' "$ROOT/docker-compose.yml"
-grep -q 'OMNIROUTE_WS_BRIDGE_SECRET:' "$ROOT/docker-compose.yml"
-grep -q 'key_env: OMNIROUTE_API_KEY' "$ROOT/templates/hermes-config.yaml.template"
-grep -q 'OPENWEBUI_OPENAI_BASE_URL=http://omniroute:20129/v1' "$ROOT/.env.example"
-
-if grep -RInE '(nine-router|NINEROUTER_|decolua/9router)' \
-    "$ROOT/docker-compose.yml" "$ROOT/templates" "$ROOT/.env.example" "$ROOT/smart-router/src"; then
-  echo 'legacy router identifier found in runtime/config source' >&2
-  exit 1
-fi
-
+bash -n "$ROOT/install.sh" "$ROOT/manage.sh"
+python3 -m compileall -q "$ROOT/smart-router/src" "$ROOT/smart-router/tests"
+PYTHONPATH="$ROOT/smart-router/src" pytest -q "$ROOT/smart-router/tests"
+python3 - "$ROOT/docker-compose.yml" <<'PY'
+import sys, yaml
+p=sys.argv[1]
+x=yaml.safe_load(open(p,encoding='utf-8'))
+s=x['services']['smart-router']
+assert s.get('build',{}).get('context') == './smart-router'
+assert './smart-router/policy:/policy:ro' in s['volumes']
+assert 'SMART_ROUTER_POLICY' in s['environment']
+assert 'SMART_ROUTER_OBSERVATION_ENABLED' in s['environment']
+print('compose YAML/wiring: OK')
+PY
+tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+PYTHONPATH="$ROOT/smart-router/src" python3 -m smart_router.eval.calibrate "$ROOT/smart-router/examples/labeled-workload.jsonl" -o "$tmp" --weight-passes 0 >/dev/null
+PYTHONPATH="$ROOT/smart-router/src" python3 -m smart_router.eval.report "$ROOT/smart-router/examples/labeled-workload.jsonl" --policy "$tmp" >/dev/null
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  tmpenv="$(mktemp)"
-  cp "$ROOT/.env.example" "$tmpenv"
-  sed -i \
-    -e 's/OMNIROUTE_INITIAL_PASSWORD=CHANGE_ME/OMNIROUTE_INITIAL_PASSWORD=test-password/' \
-    -e 's/OMNIROUTE_JWT_SECRET=CHANGE_ME/OMNIROUTE_JWT_SECRET=0123456789abcdef0123456789abcdef/' \
-    -e 's/OMNIROUTE_API_KEY_SECRET=CHANGE_ME/OMNIROUTE_API_KEY_SECRET=abcdef0123456789abcdef0123456789/' \
-    -e 's/OMNIROUTE_STORAGE_ENCRYPTION_KEY=CHANGE_ME/OMNIROUTE_STORAGE_ENCRYPTION_KEY=00112233445566778899aabbccddeeff/' \
-    -e 's/OMNIROUTE_MACHINE_ID_SALT=CHANGE_ME/OMNIROUTE_MACHINE_ID_SALT=44556677889900112233aabbccddeeff/' \
-    -e 's/OMNIROUTE_WS_BRIDGE_SECRET=CHANGE_ME/OMNIROUTE_WS_BRIDGE_SECRET=55667788990011223344aabbccddeeff/' \
-    -e 's/SMART_ROUTER_HMAC_SECRET=CHANGE_ME/SMART_ROUTER_HMAC_SECRET=11223344556677889900aabbccddeeff/' \
-    -e 's/OPENWEBUI_SECRET_KEY=CHANGE_ME/OPENWEBUI_SECRET_KEY=22334455667788990011aabbccddeeff/' \
-    -e 's/N8N_ENCRYPTION_KEY=CHANGE_ME/N8N_ENCRYPTION_KEY=33445566778899001122aabbccddeeff/' "$tmpenv"
-  docker compose -f "$ROOT/docker-compose.yml" --env-file "$tmpenv" config >/dev/null
-  rm -f "$tmpenv"
+  docker compose -f "$ROOT/docker-compose.yml" --env-file "$ROOT/.env.example" config --quiet
 fi
-
-echo 'smoke: PASS'
+echo "smoke: OK"

@@ -1,24 +1,48 @@
 from __future__ import annotations
 
-import math
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+
+def _bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
 
 
 @dataclass(frozen=True)
 class TierConfig:
     model: str
-    max_output: int
+    max_output_tokens: int
+    context_limit: int
     supports_tools: bool
     supports_vision: bool
-    max_context: int
 
 
 @dataclass(frozen=True)
 class Settings:
     mode: str
+    policy: str
+    calibration_file: Path
     upstream_base_url: str
-    database_path: str
+    upstream_api_key: str | None
+    database_path: Path
     hmac_secret: str
     policy_version: str
     observe_model: str
@@ -29,102 +53,65 @@ class Settings:
     connect_timeout_seconds: float
     read_timeout_seconds: float
     max_request_bytes: int
-    preferred_token_field: str
-    fast: TierConfig
-    standard: TierConfig
-    strong: TierConfig
+    observation_enabled: bool
+    observation_file: Path
+    observation_max_bytes: int
+    tiers: dict[str, TierConfig]
 
     @classmethod
     def from_env(cls) -> "Settings":
-        mode = os.getenv("SMART_ROUTER_MODE", "observe").lower()
+        mode = os.getenv("SMART_ROUTER_MODE", "observe").strip().lower()
         if mode not in {"observe", "route"}:
             raise ValueError("SMART_ROUTER_MODE must be observe or route")
-        preferred = os.getenv("SMART_ROUTER_PREFERRED_TOKEN_FIELD", "max_tokens")
-        if preferred not in {"max_tokens", "max_completion_tokens"}:
-            raise ValueError("SMART_ROUTER_PREFERRED_TOKEN_FIELD is invalid")
+        policy = os.getenv("SMART_ROUTER_POLICY", "heuristic").strip().lower()
+        if policy not in {"heuristic", "calibrated"}:
+            raise ValueError("SMART_ROUTER_POLICY must be heuristic or calibrated")
         secret = os.getenv("SMART_ROUTER_HMAC_SECRET", "")
-        if (
-            len(secret.strip()) < 32
-            or secret.startswith("CHANGE_ME")
-            or len(set(secret.strip())) < 8
-        ):
-            raise ValueError("SMART_ROUTER_HMAC_SECRET must be a strong secret of at least 32 characters")
-        settings = cls(
+        if len(secret) < 32:
+            raise ValueError("SMART_ROUTER_HMAC_SECRET must be at least 32 characters")
+
+        tiers = {
+            "fast": TierConfig(
+                model=os.getenv("SMART_ROUTER_FAST_MODEL", "combo-fast"),
+                max_output_tokens=_int("SMART_ROUTER_FAST_MAX_TOKENS", 1024),
+                context_limit=_int("SMART_ROUTER_FAST_CONTEXT_LIMIT", 32000),
+                supports_tools=_bool("SMART_ROUTER_FAST_SUPPORTS_TOOLS", False),
+                supports_vision=_bool("SMART_ROUTER_FAST_SUPPORTS_VISION", False),
+            ),
+            "standard": TierConfig(
+                model=os.getenv("SMART_ROUTER_STANDARD_MODEL", "combo-standard"),
+                max_output_tokens=_int("SMART_ROUTER_STANDARD_MAX_TOKENS", 4096),
+                context_limit=_int("SMART_ROUTER_STANDARD_CONTEXT_LIMIT", 128000),
+                supports_tools=_bool("SMART_ROUTER_STANDARD_SUPPORTS_TOOLS", True),
+                supports_vision=_bool("SMART_ROUTER_STANDARD_SUPPORTS_VISION", False),
+            ),
+            "strong": TierConfig(
+                model=os.getenv("SMART_ROUTER_STRONG_MODEL", "combo-strong"),
+                max_output_tokens=_int("SMART_ROUTER_STRONG_MAX_TOKENS", 6144),
+                context_limit=_int("SMART_ROUTER_STRONG_CONTEXT_LIMIT", 200000),
+                supports_tools=_bool("SMART_ROUTER_STRONG_SUPPORTS_TOOLS", True),
+                supports_vision=_bool("SMART_ROUTER_STRONG_SUPPORTS_VISION", True),
+            ),
+        }
+        return cls(
             mode=mode,
-            upstream_base_url=os.getenv(
-                "SMART_ROUTER_UPSTREAM_BASE_URL", "http://omniroute:20129/v1"
-            ).rstrip("/"),
-            database_path=os.getenv("SMART_ROUTER_DATABASE_PATH", "/data/router.sqlite3"),
+            policy=policy,
+            calibration_file=Path(os.getenv("SMART_ROUTER_CALIBRATION_FILE", "/policy/calibrated.json")),
+            upstream_base_url=os.getenv("SMART_ROUTER_UPSTREAM_BASE_URL", "http://nine-router:20128/v1").rstrip("/"),
+            upstream_api_key=os.getenv("SMART_ROUTER_UPSTREAM_API_KEY") or None,
+            database_path=Path(os.getenv("SMART_ROUTER_DATABASE_PATH", "/data/router.sqlite3")),
             hmac_secret=secret,
-            policy_version=_required_text("SMART_ROUTER_POLICY_VERSION", "1"),
-            observe_model=_required_text("SMART_ROUTER_OBSERVE_MODEL", "auto"),
-            fail_open_model=_required_text("SMART_ROUTER_FAIL_OPEN_MODEL", "auto"),
-            session_ttl_seconds=_positive_int("SMART_ROUTER_SESSION_TTL_SECONDS", 2700),
-            max_session_age_seconds=_positive_int("SMART_ROUTER_MAX_SESSION_AGE_SECONDS", 43200),
-            demotion_turns=_positive_int("SMART_ROUTER_DEMOTION_TURNS", 5),
-            connect_timeout_seconds=_positive_float("SMART_ROUTER_CONNECT_TIMEOUT_SECONDS", 10),
-            read_timeout_seconds=_positive_float("SMART_ROUTER_READ_TIMEOUT_SECONDS", 600),
-            max_request_bytes=_positive_int("SMART_ROUTER_MAX_REQUEST_BYTES", 10485760),
-            preferred_token_field=preferred,
-            fast=_tier("FAST", "auto", 1024, False, False, 32000),
-            standard=_tier("STANDARD", "auto", 4096, True, False, 128000),
-            strong=_tier("STRONG", "auto", 6144, True, True, 200000),
+            policy_version=os.getenv("SMART_ROUTER_POLICY_VERSION", "2"),
+            observe_model=os.getenv("SMART_ROUTER_OBSERVE_MODEL", "ai"),
+            fail_open_model=os.getenv("SMART_ROUTER_FAIL_OPEN_MODEL", "ai"),
+            session_ttl_seconds=_int("SMART_ROUTER_SESSION_TTL_SECONDS", 2700),
+            max_session_age_seconds=_int("SMART_ROUTER_MAX_SESSION_AGE_SECONDS", 43200),
+            demotion_turns=_int("SMART_ROUTER_DEMOTION_TURNS", 5),
+            connect_timeout_seconds=_float("SMART_ROUTER_CONNECT_TIMEOUT_SECONDS", 10),
+            read_timeout_seconds=_float("SMART_ROUTER_READ_TIMEOUT_SECONDS", 600),
+            max_request_bytes=_int("SMART_ROUTER_MAX_REQUEST_BYTES", 10485760),
+            observation_enabled=_bool("SMART_ROUTER_OBSERVATION_ENABLED", True),
+            observation_file=Path(os.getenv("SMART_ROUTER_OBSERVATION_FILE", "/data/observations.jsonl")),
+            observation_max_bytes=_int("SMART_ROUTER_OBSERVATION_MAX_BYTES", 50 * 1024 * 1024),
+            tiers=tiers,
         )
-        if not any(tier.supports_tools for tier in (settings.fast, settings.standard, settings.strong)):
-            raise ValueError("at least one tier must support tools")
-        if not any(tier.supports_vision for tier in (settings.fast, settings.standard, settings.strong)):
-            raise ValueError("at least one tier must support vision")
-        return settings
-
-    def tier(self, name: str) -> TierConfig:
-        return {"fast": self.fast, "standard": self.standard, "strong": self.strong}[name]
-
-
-def _tier(
-    prefix: str,
-    default_model: str,
-    default_output: int,
-    default_tools: bool,
-    default_vision: bool,
-    default_context: int,
-) -> TierConfig:
-    return TierConfig(
-        model=_required_text(f"SMART_ROUTER_{prefix}_MODEL", default_model),
-        max_output=_positive_int(f"SMART_ROUTER_{prefix}_MAX_TOKENS", default_output),
-        supports_tools=_bool_env(f"SMART_ROUTER_{prefix}_SUPPORTS_TOOLS", default_tools),
-        supports_vision=_bool_env(f"SMART_ROUTER_{prefix}_SUPPORTS_VISION", default_vision),
-        max_context=_positive_int(f"SMART_ROUTER_{prefix}_MAX_CONTEXT", default_context),
-    )
-
-
-def _required_text(name: str, default: str) -> str:
-    value = os.getenv(name, default).strip()
-    if not value:
-        raise ValueError(f"{name} must not be empty")
-    return value
-
-
-def _positive_int(name: str, default: int) -> int:
-    value = int(os.getenv(name, str(default)))
-    if value <= 0:
-        raise ValueError(f"{name} must be a positive integer")
-    return value
-
-
-def _positive_float(name: str, default: float) -> float:
-    value = float(os.getenv(name, str(default)))
-    if not math.isfinite(value) or value <= 0:
-        raise ValueError(f"{name} must be a finite positive number")
-    return value
-
-
-def _bool_env(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    normalized = value.lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(f"{name} must be true or false")

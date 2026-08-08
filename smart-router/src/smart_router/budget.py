@@ -1,81 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-from .config import Settings
-from .routing import Decision
 
-
-@dataclass(frozen=True)
-class BudgetResult:
-    client_limit: int | None
-    proposed_limit: int
-    effective_limit: int | None
-    enforced: bool
-    fields: tuple[str, ...]
-
-
-def propose_budget(
-    body: dict[str, Any], decision: Decision, settings: Settings
-) -> BudgetResult:
-    fields, client_limit = _client_limits(body)
-    tier_limit = settings.tier(decision.proposed_tier).max_output
-    proposed = tier_limit
-
-    text = decision.facts.text
-    if any(term in text for term in ("reply briefly", "short answer", "be concise")):
-        proposed = min(proposed, 700)
-    if any(term in text for term in ("translate", "rewrite", "grammar")):
-        proposed = min(proposed, 1200)
-    if decision.facts.structured_output:
-        proposed = min(proposed, 2500)
-    if decision.facts.has_tools:
-        proposed = min(tier_limit, max(proposed, 2048))
-    if client_limit is not None:
-        proposed = min(proposed, client_limit)
-
-    return BudgetResult(
-        client_limit=client_limit,
-        proposed_limit=proposed,
-        effective_limit=client_limit,
-        enforced=False,
-        fields=fields,
-    )
-
-
-def enforce_budget(
-    body: dict[str, Any], proposal: BudgetResult, settings: Settings
-) -> BudgetResult:
-    fields = proposal.fields or (settings.preferred_token_field,)
-    enforced = False
-    effective_values: list[int] = []
-    for field in fields:
-        if field in body:
-            current = int(body[field])
-            effective = min(current, proposal.proposed_limit)
-            body[field] = effective
-            enforced = enforced or effective < current
-        else:
-            effective = proposal.proposed_limit
-            body[field] = effective
-            enforced = True
-        effective_values.append(effective)
-    return BudgetResult(
-        client_limit=proposal.client_limit,
-        proposed_limit=proposal.proposed_limit,
-        effective_limit=min(effective_values),
-        enforced=enforced,
-        fields=fields,
-    )
-
-
-def _client_limits(body: dict[str, Any]) -> tuple[tuple[str, ...], int | None]:
-    fields = tuple(
-        field
-        for field in ("max_completion_tokens", "max_tokens")
-        if body.get(field) is not None
-    )
-    if not fields:
-        return (), None
-    return fields, min(int(body[field]) for field in fields)
+def apply_output_budget(body: dict[str, Any], tier_limit: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    out = dict(body)
+    field = "max_completion_tokens" if "max_completion_tokens" in out else "max_tokens"
+    requested = out.get(field)
+    if isinstance(requested, int) and requested > 0:
+        applied = min(requested, tier_limit)
+    else:
+        applied = tier_limit
+    out[field] = applied
+    return out, {"field": field, "requested": requested, "limit": tier_limit, "applied": applied}
