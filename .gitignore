@@ -17,3 +17,5 @@ data/stack-secrets/*
 *.log
 __pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
