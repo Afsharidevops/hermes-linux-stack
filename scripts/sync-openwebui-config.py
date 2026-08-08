@@ -6,7 +6,6 @@ import time
 database = "/app/backend/data/webui.db"
 api_key = os.environ.get("OPENAI_API_KEY", "")
 base_url = os.environ.get("OPENAI_API_BASE_URL", "")
-
 if not api_key or not base_url:
     raise SystemExit("Open WebUI API URL/key environment is missing")
 
@@ -30,4 +29,4 @@ try:
 finally:
     connection.close()
 
-print("Open WebUI persisted 9router connection synchronized")
+print("Open WebUI persisted OmniRoute connection synchronized")

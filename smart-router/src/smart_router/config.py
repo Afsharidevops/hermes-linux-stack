@@ -49,17 +49,16 @@ class Settings:
             or len(set(secret.strip())) < 8
         ):
             raise ValueError("SMART_ROUTER_HMAC_SECRET must be a strong secret of at least 32 characters")
-
         settings = cls(
             mode=mode,
             upstream_base_url=os.getenv(
-                "SMART_ROUTER_UPSTREAM_BASE_URL", "http://nine-router:20128/v1"
+                "SMART_ROUTER_UPSTREAM_BASE_URL", "http://omniroute:20129/v1"
             ).rstrip("/"),
             database_path=os.getenv("SMART_ROUTER_DATABASE_PATH", "/data/router.sqlite3"),
             hmac_secret=secret,
             policy_version=_required_text("SMART_ROUTER_POLICY_VERSION", "1"),
-            observe_model=_required_text("SMART_ROUTER_OBSERVE_MODEL", "ai"),
-            fail_open_model=_required_text("SMART_ROUTER_FAIL_OPEN_MODEL", "ai"),
+            observe_model=_required_text("SMART_ROUTER_OBSERVE_MODEL", "auto"),
+            fail_open_model=_required_text("SMART_ROUTER_FAIL_OPEN_MODEL", "auto"),
             session_ttl_seconds=_positive_int("SMART_ROUTER_SESSION_TTL_SECONDS", 2700),
             max_session_age_seconds=_positive_int("SMART_ROUTER_MAX_SESSION_AGE_SECONDS", 43200),
             demotion_turns=_positive_int("SMART_ROUTER_DEMOTION_TURNS", 5),
@@ -67,9 +66,9 @@ class Settings:
             read_timeout_seconds=_positive_float("SMART_ROUTER_READ_TIMEOUT_SECONDS", 600),
             max_request_bytes=_positive_int("SMART_ROUTER_MAX_REQUEST_BYTES", 10485760),
             preferred_token_field=preferred,
-            fast=_tier("FAST", "combo-fast", 1024, False, False, 32000),
-            standard=_tier("STANDARD", "combo-standard", 4096, True, False, 128000),
-            strong=_tier("STRONG", "combo-strong", 6144, True, True, 200000),
+            fast=_tier("FAST", "auto", 1024, False, False, 32000),
+            standard=_tier("STANDARD", "auto", 4096, True, False, 128000),
+            strong=_tier("STRONG", "auto", 6144, True, True, 200000),
         )
         if not any(tier.supports_tools for tier in (settings.fast, settings.standard, settings.strong)):
             raise ValueError("at least one tier must support tools")

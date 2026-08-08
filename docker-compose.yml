@@ -1,32 +1,37 @@
-name: hermes-9router-stack
-
+name: hermes-omniroute-stack
 services:
-  nine-router:
-    profiles: ["9router"]
-    image: ${NINEROUTER_IMAGE:-decolua/9router:latest}
-    container_name: nine-router
+  omniroute:
+    profiles: ["omniroute"]
+    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
+    container_name: omniroute
     restart: unless-stopped
+    stop_grace_period: 40s
     ports:
-      - "${NINEROUTER_BIND_IP:-127.0.0.1}:${NINEROUTER_PORT:-20128}:20128"
+      - "${OMNIROUTE_BIND_IP:-127.0.0.1}:${OMNIROUTE_PORT:-20128}:20128"
+      - "${OMNIROUTE_API_BIND_IP:-127.0.0.1}:${OMNIROUTE_API_PORT:-20129}:20129"
     volumes:
-      - ./data/9router:/app/data
+      - ./data/omniroute:/app/data
     environment:
       DATA_DIR: /app/data
       PORT: "20128"
+      DASHBOARD_PORT: "20128"
+      API_PORT: "20129"
+      API_HOST: "0.0.0.0"
       HOSTNAME: "0.0.0.0"
       NODE_ENV: production
-      JWT_SECRET: ${NINEROUTER_JWT_SECRET}
-      INITIAL_PASSWORD: ${NINEROUTER_INITIAL_PASSWORD}
-      API_KEY_SECRET: ${NINEROUTER_API_KEY_SECRET}
-      MACHINE_ID_SALT: ${NINEROUTER_MACHINE_ID_SALT}
-      REQUIRE_API_KEY: ${NINEROUTER_REQUIRE_API_KEY:-false}
-      AUTH_COOKIE_SECURE: ${NINEROUTER_AUTH_COOKIE_SECURE:-false}
-      ENABLE_REQUEST_LOGS: ${NINEROUTER_ENABLE_REQUEST_LOGS:-false}
-      OBSERVABILITY_ENABLED: ${NINEROUTER_OBSERVABILITY_ENABLED:-true}
-      BASE_URL: http://nine-router:20128
-      NEXT_PUBLIC_BASE_URL: ${NINEROUTER_PUBLIC_BASE_URL:-http://localhost:20128}
-      CLOUD_URL: ${NINEROUTER_CLOUD_URL:-https://9router.com}
-      NEXT_PUBLIC_CLOUD_URL: ${NINEROUTER_CLOUD_URL:-https://9router.com}
+      JWT_SECRET: ${OMNIROUTE_JWT_SECRET}
+      INITIAL_PASSWORD: ${OMNIROUTE_INITIAL_PASSWORD}
+      API_KEY_SECRET: ${OMNIROUTE_API_KEY_SECRET}
+      STORAGE_ENCRYPTION_KEY: ${OMNIROUTE_STORAGE_ENCRYPTION_KEY}
+      STORAGE_ENCRYPTION_KEY_VERSION: ${OMNIROUTE_STORAGE_ENCRYPTION_KEY_VERSION:-v1}
+      MACHINE_ID_SALT: ${OMNIROUTE_MACHINE_ID_SALT}
+      OMNIROUTE_WS_BRIDGE_SECRET: ${OMNIROUTE_WS_BRIDGE_SECRET}
+      REQUIRE_API_KEY: ${OMNIROUTE_REQUIRE_API_KEY:-false}
+      AUTH_COOKIE_SECURE: ${OMNIROUTE_AUTH_COOKIE_SECURE:-false}
+      NEXT_PUBLIC_BASE_URL: ${OMNIROUTE_PUBLIC_BASE_URL:-http://localhost:20128}
+      BASE_URL: http://omniroute:20128
+      ALLOW_API_KEY_REVEAL: ${OMNIROUTE_ALLOW_API_KEY_REVEAL:-false}
+      OMNIROUTE_MEMORY_MB: ${OMNIROUTE_MEMORY_MB:-512}
     networks: [agent-net]
     healthcheck:
       test:
@@ -60,15 +65,15 @@ services:
     restart: unless-stopped
     environment:
       SMART_ROUTER_MODE: ${SMART_ROUTER_MODE:-observe}
-      SMART_ROUTER_UPSTREAM_BASE_URL: http://nine-router:20128/v1
+      SMART_ROUTER_UPSTREAM_BASE_URL: http://omniroute:20129/v1
       SMART_ROUTER_DATABASE_PATH: /data/router.sqlite3
       SMART_ROUTER_HMAC_SECRET: ${SMART_ROUTER_HMAC_SECRET}
       SMART_ROUTER_POLICY_VERSION: ${SMART_ROUTER_POLICY_VERSION:-1}
-      SMART_ROUTER_OBSERVE_MODEL: ${SMART_ROUTER_OBSERVE_MODEL:-ai}
-      SMART_ROUTER_FAIL_OPEN_MODEL: ${SMART_ROUTER_FAIL_OPEN_MODEL:-ai}
-      SMART_ROUTER_FAST_MODEL: ${SMART_ROUTER_FAST_MODEL:-combo-fast}
-      SMART_ROUTER_STANDARD_MODEL: ${SMART_ROUTER_STANDARD_MODEL:-combo-standard}
-      SMART_ROUTER_STRONG_MODEL: ${SMART_ROUTER_STRONG_MODEL:-combo-strong}
+      SMART_ROUTER_OBSERVE_MODEL: ${SMART_ROUTER_OBSERVE_MODEL:-auto}
+      SMART_ROUTER_FAIL_OPEN_MODEL: ${SMART_ROUTER_FAIL_OPEN_MODEL:-auto}
+      SMART_ROUTER_FAST_MODEL: ${SMART_ROUTER_FAST_MODEL:-auto}
+      SMART_ROUTER_STANDARD_MODEL: ${SMART_ROUTER_STANDARD_MODEL:-auto}
+      SMART_ROUTER_STRONG_MODEL: ${SMART_ROUTER_STRONG_MODEL:-auto}
       SMART_ROUTER_SESSION_TTL_SECONDS: ${SMART_ROUTER_SESSION_TTL_SECONDS:-2700}
       SMART_ROUTER_MAX_SESSION_AGE_SECONDS: ${SMART_ROUTER_MAX_SESSION_AGE_SECONDS:-43200}
       SMART_ROUTER_DEMOTION_TURNS: ${SMART_ROUTER_DEMOTION_TURNS:-5}
@@ -87,7 +92,7 @@ services:
       - no-new-privileges:true
     cap_drop: ["ALL"]
     depends_on:
-      nine-router:
+      omniroute:
         condition: service_healthy
       smart-router-init:
         condition: service_completed_successfully
@@ -368,7 +373,7 @@ services:
 
 networks:
   agent-net:
-    name: hermes-9router-net
+    name: hermes-omniroute-net
     driver: bridge
   # Internal: the brokers cannot reach, and cannot be reached from, the internet
   # or the rest of the stack. Only Hermes and the brokers are attached.

@@ -17,3 +17,5 @@ data/stack-secrets/*
 *.log
 __pycache__/
 *.py[cod]
+
+.omniroute-migration-backup-*/
