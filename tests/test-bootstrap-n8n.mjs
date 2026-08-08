@@ -8,7 +8,7 @@ import {
   CREDENTIAL_TYPES,
   MANAGED_NAMES,
   MCP_PATH,
-  NINEROUTER_BASE_URL,
+  OMNIROUTE_BASE_URL,
   SMART_ROUTER_BASE_URL,
   buildHostedChatWorkflow,
   buildMcpWorkflow,
@@ -309,12 +309,12 @@ test("clean run discovers schemas, creates credentials/workflows, publishes, ver
   assert.equal(state.workflows.chat.id, result.workflows.chat.id);
 });
 
-test("direct 9router mode provisions its URL and ai model", async (t) => {
+test("direct OmniRoute mode provisions its URL and ai model", async (t) => {
   const server = await fixture(t);
   const stateFile = await tempState(t);
   const result = await reconcileN8n({
     ...input(server, stateFile),
-    routerBaseUrl: NINEROUTER_BASE_URL,
+    routerBaseUrl: OMNIROUTE_BASE_URL,
     routerModel: "ai",
   });
 
@@ -322,10 +322,10 @@ test("direct 9router mode provisions its URL and ai model", async (t) => {
     (item) => item.type === CREDENTIAL_TYPES.router,
   );
   const chat = [...server.workflows.values()].find((item) => item.name === MANAGED_NAMES.chatWorkflow);
-  assert.deepEqual(routerCredential.data, { apiKey: ROUTER_KEY, url: NINEROUTER_BASE_URL });
+  assert.deepEqual(routerCredential.data, { apiKey: ROUTER_KEY, url: OMNIROUTE_BASE_URL });
   assert.deepEqual(chat.nodes[2].parameters.model, { mode: "id", value: "ai" });
   const state = JSON.parse(await readFile(stateFile, "utf8"));
-  assert.equal(state.routerBaseUrl, NINEROUTER_BASE_URL);
+  assert.equal(state.routerBaseUrl, OMNIROUTE_BASE_URL);
   assert.equal(state.routerModel, "ai");
   assert.equal(result.workflows.chat.published, true);
 });
@@ -339,7 +339,7 @@ test("router transition updates the same credential and workflow with proven pri
 
   const changed = await reconcileN8n({
     ...input(server, stateFile),
-    routerBaseUrl: NINEROUTER_BASE_URL,
+    routerBaseUrl: OMNIROUTE_BASE_URL,
     routerModel: "ai",
     previousRouterBaseUrl: SMART_ROUTER_BASE_URL,
   });

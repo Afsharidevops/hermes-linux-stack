@@ -88,7 +88,7 @@ new_fixture() {
   chmod 755 "$stack/manage.sh"
   : > "$stack/docker-compose.yml"
   cat > "$stack/.env" <<EOF
-COMPOSE_PROFILES=9router,hermes,n8n
+COMPOSE_PROFILES=omniroute,hermes,n8n
 N8N_MCP_MODE=$mode
 N8N_IMAGE=n8nio/n8n:latest
 EOF
@@ -181,7 +181,7 @@ grep -q 'reconciliation failed before Hermes was recreated' "$stack/output"
 ! grep -Fq eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature "$stack/output"
 
 # Mode transitions preserve unrelated MCP servers and both tokens. Without Smart
-# Router, hosted chat reconciliation must target 9router model ai.
+# Router, hosted chat reconciliation must target OmniRoute model ai.
 stack="$(new_fixture token-validation off)"
 printf '%s\n' eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature | run_manage "$stack" "$stack/valid.out" set-n8n-instance-mcp-token
 : > "$stack/fake-docker.log"
@@ -196,7 +196,7 @@ grep -q '^  n8n:$' "$stack/data/hermes/config.yaml"
 grep -q 'N8N_INSTANCE_MCP_URL' "$stack/data/hermes/config.yaml"
 grep -q '^N8N_TRIGGER_MCP_TOKEN=valid-trigger-token$' "$stack/data/hermes/.env"
 grep -q '^N8N_INSTANCE_MCP_TOKEN=eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature$' "$stack/data/hermes/.env"
-grep -q 'reconcile mode=instance router=http://nine-router:20128/v1 model=ai' "$stack/fake-docker.log"
+grep -q 'reconcile mode=instance router=http://omniroute:20129/v1 model=ai' "$stack/fake-docker.log"
 run_manage "$stack" "$stack/trigger.out" set-n8n-mcp-mode trigger
 grep -q '^N8N_MCP_MODE=trigger$' "$stack/.env"
 grep -q 'N8N_TRIGGER_MCP_URL' "$stack/data/hermes/config.yaml"

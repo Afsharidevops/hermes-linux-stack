@@ -1,12 +1,10 @@
 .env
-data/9router/*
 data/hermes/*
 data/open-webui/*
 data/caddy/*
 data/smart-router/*
 data/n8n/*
 data/stack-secrets/*
-!data/9router/.gitkeep
 !data/hermes/.gitkeep
 !data/open-webui/.gitkeep
 !data/caddy/.gitkeep
@@ -19,3 +17,6 @@ __pycache__/
 *.py[cod]
 
 .omniroute-migration-backup-*/
+
+data/omniroute/*
+!data/omniroute/.gitkeep

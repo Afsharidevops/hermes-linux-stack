@@ -4,7 +4,6 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 bash -n "$ROOT/install.sh"
 bash -n "$ROOT/manage.sh"
-bash -n "$ROOT/scripts/apply-to-upstream.sh"
 python3 -m py_compile "$ROOT/smart-router/src/smart_router/config.py"
 
 grep -q '^name: hermes-omniroute-stack$' "$ROOT/docker-compose.yml"

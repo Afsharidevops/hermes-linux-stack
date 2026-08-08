@@ -424,7 +424,7 @@ export async function reconcileN8n({
   ].filter(Boolean);
   requireValue(apiKey, "N8N_API_KEY");
   if (mode === "trigger") requireValue(mcpToken, "N8N_TRIGGER_MCP_TOKEN");
-  requireValue(routerApiKey, "NINEROUTER_API_KEY");
+  requireValue(routerApiKey, "OMNIROUTE_API_KEY");
   const selectedRouterUrl = requireHttpUrl(routerBaseUrl, "N8N_ROUTER_BASE_URL").toString().replace(/\/$/, "");
   const rollbackRouterUrl = requireHttpUrl(
     previousRouterBaseUrl,
@@ -633,11 +633,11 @@ export function configFromEnv(env = process.env) {
     apiKey: env.N8N_API_KEY,
     mcpMode: env.N8N_MCP_MODE || "trigger",
     mcpToken: env.N8N_TRIGGER_MCP_TOKEN || env.N8N_MCP_TOKEN,
-    routerApiKey: env.NINEROUTER_API_KEY,
+    routerApiKey: env.OMNIROUTE_API_KEY,
     previousMcpToken:
       env.N8N_PREVIOUS_TRIGGER_MCP_TOKEN || env.N8N_PREVIOUS_MCP_TOKEN ||
       env.N8N_TRIGGER_MCP_TOKEN || env.N8N_MCP_TOKEN,
-    previousRouterApiKey: env.N8N_PREVIOUS_NINEROUTER_API_KEY || env.NINEROUTER_API_KEY,
+    previousRouterApiKey: env.N8N_PREVIOUS_OMNIROUTE_API_KEY || env.OMNIROUTE_API_KEY,
     routerBaseUrl: env.N8N_ROUTER_BASE_URL || "http://smart-router:8080/v1",
     routerModel: env.N8N_CHAT_MODEL || "auto",
     previousRouterBaseUrl:
@@ -657,10 +657,10 @@ async function main() {
         process.env.N8N_API_KEY,
         process.env.N8N_TRIGGER_MCP_TOKEN,
         process.env.N8N_MCP_TOKEN,
-        process.env.NINEROUTER_API_KEY,
+        process.env.OMNIROUTE_API_KEY,
         process.env.N8N_PREVIOUS_TRIGGER_MCP_TOKEN,
         process.env.N8N_PREVIOUS_MCP_TOKEN,
-        process.env.N8N_PREVIOUS_NINEROUTER_API_KEY,
+        process.env.N8N_PREVIOUS_OMNIROUTE_API_KEY,
       ],
     );
     process.stderr.write(`${JSON.stringify(safe)}\n`);

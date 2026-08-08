@@ -14,7 +14,7 @@ export const CREDENTIAL_TYPES = Object.freeze({
 
 export const MCP_PATH = "hermes";
 export const SMART_ROUTER_BASE_URL = "http://smart-router:8080/v1";
-export const NINEROUTER_BASE_URL = "http://nine-router:20128/v1";
+export const OMNIROUTE_BASE_URL = "http://omniroute:20129/v1";
 
 const MCP_TRIGGER_NAME = "MCP Server Trigger";
 const CALCULATOR_NAME = "Calculator";

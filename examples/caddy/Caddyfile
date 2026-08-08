@@ -1,9 +1,9 @@
 # Optional example. Telegram polling does not need Caddy or a domain.
 # Replace the domains and uncomment only the services you expose.
 
-# 9router.example.com {
+# omniroute.example.com {
 #     encode zstd gzip
-#     reverse_proxy nine-router:20128
+#     reverse_proxy omniroute:20128
 # }
 
 # hermes.example.com {

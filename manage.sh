@@ -31,7 +31,6 @@ OmniRoute migration/operations:
                               configure Hermes/Open WebUI to use it, enable enforcement
   disable-omniroute-api-auth  Disable endpoint-key enforcement (loopback-only recommended)
   set-model <name>            Change Hermes and Smart Router defaults to a model/route name
-  migration-status            Report legacy data/9router presence and new data/omniroute state
 
 Hermes:
   show-telegram-users
@@ -149,7 +148,7 @@ doctor() {
   local failed=0
   printf 'Hermes OmniRoute stack doctor\n\n'
 
-  if grep -RInE --exclude='MIGRATION.md' --exclude='CHANGELOG.md' --exclude='RELEASE_NOTES.md' \
+  if grep -RInE --exclude='CHANGELOG.md' \
       --exclude-dir='.git' '(nine-router|NINEROUTER_|decolua/9router)' \
       "$ROOT_DIR/docker-compose.yml" "$ROOT_DIR/templates" "$ROOT_DIR/plugins" "$ROOT_DIR/.env.example" 2>/dev/null; then
     warn "Legacy router identifiers remain in runtime/config templates."
@@ -186,7 +185,7 @@ doctor() {
 backup_stack() {
   require_env
   local output="${1:-$ROOT_DIR/hermes-omniroute-backup-$(date +%Y%m%d-%H%M%S).tar.gz}"
-  tar -C "$ROOT_DIR" -czf "$output" .env data templates docker-compose.yml plugins install.sh manage.sh README.md SECURITY.md MIGRATION.md CHANGELOG.md RELEASE_NOTES.md
+  tar -C "$ROOT_DIR" -czf "$output" .env data templates docker-compose.yml plugins install.sh manage.sh README.md SECURITY.md CHANGELOG.md
   chmod 600 "$output" || true
   ok "Backup written to $output"
 }
@@ -234,17 +233,6 @@ case "$cmd" in
     [[ $# -eq 2 ]] || die "Usage: ./manage.sh set-model <name>"
     set_model "$2"
     restart_clients
-    ;;
-  migration-status)
-    require_env
-    if [[ -d "$ROOT_DIR/data/9router" ]]; then
-      warn "Legacy data/9router exists. It is intentionally not mounted by this release. Keep it as a backup until OmniRoute is verified."
-    else
-      ok "No legacy data/9router directory in this installation."
-    fi
-    [[ -d "$ROOT_DIR/data/omniroute" ]] && ok "OmniRoute data directory exists: data/omniroute" || warn "data/omniroute is missing."
-    printf 'Selected profiles: %s\n' "$(env_get COMPOSE_PROFILES)"
-    printf 'OmniRoute API-key enforcement: %s\n' "$(env_get OMNIROUTE_REQUIRE_API_KEY)"
     ;;
   show-telegram-users)
     [[ -f "$HERMES_ENV" ]] || die "Hermes is not configured."

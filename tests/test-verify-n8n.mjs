@@ -246,7 +246,7 @@ test("supports SSE MCP responses", async (t) => {
   assert.equal(result.checks.mcp, "ok");
 });
 
-test("supports a direct 9router health endpoint", async (t) => {
+test("supports a direct OmniRoute health endpoint", async (t) => {
   const server = await fixture(t);
   const result = await verifyN8n(
     input(server, await stateFile(t), {

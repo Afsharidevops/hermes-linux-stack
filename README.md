@@ -1,6 +1,6 @@
 # Hermes + OmniRoute + Open WebUI Linux Stack
 
-OmniRoute migration release for the Hermes Linux Stack. It replaces the legacy 9router service with [OmniRoute](https://github.com/diegosouzapw/OmniRoute) while keeping the stack's OpenAI-compatible architecture.
+Hermes Linux Stack powered by [OmniRoute](https://github.com/diegosouzapw/OmniRoute) as the OpenAI-compatible model routing gateway.
 
 ## Architecture
 
@@ -37,7 +37,6 @@ Containers use `http://omniroute:20129/v1`. Splitting the dashboard and API port
 - Fresh route/model default: `auto`
 - All stack router secrets/settings use `OMNIROUTE_*`
 
-The old router database is **not** mounted or converted. See `MIGRATION.md`.
 
 ## Install
 
@@ -110,10 +109,8 @@ Run `./manage.sh help` for all commands.
 This archive also includes a non-destructive overlay helper. If you have a complete upstream checkout and want to preserve all unchanged development/source files:
 
 ```bash
-./scripts/apply-to-upstream.sh /path/to/hermes-linux-stack
 ```
 
-It backs up files it replaces, applies the OmniRoute migration files, creates `data/omniroute`, and does **not** delete the old `data/9router` runtime directory. Read `MIGRATION.md` before starting the migrated stack.
 
 ## Validation
 
