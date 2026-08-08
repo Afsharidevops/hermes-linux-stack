@@ -23,20 +23,37 @@ from .routing import AUTO_ALIASES, Decision, PolicyEngine, decide
 
 
 class RouterRuntime:
-    def __init__(self, settings: Settings):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self.settings = settings
         self.engine = PolicyEngine(settings)
         self.store = SessionStore(settings.database_path)
-        self.observations = ObservationWriter(settings.observation_file, settings.observation_max_bytes, settings.observation_enabled)
-        self.client = httpx.AsyncClient(timeout=httpx.Timeout(settings.read_timeout_seconds, connect=settings.connect_timeout_seconds))
+        self.observations = ObservationWriter(
+            settings.observation_file,
+            settings.observation_max_bytes,
+            settings.observation_enabled,
+        )
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                settings.read_timeout_seconds,
+                connect=settings.connect_timeout_seconds,
+            ),
+            transport=transport,
+        )
 
     async def close(self) -> None:
         await self.client.aclose()
 
 
-def create_app(settings: Settings | None = None) -> Starlette:
+def create_app(
+    settings: Settings | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> Starlette:
     settings = settings or Settings.from_env()
-    runtime = RouterRuntime(settings)
+    runtime = RouterRuntime(settings, transport=transport)
 
     async def health(_: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "version": "0.2.0", "mode": settings.mode, "policy": runtime.engine.name})
@@ -145,7 +162,13 @@ def create_app(settings: Settings | None = None) -> Starlette:
 
         url = f"{settings.upstream_base_url}/chat/completions"
         headers = forwarded_headers(dict(request.headers), settings.upstream_api_key)
-        payload = json.dumps(outbound, separators=(",", ":")).encode()
+        # Preserve the original request bytes whenever Smart Router did not
+        # modify the OpenAI payload. This keeps explicit model passthrough
+        # byte-transparent.
+        if outbound == body:
+            payload = raw
+        else:
+            payload = json.dumps(outbound, separators=(",", ":")).encode()
         started = time.monotonic()
         try:
             if outbound.get("stream") is True:
