@@ -23,7 +23,7 @@ The Smart Router answers **what capability/tier does this request need?**. 9rout
 - request-aware output budgets in route mode
 - privacy-safe JSONL observations (derived features/metadata only)
 - offline `replay`, `calibrate`, and `report` commands
-- local Smart Router Docker build; no unpublished v0.2 image is required
+- published multi-architecture Smart Router image: `afsharidevops/hermes-smart-router:0.2.0`
 - Open WebUI defaults to `http://smart-router:8080/v1`
 - Smart Router upstream is `http://nine-router:20128/v1`
 - current default tier models: `combo-fast`, `combo-standard`, `combo-strong`

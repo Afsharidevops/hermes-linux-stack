@@ -55,9 +55,7 @@ services:
 
   smart-router:
     profiles: ["smart-router"]
-    build:
-      context: ./smart-router
-    image: ${SMART_ROUTER_IMAGE:-hermes-smart-router:0.2.0-local}
+    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.2.0}
     container_name: hermes-smart-router
     restart: unless-stopped
     environment:
