@@ -1,30 +1,26 @@
-import sqlite3
-
-from smart_router.database import RouteStore
-from smart_router.privacy import session_identity
+from smart_router.observations import ObservationWriter
+from smart_router.privacy import pseudonym, stable_session_id
 
 
-def test_session_identity_is_hmac_and_does_not_contain_source(settings):
-    synthetic_session = "telegram-user-test-12345"
-    value, source = session_identity(
-        {"X-Router-Session": synthetic_session},
-        {"messages": []},
-        settings.hmac_secret,
-    )
-    assert source == "router-header"
-    assert value
-    assert synthetic_session not in value
+def test_session_id_is_pseudonymous():
+    secret = "x" * 64
+    value, source = stable_session_id(secret, {"x-session-id": "raw-session"}, {})
+    assert value != "raw-session"
+    assert len(value) == 32
+    assert source == "x-session-id"
+    assert value == pseudonym(secret, "raw-session")
 
 
-def test_database_stores_no_prompt_or_credential(settings):
-    store = RouteStore(settings)
-    session_hash, _ = session_identity(
-        {"Authorization": "Bearer very-secret", "X-Router-Session": "private-user"},
-        {"messages": [{"role": "user", "content": "private prompt"}]},
-        settings.hmac_secret,
-    )
-    store.resolve(session_hash, "auto", "standard", "initial")
-    raw = open(settings.database_path, "rb").read()
-    assert b"very-secret" not in raw
-    assert b"private-user" not in raw
-    assert b"private prompt" not in raw
+def test_observation_writer_only_writes_given_safe_metadata(tmp_path):
+    path = tmp_path / "obs.jsonl"
+    writer = ObservationWriter(path, 10000, True)
+    writer.write({"event": "decision", "facts": {"estimated_tokens": 12}})
+    text = path.read_text()
+    assert "estimated_tokens" in text
+    assert "prompt" not in text
+
+
+def test_no_stable_identifier_disables_cross_chat_stickiness():
+    session, source = stable_session_id("x" * 64, {"authorization": "Bearer shared"}, {})
+    assert session is None
+    assert source == "none"

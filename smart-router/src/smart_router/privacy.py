@@ -1,74 +1,36 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
-from typing import Any, Mapping
+from typing import Any
 
 
-def session_identity(
-    headers: Mapping[str, str], body: dict[str, Any], secret: str
-) -> tuple[str | None, str]:
+def pseudonym(secret: str, value: str) -> str:
+    return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def stable_session_id(secret: str, headers: dict[str, str], body: dict[str, Any]) -> tuple[str | None, str]:
+    # Prefer explicit, stable conversation/user identifiers. Never persist the raw value.
     candidates = (
-        ("router-header", _header(headers, "x-router-session")),
-        ("hermes-header", _header(headers, "x-hermes-session-key")),
-        ("session-id", body.get("session_id")),
-        ("metadata", (body.get("metadata") or {}).get("conversation_id") if isinstance(body.get("metadata"), dict) else None),
-        ("prompt-cache-key", body.get("prompt_cache_key")),
-        ("user", body.get("user")),
+        ("x-session-id", headers.get("x-session-id")),
+        ("x-conversation-id", headers.get("x-conversation-id")),
+        ("x-chat-id", headers.get("x-chat-id")),
+        ("x-openwebui-chat-id", headers.get("x-openwebui-chat-id")),
+        ("x-openwebui-user-id", headers.get("x-openwebui-user-id")),
+        ("x-user-id", headers.get("x-user-id")),
+        ("body-user", body.get("user")),
     )
     for source, value in candidates:
         if isinstance(value, str) and value.strip():
-            return _digest(secret, source, value.strip()), source
-
-    # Without a trusted session value, stay stateless. Content fingerprints can
-    # merge unrelated users who share an endpoint key and ask the same question.
+            return pseudonym(secret, value.strip()), source
+    # Do not make a caller-wide API key into a sticky conversation: one difficult
+    # chat must not promote every unrelated chat sharing that credential.
     return None, "none"
 
 
-def _credential_namespace(headers: Mapping[str, str], secret: str) -> str:
-    for name in ("authorization", "x-api-key", "x-goog-api-key"):
-        value = _header(headers, name)
-        if value:
-            return _digest(secret, "credential", name + "\0" + value)
-    return "anonymous"
-
-
-def _conversation_fingerprint(body: dict[str, Any]) -> str | None:
-    messages = body.get("messages")
-    if not isinstance(messages, list):
-        return None
-    stable: list[dict[str, Any]] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        role = message.get("role")
-        if role not in {"system", "user"}:
-            continue
-        content = message.get("content")
-        if content in (None, "", []):
-            continue
-        stable.append({"role": role, "content": content})
-        if role == "user":
-            break
-    if not stable:
-        return None
-    raw = json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def _digest(secret: str, domain: str, value: str) -> str:
-    raw = hmac.new(
-        secret.encode(),
-        ("smart-router/v0.1/" + domain + "\0" + value).encode(),
-        hashlib.sha256,
-    ).digest()
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
-
-
-def _header(headers: Mapping[str, str], name: str) -> str | None:
-    for key, value in headers.items():
-        if key.lower() == name:
-            return value
-    return None
+def safe_json_size(value: Any) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode())
+    except Exception:
+        return 0
