@@ -1,78 +1,207 @@
 from __future__ import annotations
 
+import os
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .routing import TIER_ORDER
+from .config import Settings
+from .routing import TIER_RANK
 
 
 @dataclass(frozen=True)
 class StickyResult:
     tier: str
+    hit: bool
     action: str
 
 
-class SessionStore:
-    def __init__(self, path: Path):
-        self.path = path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._init()
+class RouteStore:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        Path(settings.database_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=5)
-        conn.row_factory = sqlite3.Row
-        return conn
+        os.umask(0o077)
+        connection = sqlite3.connect(self.settings.database_path, timeout=5)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 5000")
+        return connection
 
-    def _init(self) -> None:
-        with self._connect() as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(
+    def _initialize(self) -> None:
+        with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_hash TEXT PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS session_routes (
+                    session_hash TEXT NOT NULL,
+                    auto_alias TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
                     tier TEXT NOT NULL,
+                    previous_tier TEXT,
+                    promotion_reason TEXT,
+                    simple_turn_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL,
-                    lower_turns INTEGER NOT NULL DEFAULT 0,
-                    policy_version TEXT NOT NULL
+                    last_seen_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    PRIMARY KEY(session_hash, auto_alias, policy_version)
                 )
                 """
             )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS session_routes_expiry ON session_routes(expires_at)"
+            )
+        self.purge_expired()
 
-    def choose(
+    def purge_expired(self, now: int | None = None, limit: int = 500) -> int:
+        now = now or int(time.time())
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM session_routes WHERE rowid IN (
+                    SELECT rowid FROM session_routes
+                    WHERE expires_at <= ? OR created_at + ? <= ?
+                    LIMIT ?
+                )
+                """,
+                (now, self.settings.max_session_age_seconds, now, limit),
+            )
+            return cursor.rowcount or 0
+
+    def ready(self) -> bool:
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("SELECT 1")
+                connection.rollback()
+            return True
+        except sqlite3.Error:
+            return False
+
+    def reset(self, session_hash: str, alias: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM session_routes WHERE session_hash = ? AND auto_alias = ?",
+                (session_hash, alias),
+            )
+
+    def resolve(
         self,
         session_hash: str,
+        alias: str,
         proposed_tier: str,
-        *,
-        policy_version: str,
-        ttl_seconds: int,
-        max_age_seconds: int,
-        demotion_turns: int,
+        promotion_reason: str,
         now: int | None = None,
     ) -> StickyResult:
-        now = int(now or time.time())
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM sessions WHERE session_hash=?", (session_hash,)).fetchone()
-            if row is None or row["policy_version"] != policy_version or now - row["updated_at"] > ttl_seconds or now - row["created_at"] > max_age_seconds:
-                conn.execute(
-                    "INSERT OR REPLACE INTO sessions(session_hash,tier,created_at,updated_at,lower_turns,policy_version) VALUES(?,?,?,?,?,?)",
-                    (session_hash, proposed_tier, now, now, 0, policy_version),
+        now = now or int(time.time())
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                DELETE FROM session_routes WHERE rowid IN (
+                    SELECT rowid FROM session_routes
+                    WHERE expires_at <= ? OR created_at + ? <= ?
+                    LIMIT 100
                 )
-                return StickyResult(proposed_tier, "new_or_expired")
+                """,
+                (now, self.settings.max_session_age_seconds, now),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM session_routes
+                WHERE session_hash = ? AND auto_alias = ? AND policy_version = ?
+                """,
+                (session_hash, alias, self.settings.policy_version),
+            ).fetchone()
+            if row and (
+                row["expires_at"] <= now
+                or row["created_at"] + self.settings.max_session_age_seconds <= now
+            ):
+                connection.execute(
+                    """
+                    DELETE FROM session_routes
+                    WHERE session_hash = ? AND auto_alias = ? AND policy_version = ?
+                    """,
+                    (session_hash, alias, self.settings.policy_version),
+                )
+                row = None
+            if row is None:
+                self._insert(connection, session_hash, alias, proposed_tier, now)
+                connection.commit()
+                return StickyResult(proposed_tier, False, "created")
 
             current = row["tier"]
-            if TIER_ORDER[proposed_tier] > TIER_ORDER[current]:
-                conn.execute("UPDATE sessions SET tier=?,updated_at=?,lower_turns=0 WHERE session_hash=?", (proposed_tier, now, session_hash))
-                return StickyResult(proposed_tier, "promoted")
-            if TIER_ORDER[proposed_tier] == TIER_ORDER[current]:
-                conn.execute("UPDATE sessions SET updated_at=?,lower_turns=0 WHERE session_hash=?", (now, session_hash))
-                return StickyResult(current, "kept")
+            selected = current
+            action = "sticky"
+            simple_count = row["simple_turn_count"]
+            previous = row["previous_tier"]
+            reason = row["promotion_reason"]
+            if TIER_RANK[proposed_tier] > TIER_RANK[current]:
+                selected = proposed_tier
+                previous = current
+                reason = promotion_reason
+                simple_count = 0
+                action = "promoted"
+            elif TIER_RANK[proposed_tier] < TIER_RANK[current]:
+                simple_count += 1
+                if simple_count >= self.settings.demotion_turns:
+                    selected = proposed_tier
+                    previous = current
+                    reason = "consecutive_simple_turns"
+                    simple_count = 0
+                    action = "demoted"
+            else:
+                simple_count = 0
 
-            lower_turns = int(row["lower_turns"]) + 1
-            if lower_turns >= max(1, demotion_turns):
-                conn.execute("UPDATE sessions SET tier=?,updated_at=?,lower_turns=0 WHERE session_hash=?", (proposed_tier, now, session_hash))
-                return StickyResult(proposed_tier, "demoted")
-            conn.execute("UPDATE sessions SET updated_at=?,lower_turns=? WHERE session_hash=?", (now, lower_turns, session_hash))
-            return StickyResult(current, f"sticky_hold:{lower_turns}/{max(1, demotion_turns)}")
+            connection.execute(
+                """
+                UPDATE session_routes
+                SET tier = ?, previous_tier = ?, promotion_reason = ?,
+                    simple_turn_count = ?, last_seen_at = ?, expires_at = ?
+                WHERE session_hash = ? AND auto_alias = ? AND policy_version = ?
+                """,
+                (
+                    selected,
+                    previous,
+                    reason,
+                    simple_count,
+                    now,
+                    now + self.settings.session_ttl_seconds,
+                    session_hash,
+                    alias,
+                    self.settings.policy_version,
+                ),
+            )
+            connection.commit()
+            return StickyResult(selected, True, action)
+
+    def _insert(
+        self,
+        connection: sqlite3.Connection,
+        session_hash: str,
+        alias: str,
+        tier: str,
+        now: int,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO session_routes(
+                session_hash, auto_alias, policy_version, tier,
+                created_at, last_seen_at, expires_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_hash,
+                alias,
+                self.settings.policy_version,
+                tier,
+                now,
+                now,
+                now + self.settings.session_ttl_seconds,
+            ),
+        )

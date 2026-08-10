@@ -1,45 +1,95 @@
-> Branch scope: **hermes-omniroute-linux-stack** only. Runtime gateway: **OmniRoute** only. This package does not include or run the alternate gateway.
+# Hermes Smart Router v0.3.0
 
-# Hermes Smart Router v0.2
+Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.3 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
 
-An OpenAI-compatible routing layer for Hermes Linux Stack. It keeps capability safety deterministic while allowing the cost/quality policy to be calibrated offline from your own workload.
+## Safe default
 
-## Request path
-
-`Hermes / Open WebUI / n8n -> Smart Router -> OmniRoute -> provider/model`
-
-The router has four separate responsibilities:
-
-1. **Policy** proposes `fast`, `standard`, or `strong` from privacy-safe request features.
-2. **Capability gates** upgrade proposals when tools, vision, or context do not fit a tier.
-3. **Sticky sessions** promote immediately and delay demotion to reduce model thrashing.
-4. **Output budgets** clamp routed requests to a per-tier maximum without ever increasing a client-specified lower limit.
-
-## Modes
-
-- `SMART_ROUTER_MODE=observe`: calculate/log a decision, but send router aliases to `SMART_ROUTER_OBSERVE_MODEL`.
-- `SMART_ROUTER_MODE=route`: aliases `auto`, `auto-fast`, `auto-standard`, `auto-strong` are routed. Explicit non-alias model names pass through untouched.
-
-## Policies
-
-- `SMART_ROUTER_POLICY=heuristic`: original deterministic scoring.
-- `SMART_ROUTER_POLICY=calibrated`: load weights/thresholds from `SMART_ROUTER_CALIBRATION_FILE`.
-
-`policy/calibrated.json` is a safe bootstrap that exactly matches the heuristic. It is **not claimed to be trained**. Replace it only after evaluating your own workload.
-
-## Offline calibration
-
-Install locally with `pip install -e '.[dev]'`, set a 32+ character `SMART_ROUTER_HMAC_SECRET`, then:
-
-```bash
-smart-router-calibrate examples/labeled-workload.jsonl -o policy/calibrated.json
-smart-router-report examples/labeled-workload.jsonl --policy policy/calibrated.json
+```env
+SMART_ROUTER_MODE=observe
+SMART_ROUTER_POLICY=heuristic
 ```
 
-The calibration dataset can contain derived `features`, `facts`, or a `body`. For production data, prefer `features`/`facts` so prompts never leave your normal request path.
+The learned policy is workload-specific. Train it offline, evaluate it, run it in observe/shadow mode, then explicitly opt into route mode.
 
-`smart-router-replay requests.jsonl -o replay-decisions.jsonl` is provided for offline request replay. Its output omits prompts/tool arguments and contains decisions/features only.
+## Learned policy
 
-## Privacy
+```env
+SMART_ROUTER_POLICY=learned
+SMART_ROUTER_LEARNED_MODEL_FILE=/policy/learned-v3.joblib
+SMART_ROUTER_LEARNED_METADATA_FILE=/policy/learned-v3.json
+SMART_ROUTER_LEARNED_MIN_CONFIDENCE=0.70
+SMART_ROUTER_LEARNED_FALLBACK=standard
+SMART_ROUTER_LEARNED_ERROR_FALLBACK=heuristic
+```
 
-The production observation writer accepts only derived features and routing metadata. Session identifiers are HMAC-pseudonymized. No prompt text, response text, tool arguments, credentials, or raw conversation IDs are written to the observation JSONL by this code.
+Inference is local and network-free. The model is loaded once when the application starts. If loading or inference fails, routing falls back to the configured deterministic policy. The feature schema is versioned (`1`) and contains only structured request-shape/capability features; observations never need raw prompt text or raw tool arguments.
+
+> Security: `joblib` uses pickle-compatible serialization and can execute code while loading. Only load model artifacts produced by a trusted Smart Router training process. The metadata can include an SHA-256 digest to detect accidental or unauthorized artifact replacement.
+
+## Train
+
+Training input is JSONL with `schema_version`, a complete privacy-safe `features` object, and either `label` or tier outcome scores.
+
+```bash
+smart-router-train examples/learned-routing-sample.jsonl \
+  --output policy/learned-v3.joblib \
+  --metadata policy/learned-v3.json \
+  --random-seed 42
+```
+
+The default classifier is `HistGradientBoostingClassifier`; `--model logistic-regression` is also supported. Training produces metadata with schema, classes, validation metrics, confidence fallback, seed, and artifact digest.
+
+## Evaluate
+
+```bash
+smart-router-report examples/learned-routing-sample.jsonl \
+  --learned-model policy/learned-v3.joblib \
+  --metadata policy/learned-v3.json
+```
+
+The report includes fixed fast/standard/strong baselines and learned accuracy, per-tier precision/recall, confusion matrix, false-fast rate, strong-overroute rate, tier distribution, and low-confidence fallback rate. Capability gates remain runtime invariants; a learned proposal cannot force an incompatible tier.
+
+## Client API key
+
+Smart Router can be exposed to OpenAI-compatible clients without sharing the downstream 9router/OmniRoute/provider credential:
+
+```env
+SMART_ROUTER_CLIENT_API_KEY=<random-client-secret>
+SMART_ROUTER_UPSTREAM_API_KEY=<optional-downstream-gateway-secret>
+```
+
+When `SMART_ROUTER_CLIENT_API_KEY` is set, clients must send `Authorization: Bearer <secret>` or `x-api-key: <secret>`. Client credentials are consumed at Smart Router and are not forwarded. If `SMART_ROUTER_UPSTREAM_API_KEY` is configured, Smart Router injects it upstream. Use HTTPS or a private network; do not publish port 8080 directly to the Internet.
+
+Clients should select `model=auto`. `auto-fast`, `auto-standard`, and `auto-strong` are available as explicit tier aliases. Forced fast/standard aliases can still be upgraded by hard capability gates.
+
+## Branch configuration
+
+`main` (9router):
+
+```env
+SMART_ROUTER_UPSTREAM_BASE_URL=http://nine-router:20128/v1
+SMART_ROUTER_FAST_MODEL=combo-fast
+SMART_ROUTER_STANDARD_MODEL=combo-standard
+SMART_ROUTER_STRONG_MODEL=combo-strong
+```
+
+`hermes-omniroute-linux-stack` (OmniRoute):
+
+```env
+SMART_ROUTER_UPSTREAM_BASE_URL=http://omniroute:20129/v1
+SMART_ROUTER_FAST_MODEL=auto
+SMART_ROUTER_STANDARD_MODEL=auto
+SMART_ROUTER_STRONG_MODEL=auto
+```
+
+Do not invent OmniRoute route IDs. Replace the three `auto` targets only after the actual OmniRoute deployment has validated distinct tier route IDs.
+
+## Endpoints
+
+- `GET /health`
+- `GET /ready`
+- `GET /metrics`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+Explicit non-Smart-Router model IDs pass through unchanged. Streaming response bytes are passed through without decoding/re-encoding the SSE body.

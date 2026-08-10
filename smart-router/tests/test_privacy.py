@@ -1,26 +1,27 @@
+import json
+
+import pytest
+
 from smart_router.observations import ObservationWriter
-from smart_router.privacy import pseudonym, stable_session_id
+from smart_router.privacy import privacy_safe_json, session_identity
 
 
-def test_session_id_is_pseudonymous():
-    secret = "x" * 64
-    value, source = stable_session_id(secret, {"x-session-id": "raw-session"}, {})
-    assert value != "raw-session"
-    assert len(value) == 32
-    assert source == "x-session-id"
-    assert value == pseudonym(secret, "raw-session")
+def test_session_id_is_hmac_not_raw(settings):
+    digest, source = session_identity({"x-router-session": "secret-session"}, {}, settings.hmac_secret)
+    assert source == "x-router-session"
+    assert digest and digest != "secret-session"
 
 
-def test_observation_writer_only_writes_given_safe_metadata(tmp_path):
+def test_observation_rejects_raw_sensitive_shapes():
+    with pytest.raises(ValueError):
+        privacy_safe_json({"messages": [{"content": "secret"}]})
+    with pytest.raises(ValueError):
+        privacy_safe_json({"tool_arguments": {"password": "secret"}})
+
+
+def test_observation_writer_keeps_only_derived_data(tmp_path):
     path = tmp_path / "obs.jsonl"
-    writer = ObservationWriter(path, 10000, True)
-    writer.write({"event": "decision", "facts": {"estimated_tokens": 12}})
-    text = path.read_text()
-    assert "estimated_tokens" in text
-    assert "prompt" not in text
-
-
-def test_no_stable_identifier_disables_cross_chat_stickiness():
-    session, source = stable_session_id("x" * 64, {"authorization": "Bearer shared"}, {})
-    assert session is None
-    assert source == "none"
+    ObservationWriter(str(path)).write({"policy": "learned", "confidence": 0.8, "probabilities": {"fast": 0.1, "standard": 0.8, "strong": 0.1}})
+    row = json.loads(path.read_text())
+    assert row["policy"] == "learned"
+    assert "messages" not in row

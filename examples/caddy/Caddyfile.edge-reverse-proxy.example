@@ -1,0 +1,14 @@
+# Example ONLY for a separate edge/reverse-proxy VM that also uses Caddy.
+# DNS points to this edge VM. This Caddy terminates public TLS, then forwards
+# over the private network to the stack VM's HTTP-only Caddy listener.
+
+api.example.com {
+    encode zstd gzip
+    reverse_proxy http://10.20.0.20:8088
+}
+
+# Optional Open WebUI, if the inner Caddyfile enables chat.example.com.
+# chat.example.com {
+#     encode zstd gzip
+#     reverse_proxy http://10.20.0.20:8088
+# }

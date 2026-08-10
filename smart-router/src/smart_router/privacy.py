@@ -3,34 +3,59 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from typing import Any
+from typing import Any, Mapping
 
 
-def pseudonym(secret: str, value: str) -> str:
-    return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()[:32]
+def session_identity(
+    headers: Mapping[str, str], body: dict[str, Any], secret: str
+) -> tuple[str | None, str]:
+    raw: str | None = None
+    source = "none"
+    for header in ("x-router-session", "x-task-id", "x-session-id"):
+        value = headers.get(header)
+        if value:
+            raw = value
+            source = header
+            break
+    if raw is None:
+        metadata = body.get("metadata")
+        if isinstance(metadata, dict):
+            for key in ("session_id", "conversation_id", "task_id"):
+                value = metadata.get(key)
+                if isinstance(value, (str, int)) and str(value):
+                    raw = str(value)
+                    source = f"metadata.{key}"
+                    break
+    if raw is None:
+        return None, source
+    digest = hmac.new(secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
+    return digest, source
 
 
-def stable_session_id(secret: str, headers: dict[str, str], body: dict[str, Any]) -> tuple[str | None, str]:
-    # Prefer explicit, stable conversation/user identifiers. Never persist the raw value.
-    candidates = (
-        ("x-session-id", headers.get("x-session-id")),
-        ("x-conversation-id", headers.get("x-conversation-id")),
-        ("x-chat-id", headers.get("x-chat-id")),
-        ("x-openwebui-chat-id", headers.get("x-openwebui-chat-id")),
-        ("x-openwebui-user-id", headers.get("x-openwebui-user-id")),
-        ("x-user-id", headers.get("x-user-id")),
-        ("body-user", body.get("user")),
-    )
-    for source, value in candidates:
-        if isinstance(value, str) and value.strip():
-            return pseudonym(secret, value.strip()), source
-    # Do not make a caller-wide API key into a sticky conversation: one difficult
-    # chat must not promote every unrelated chat sharing that credential.
-    return None, "none"
+def privacy_safe_json(payload: dict[str, Any]) -> str:
+    """Serialize already-derived routing metadata; rejects obvious unsafe keys."""
+    forbidden = {
+        "prompt",
+        "messages",
+        "system_message",
+        "tool_arguments",
+        "authorization",
+        "api_key",
+        "bearer",
+        "response_text",
+    }
+    lowered = {str(key).lower() for key in _walk_keys(payload)}
+    unsafe = sorted(lowered & forbidden)
+    if unsafe:
+        raise ValueError(f"unsafe observation keys: {', '.join(unsafe)}")
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def safe_json_size(value: Any) -> int:
-    try:
-        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode())
-    except Exception:
-        return 0
+def _walk_keys(value: Any):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield key
+            yield from _walk_keys(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_keys(child)
