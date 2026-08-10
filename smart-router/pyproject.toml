@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-smart-router"
-version = "0.5.0"
+version = "0.5.1"
 description = "OpenAI-compatible privacy-safe three-tier Smart Router for Hermes Linux Stack"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,8 @@ dependencies = [
   "scikit-learn>=1.5,<2",
   "starlette>=0.38,<1",
   "uvicorn>=0.30,<1",
+"SQLAlchemy>=2.0,<3",
+"psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +40,7 @@ smart-router-benchmark = "smart_router.eval.benchmark:main"
 smart-router-cost-report = "smart_router.costs:main"
 smart-router-provider-profile = "smart_router.provider_registry:main"
 smart-router-preference-build = "smart_router.eval.preference_data:main"
+smart-router-benchmark-v51 = "smart_router.benchmark_v51:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

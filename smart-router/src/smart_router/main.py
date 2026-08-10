@@ -12,11 +12,12 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
 from . import __version__
 from .budget import BudgetResult, enforce_budget, propose_budget
 from .config import Settings
+from .control_plane import ControlPlane
 from .costs import CostLedger
 from .dashboard import dashboard_enabled, dashboard_response
 from .database import RouteStore
@@ -82,6 +83,7 @@ def create_app(
     policy_runtime = build_policy_runtime(settings)
     observations = ObservationWriter(settings.observation_file)
     cost_ledger = CostLedger.from_env(default_database_path=settings.database_path)
+    control_plane = ControlPlane(settings)  # Hermes Smart Router v0.5.1 control-plane hook
     timeout = httpx.Timeout(
         connect=settings.connect_timeout_seconds,
         read=settings.read_timeout_seconds,
@@ -211,6 +213,9 @@ def create_app(
             return _openai_error("invalid JSON body", "invalid_json", 400)
         if not isinstance(body, dict) or not isinstance(body.get("model"), str):
             return _openai_error("model is required", "invalid_model", 400)
+        v51_error = control_plane.begin_request(request, body)
+        if v51_error:
+            return v51_error
         requested_model = body["model"]
         stream = body.get("stream") is True
         try:
@@ -258,7 +263,7 @@ def create_app(
         )
         selected_tier = decision.proposed_tier
         sticky_action = "stateless"
-        if settings.mode == "route" and session_hash:
+        if settings.mode == "route" and session_hash and not control_plane.ha_mode:
             try:
                 if request.headers.get("x-router-reset", "").lower() == "true":
                     await asyncio.to_thread(store.reset, session_hash, requested_model)
@@ -317,6 +322,11 @@ def create_app(
                     selected_tier, "+".join(budget.fields) or "none"
                 ).inc()
 
+        v51_route = control_plane.finalize_routing(request, body, selected_tier, effective_model, budget)
+        if v51_route.error:
+            return v51_route.error
+        selected_tier = v51_route.tier
+        effective_model = v51_route.model
         body["model"] = effective_model
         outbound = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
         _safe_log_decision(
@@ -353,6 +363,10 @@ def create_app(
             )
         except Exception as error:
             logger.error(json.dumps({"event": "cost_ledger_error", "reason": type(error).__name__}))
+        try:
+            control_plane.record_route(request, response, decision.policy, decision.reasons)
+        except Exception as error:
+            logger.error(json.dumps({"event": "v51_control_telemetry_error", "reason": type(error).__name__}))
         return response
 
     routes = [
@@ -361,6 +375,7 @@ def create_app(
         Route("/metrics", metrics),
         Route("/dashboard", dashboard, methods=["GET"]),
         Route("/dashboard/api/summary", dashboard_summary, methods=["GET"]),
+        Mount("/control", app=control_plane.app),
         Route("/v1/models", models, methods=["GET"]),
         Route("/v1/chat/completions", completions, methods=["POST"]),
     ]
@@ -369,6 +384,7 @@ def create_app(
     app.state.store = store
     app.state.policy_runtime = policy_runtime
     app.state.cost_ledger = cost_ledger
+    app.state.control_plane = control_plane
     return app
 
 
@@ -423,6 +439,12 @@ async def _dispatch(
 
 
 def _client_auth_error(request: Request, settings: Settings) -> JSONResponse | None:
+    control = getattr(request.app.state, "control_plane", None)
+    if control is not None:
+        if control.authenticate_api_request(request) is not None:
+            return None
+        if control.require_auth:
+            return _openai_error("authentication required", "auth_required", 401)
     if not settings.client_api_key:
         return None
     provided = request.headers.get("authorization", "")
@@ -436,7 +458,7 @@ def _forward_headers(request: Request, settings: Settings) -> list[tuple[bytes, 
     return forward_headers(
         request.scope["headers"],
         upstream_api_key=settings.upstream_api_key,
-        consume_client_credentials=bool(settings.client_api_key),
+        consume_client_credentials=bool(settings.client_api_key) or bool(getattr(request.state, "v51_identity", None)),
     )
 
 

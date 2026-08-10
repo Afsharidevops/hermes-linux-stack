@@ -1,6 +1,6 @@
-# Hermes Smart Router v0.5.0
+# Hermes Smart Router v0.5.1
 
-Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.4.0 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
+Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.5.1 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
 
 ## Safe default
 
@@ -155,3 +155,10 @@ smart-router-preference-build outcomes.jsonl \
 Input rows must contain the **existing complete privacy-safe feature schema** plus measured `quality_by_tier`. The builder emits the existing `schema_version` + `features` + `label` training shape. The format example in `examples/preference-outcomes-format-v0.5.example.jsonl` is illustrative; replace its placeholder features with real Smart Router feature objects before training.
 
 See `../docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md` for evidence gates and the research roadmap.
+
+
+---
+
+## v0.5.1 control plane
+
+v0.5.1 adds dynamic `fast`/`standard`/`strong`/`coding`/`vision` profiles, the `/control/` operations panel, RBAC, virtual keys and quotas, scoped budgets, policies, knowledge/RAG, persistent memory, agents and teams, plugin registry, audit telemetry, PostgreSQL-ready shared state and a v0.5.1 benchmark reporter. See `V0.5.1-CONTROL-PLANE.md`.

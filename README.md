@@ -1,6 +1,6 @@
-# Hermes Linux Stack — 9router + Smart Router v0.5.0
+# Hermes Linux Stack — 9router + Smart Router v0.5.1
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.0** and **9router**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.1** and **9router**.
 
 > This is the **9router branch**.
 >
@@ -18,7 +18,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.0
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.1
                             │              │
 n8n / other clients ────────┘              │
                                            ├─ fast     → combo-fast
@@ -44,7 +44,7 @@ The repository intentionally keeps its routing backends separate.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.0
+          Smart Router v0.5.1
                   │
                   ▼
                9router
@@ -59,7 +59,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.0
+          Smart Router v0.5.1
                   │
                   ▼
               OmniRoute
@@ -78,7 +78,7 @@ Do not add OmniRoute to `main`, and do not add 9router to the OmniRoute branch.
 - Telegram bot/agent integration through Hermes
 - Numeric Telegram user allowlist
 - Optional Telegram home chat for cron results and notifications
-- Hermes Smart Router v0.5.0
+- Hermes Smart Router v0.5.1
 - OpenAI-compatible `auto` routing aliases
 - 9router provider/model gateway
 - Open WebUI integration
@@ -247,12 +247,12 @@ Verify:
 
 ---
 
-# Smart Router v0.5.0
+# Smart Router v0.5.1
 
 Published image:
 
 ```text
-afsharidevops/hermes-smart-router:0.5.0
+afsharidevops/hermes-smart-router:0.5.1
 ```
 
 The Smart Router decides:
@@ -706,7 +706,7 @@ python -m pip install -e "./smart-router[dev]"
 pytest -q smart-router/tests
 ```
 
-Smart Router v0.5.0 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
+Smart Router v0.5.1 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
 
 ---
 
@@ -781,7 +781,7 @@ Verify:
 # Published Smart Router Image
 
 ```text
-afsharidevops/hermes-smart-router:0.5.0
+afsharidevops/hermes-smart-router:0.5.1
 ```
 
 Platforms:
@@ -817,7 +817,7 @@ OCI release digest:
 
 ```text
 Branch: main
-    Smart Router: v0.5.0
+    Smart Router: v0.5.1
 Backend: 9router
 Smart Router upstream: http://nine-router:20128/v1
 
@@ -887,3 +887,14 @@ The v0.5 target scorecard is a roadmap figure, not measured performance:
 ![v0.5 improvement targets](docs/smart-router-v0.5.0/figures/v050-improvement-scorecard.png)
 
 ![v0.5 dashboard measurement funnel](docs/smart-router-v0.5.0/figures/v050-dashboard-measurement-funnel.png)
+
+
+---
+
+## Smart Router v0.5.1 control plane
+
+v0.5.1 adds the P0-P2 control-plane roadmap while preserving 9router as this branch's provider gateway. Open `http://127.0.0.1:8787/control/` by default for RBAC, virtual keys/quotas, dynamic routing profiles, provider discovery, budgets, policies, RAG/knowledge, memory, agents/teams, plugin registry, audit and system health.
+
+See `smart-router/V0.5.1-CONTROL-PLANE.md` before enabling production authentication or HA mode.
+
+Current v0.5.1 image: `afsharidevops/hermes-smart-router:0.5.1`.
