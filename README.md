@@ -1,6 +1,6 @@
 # Hermes Linux Stack — OmniRoute + Smart Router v0.5.0
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.4.0** and **OmniRoute**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.5.0** and **OmniRoute**.
 
 > This branch is intentionally **OmniRoute-only**.
 >
@@ -18,7 +18,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.4.0
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.0
                             │              │
 n8n / other clients ────────┘              │
                                            ▼
@@ -44,7 +44,7 @@ The two router backends in this repository are intentionally isolated.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.4.0
+          Smart Router v0.5.0
                   │
                   ▼
                9router
@@ -59,7 +59,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.4.0
+          Smart Router v0.5.0
                   │
                   ▼
               OmniRoute
@@ -77,7 +77,7 @@ Do not combine 9router and OmniRoute in one Compose stack.
 - Hermes Agent
 - Telegram bot/agent through Hermes
 - Numeric Telegram allowlist
-- Hermes Smart Router v0.4.0
+- Hermes Smart Router v0.5.0
 - OmniRoute dashboard and OpenAI-compatible API
 - Open WebUI
 - Optional n8n
@@ -180,7 +180,7 @@ Telegram Bot API
 Hermes Agent
      │
      ▼
-Smart Router v0.4.0
+Smart Router v0.5.0
      │
      ▼
 OmniRoute
@@ -331,7 +331,7 @@ curl -s http://127.0.0.1:20129/v1/models
 
 ---
 
-# Smart Router v0.4.0
+# Smart Router v0.5.0
 
 Published image:
 
@@ -506,7 +506,7 @@ Automatic requests can be clamped to the selected tier's budget when active rout
 
 # Offline Calibration and Evaluation
 
-Smart Router v0.4.0 includes offline tools.
+Smart Router v0.5.0 includes offline tools.
 
 ## Calibrate
 
@@ -556,7 +556,7 @@ Expected version:
 ```json
 {
   "status": "ok",
-  "version": "0.4.0"
+  "version": "0.5.0"
 }
 ```
 
@@ -1064,7 +1064,7 @@ Recommended rollout:
 
 ```text
 Branch: hermes-omniroute-linux-stack
-    Smart Router: v0.4.0
+    Smart Router: v0.5.0
 Backend: OmniRoute
 Smart Router upstream: http://omniroute:20129/v1
 
@@ -1078,9 +1078,9 @@ Recommended initial policy: heuristic
 
 
 
-## Smart Router v0.4.0 release hardening
+## Smart Router v0.5.0 release hardening
 
-The v0.4.0 release keeps the learned classifier as a proposal layer and preserves deterministic capability, sticky-session, budget, explicit-model, streaming, privacy, and fail-open rules. The safe default remains `SMART_ROUTER_MODE=observe` with `SMART_ROUTER_POLICY=heuristic`.
+The v0.5.0 release keeps the learned classifier as a proposal layer and preserves deterministic capability, sticky-session, budget, explicit-model, streaming, privacy, and fail-open rules. The safe default remains `SMART_ROUTER_MODE=observe` with `SMART_ROUTER_POLICY=heuristic`.
 
 Branch backend: **OmniRoute**
 
@@ -1092,7 +1092,7 @@ SMART_ROUTER_STANDARD_MODEL=auto
 SMART_ROUTER_STRONG_MODEL=auto
 ```
 
-The shared v0.4.0 image is `afsharidevops/hermes-smart-router:0.5.0`. `SMART_ROUTER_HMAC_SECRET` is mandatory; generate a persistent secret with `openssl rand -hex 32` and keep the real value outside Git. Use `SMART_ROUTER_*_MAX_CONTEXT` for context limits.
+The shared v0.5.0 image is `afsharidevops/hermes-smart-router:0.5.0`. `SMART_ROUTER_HMAC_SECRET` is mandatory; generate a persistent secret with `openssl rand -hex 32` and keep the real value outside Git. Use `SMART_ROUTER_*_MAX_CONTEXT` for context limits.
 
 For external OpenAI-compatible applications, see `docs/SMART-ROUTER-CLIENT-API.md`. For standalone TLS or an external Caddy/Nginx/Traefik/other reverse proxy, see `docs/SMART-ROUTER-PUBLIC-INGRESS.md`.
 
@@ -1106,13 +1106,13 @@ Third-party images and upstream projects retain their respective licenses.
 
 
 <!-- smart-router-v0.4.0-release -->
-## Smart Router v0.4.0 measurement and release hardening
+## Previous release: Smart Router v0.4.0 benchmarking
 
 Smart Router v0.4.0 adds RouteLLM-style cost/quality benchmarking with Pareto plots, fixed baselines, tier distribution, confusion matrix, confidence-risk analysis, machine-readable summaries, and CI release gates. Synthetic example figures are explicitly watermarked and are not performance claims. See [`docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md`](docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md).
 
 Client tier forcing is disabled by default, approximate context counts receive a configurable 15% safety margin, and the unused `SMART_ROUTER_FAIL_OPEN_MODEL` knob has been removed. The shared Docker image is released canonically from `main` only after `smart-router/` is identical on `main` and `hermes-omniroute-linux-stack`.
 
-The v0.4.0 OCI digest must be recorded **after** the new image is published; do not reuse the v0.3.1 digest.
+The v0.4.0 benchmark artifacts are retained as historical, reproducible validation evidence. They are synthetic results and are not production-cost claims.
 
 
 <!-- smart-router-v0.5.0-release -->
