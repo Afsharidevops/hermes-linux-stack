@@ -7,6 +7,8 @@ PYTHONPATH="$ROOT/smart-router/src" pytest -q "$ROOT/smart-router/tests"
 python3 - "$ROOT/docker-compose.yml" <<'PY'
 import sys, yaml
 p=sys.argv[1]
+import tomllib
+from pathlib import Path
 x=yaml.safe_load(open(p,encoding='utf-8'))
 s=x['services']['smart-router']
 build = s.get('build')
@@ -20,13 +22,17 @@ else:
 
 image = str(s.get('image', ''))
 
+repo_root = Path(p).resolve().parent
+with (repo_root / "smart-router" / "pyproject.toml").open("rb") as fh:
+    expected_version = tomllib.load(fh)["project"]["version"]
+
 assert (
     build_context == './smart-router'
     or (
         'afsharidevops/hermes-smart-router' in image
-        and '0.4.0' in image
+        and f':{expected_version}' in image
     )
-), f"unexpected Smart Router source: build={build!r}, image={image!r}"
+), f"unexpected Smart Router source: build={build!r}, image={image!r}, expected_version={expected_version!r}"
 
 assert './smart-router/policy:/policy:ro' in s['volumes'], (
     f"Smart Router policy volume missing: {s.get('volumes')!r}"
@@ -43,7 +49,7 @@ assert 'SMART_ROUTER_OBSERVATION_FILE' in s['environment'], (
 assert 'observations-v4.jsonl' in str(
     s['environment']['SMART_ROUTER_OBSERVATION_FILE']
 ), (
-    "SMART_ROUTER_OBSERVATION_FILE must use the v0.4 observation path"
+    "SMART_ROUTER_OBSERVATION_FILE must use observations-v4.jsonl (current observation schema)"
 )
 print('compose YAML/wiring: OK')
 PY
