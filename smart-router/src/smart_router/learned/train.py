@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +42,9 @@ def load_rows(path: str, *, cost_weight: float, latency_weight: float, min_quali
         raise ValueError("at least 9 training rows are required")
     if set(y) != set(ALLOWED_TIERS):
         raise ValueError("training data must include fast, standard, and strong labels")
+    counts = Counter(y)
+    if any(counts[tier] < 2 for tier in ALLOWED_TIERS):
+        raise ValueError("training data must include at least two rows for each tier")
     return x, y
 
 
@@ -69,10 +74,13 @@ def train_model(
         latency_weight=latency_weight,
         min_quality=min_quality,
     )
+    class_count = len(ALLOWED_TIERS)
+    validation_rows = max(class_count, math.ceil(len(x) * validation_fraction))
+    validation_rows = min(validation_rows, len(x) - class_count)
     x_train, x_valid, y_train, y_valid = train_test_split(
         x,
         y,
-        test_size=validation_fraction,
+        test_size=validation_rows,
         random_state=random_seed,
         stratify=y,
     )
@@ -81,7 +89,7 @@ def train_model(
         model_name = "HistGradientBoostingClassifier"
     elif model_type == "logistic-regression":
         estimator = LogisticRegression(
-            max_iter=1000, random_state=random_seed, multi_class="auto"
+            max_iter=1000, random_state=random_seed
         )
         model_name = "LogisticRegression"
     else:

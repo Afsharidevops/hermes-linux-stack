@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from .config import Settings
 from .features import FEATURE_SCHEMA_VERSION, SafeFeatures, extract_safe_features
 from .learned.model import LearnedPolicy, load_learned_policy
+from .metrics import FAIL_OPEN, LEARNED_INFERENCE_SECONDS
 
 AUTO_ALIASES = {
     "auto": None,
@@ -113,6 +115,7 @@ def build_policy_runtime(settings: Settings) -> PolicyRuntime:
             )
         except Exception as exc:  # fail-open is deliberate at startup
             learned_error = type(exc).__name__
+            FAIL_OPEN.labels(f"learned_load_{learned_error}").inc()
     return PolicyRuntime(calibration, learned, learned_error)
 
 
@@ -208,6 +211,7 @@ def decide(
                 )
                 reasons.extend(fallback_reasons)
             else:
+                inference_started = time.perf_counter()
                 try:
                     prediction = runtime.learned.predict(safe_features)
                     tier = prediction.tier
@@ -220,11 +224,15 @@ def decide(
                         reasons.append("learned_argmax")
                 except Exception as exc:
                     policy_fallback = settings.learned_error_fallback
-                    reasons.append(f"learned_inference_error_{type(exc).__name__}")
+                    error_name = type(exc).__name__
+                    FAIL_OPEN.labels(f"learned_inference_{error_name}").inc()
+                    reasons.append(f"learned_inference_error_{error_name}")
                     tier, score, fallback_reasons = _fallback_policy(
                         facts, runtime, settings.learned_error_fallback
                     )
                     reasons.extend(fallback_reasons)
+                finally:
+                    LEARNED_INFERENCE_SECONDS.observe(time.perf_counter() - inference_started)
         elif settings.policy == "calibrated":
             tier, score, reasons = _calibrated_decision(
                 facts, runtime.calibration
@@ -251,6 +259,20 @@ def decide(
     )
 
 
+def tier_satisfies_capabilities(
+    tier: str, facts: RequestFacts, settings: Settings
+) -> bool:
+    candidate = settings.tier(tier)
+    if facts.has_tools and not candidate.supports_tools:
+        return False
+    if facts.has_vision and not candidate.supports_vision:
+        return False
+    required_context = facts.estimated_total_tokens + (
+        facts.requested_output_tokens or candidate.max_output
+    )
+    return required_context <= candidate.max_context
+
+
 def apply_capability_gates(
     tier: str, facts: RequestFacts, settings: Settings, reasons: list[str]
 ) -> tuple[str, str | None]:
@@ -259,16 +281,7 @@ def apply_capability_gates(
     requested_rank = TIER_RANK[tier]
     for rank in range(requested_rank, TIER_RANK["strong"] + 1):
         candidate_name = _tier_name(rank)
-        candidate = settings.tier(candidate_name)
-        if facts.has_tools and not candidate.supports_tools:
-            continue
-        if facts.has_vision and not candidate.supports_vision:
-            continue
-        required_context = (
-            facts.estimated_total_tokens
-            + (facts.requested_output_tokens or candidate.max_output)
-        )
-        if required_context > candidate.max_context:
+        if not tier_satisfies_capabilities(candidate_name, facts, settings):
             continue
         if candidate_name != tier:
             reason = _capability_reason(tier, candidate_name, facts, settings)

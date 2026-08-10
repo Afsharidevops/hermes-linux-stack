@@ -18,7 +18,7 @@ class BytesStream(httpx.AsyncByteStream):
 
 
 def upstream(request: httpx.Request) -> httpx.Response:
-    if request.url.path == "/api/health":
+    if request.url.path == "/health":
         return httpx.Response(200, json={"status": "ok"})
     if request.url.path == "/v1/models":
         return httpx.Response(200, json={"object": "list", "data": [{"id": "real-model"}]})
@@ -77,3 +77,43 @@ def test_streaming_sse_bytes_are_preserved(settings):
         with client.stream("POST", "/v1/chat/completions", json={"model": "gpt-explicit", "messages": [], "stream": True}) as response:
             raw = b"".join(response.iter_raw())
     assert raw == b'data: {"x":1}\n\ndata: [DONE]\n\n'
+
+
+def test_ready_uses_configured_upstream_health_url(settings):
+    seen = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if str(request.url) == settings.upstream_health_url:
+            return httpx.Response(200, json={"status": "ok"})
+        return upstream(request)
+    app = create_app(settings, httpx.MockTransport(handler))
+    with TestClient(app) as client:
+        response = client.get("/ready")
+    assert response.status_code == 200
+    assert settings.upstream_health_url in seen
+
+
+def test_sticky_tier_cannot_bypass_tool_capability(settings):
+    # Deliberately construct an invalid non-monotonic object after startup validation
+    # to exercise the runtime belt-and-suspenders safety check.
+    unsafe = replace(settings, strong=replace(settings.strong, supports_tools=False))
+    app = create_app(unsafe, httpx.MockTransport(upstream))
+    headers = {"x-router-session": "sticky-capability-test"}
+    with TestClient(app) as client:
+        first = client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={"model": "auto-strong", "messages": [{"role": "user", "content": "hard task"}]},
+        )
+        second = client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "auto",
+                "messages": [{"role": "user", "content": "use a tool"}],
+                "tools": [{"type": "function", "function": {"name": "read"}}],
+            },
+        )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["echo"]["model"] == unsafe.standard.model

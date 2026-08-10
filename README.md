@@ -1,6 +1,6 @@
-# Hermes Linux Stack — OmniRoute + Smart Router v0.2
+# Hermes Linux Stack — OmniRoute + Smart Router v0.3.1
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.2** and **OmniRoute**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.3.1** and **OmniRoute**.
 
 > This branch is intentionally **OmniRoute-only**.
 >
@@ -18,7 +18,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.2
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.3.1
                             │              │
 n8n / other clients ────────┘              │
                                            ▼
@@ -44,7 +44,7 @@ The two router backends in this repository are intentionally isolated.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.2
+          Smart Router v0.3.1
                   │
                   ▼
                9router
@@ -59,7 +59,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.2
+          Smart Router v0.3.1
                   │
                   ▼
               OmniRoute
@@ -77,7 +77,7 @@ Do not combine 9router and OmniRoute in one Compose stack.
 - Hermes Agent
 - Telegram bot/agent through Hermes
 - Numeric Telegram allowlist
-- Hermes Smart Router v0.2
+- Hermes Smart Router v0.3.1
 - OmniRoute dashboard and OpenAI-compatible API
 - Open WebUI
 - Optional n8n
@@ -180,7 +180,7 @@ Telegram Bot API
 Hermes Agent
      │
      ▼
-Smart Router v0.2
+Smart Router v0.3.1
      │
      ▼
 OmniRoute
@@ -331,12 +331,12 @@ curl -s http://127.0.0.1:20129/v1/models
 
 ---
 
-# Smart Router v0.2
+# Smart Router v0.3.1
 
 Published image:
 
 ```text
-afsharidevops/hermes-smart-router:0.2.0
+afsharidevops/hermes-smart-router:0.3.1
 ```
 
 Smart Router answers:
@@ -507,7 +507,7 @@ Automatic requests can be clamped to the selected tier's budget when active rout
 
 # Offline Calibration and Evaluation
 
-Smart Router v0.2 includes offline tools.
+Smart Router v0.3.1 includes offline tools.
 
 ## Calibrate
 
@@ -557,7 +557,7 @@ Expected version:
 ```json
 {
   "status": "ok",
-  "version": "0.2.0"
+  "version": "0.3.1"
 }
 ```
 
@@ -880,7 +880,7 @@ docker compose \
 Smart Router should resolve to:
 
 ```text
-afsharidevops/hermes-smart-router:0.2.0
+afsharidevops/hermes-smart-router:0.3.1
 ```
 
 Check services:
@@ -971,7 +971,7 @@ The runtime directory is intentionally owned/prepared for Smart Router UID `1000
 # Published Smart Router Image
 
 ```text
-afsharidevops/hermes-smart-router:0.2.0
+afsharidevops/hermes-smart-router:0.3.1
 ```
 
 Platforms:
@@ -1066,7 +1066,7 @@ Recommended rollout:
 
 ```text
 Branch: hermes-omniroute-linux-stack
-Smart Router: v0.2.0
+    Smart Router: v0.3.1
 Backend: OmniRoute
 Smart Router upstream: http://omniroute:20129/v1
 
@@ -1077,6 +1077,28 @@ Strong:   auto
 Recommended initial router mode: observe
 Recommended initial policy: heuristic
 ```
+
+
+
+## Smart Router v0.3.1 release hardening
+
+The v0.3.1 release keeps the learned classifier as a proposal layer and preserves deterministic capability, sticky-session, budget, explicit-model, streaming, privacy, and fail-open rules. The safe default remains `SMART_ROUTER_MODE=observe` with `SMART_ROUTER_POLICY=heuristic`.
+
+Branch backend: **OmniRoute**
+
+```env
+SMART_ROUTER_UPSTREAM_BASE_URL=http://omniroute:20129/v1
+SMART_ROUTER_UPSTREAM_HEALTH_URL=http://omniroute:20128/api/monitoring/health
+SMART_ROUTER_FAST_MODEL=auto
+SMART_ROUTER_STANDARD_MODEL=auto
+SMART_ROUTER_STRONG_MODEL=auto
+```
+
+The shared v0.3.1 image is `afsharidevops/hermes-smart-router:0.3.1`. `SMART_ROUTER_HMAC_SECRET` is mandatory; generate a persistent secret with `openssl rand -hex 32` and keep the real value outside Git. Use `SMART_ROUTER_*_MAX_CONTEXT` for context limits.
+
+For external OpenAI-compatible applications, see `docs/SMART-ROUTER-CLIENT-API.md`. For standalone TLS or an external Caddy/Nginx/Traefik/other reverse proxy, see `docs/SMART-ROUTER-PUBLIC-INGRESS.md`.
+
+Learned rollout remains: heuristic+observe → collect safe features → train/evaluate → learned+observe → validate → learned+route. Do not publish cost/quality claims until measured on a representative workload.
 
 ## License
 

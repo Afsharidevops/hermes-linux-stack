@@ -5,3 +5,6 @@ __pycache__
 *.joblib
 router.sqlite3
 observations*.jsonl
+
+.venv
+*.egg-info

@@ -40,7 +40,7 @@ from .metrics import (
 from .observations import ObservationWriter
 from .privacy import session_identity
 from .proxy import forward_headers, proxy_buffered, proxy_streaming, response_header_pairs
-from .routing import AUTO_ALIASES, Decision, build_policy_runtime, decide
+from .routing import AUTO_ALIASES, Decision, build_policy_runtime, decide, tier_satisfies_capabilities
 
 logger = logging.getLogger("smart-router")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -85,7 +85,7 @@ def create_app(
         upstream_ok = False
         try:
             response = await request.app.state.client.get(
-                settings.upstream_base_url.removesuffix("/v1") + "/api/health",
+                settings.upstream_health_url,
                 headers=_upstream_auth_headers(settings),
             )
             upstream_ok = response.is_success
@@ -189,7 +189,9 @@ def create_app(
             return _openai_error(str(error), "invalid_routing_request", 422)
 
         if decision.policy_fallback:
-            LEARNED_FALLBACKS.labels(decision.policy_fallback).inc()
+            LEARNED_FALLBACKS.labels(f"error_{decision.policy_fallback}").inc()
+        elif "learned_low_confidence_fallback" in decision.reasons:
+            LEARNED_FALLBACKS.labels("low_confidence").inc()
         _safe_record_proposal(decision, proposal, settings.mode)
         session_hash, session_source = session_identity(
             request.headers, body, settings.hmac_secret
@@ -213,6 +215,13 @@ def create_app(
             except Exception as error:
                 sticky_action = "store-error-stateless"
                 logger.error(json.dumps({"event": "sticky_store_error", "reason": type(error).__name__}))
+
+            # Sticky state is never allowed to bypass capability/context requirements.
+            # If a manually-constructed/non-monotonic configuration makes the sticky
+            # tier incompatible, prefer the already capability-gated proposal.
+            if not tier_satisfies_capabilities(selected_tier, decision.facts, settings):
+                selected_tier = decision.proposed_tier
+                sticky_action = f"{sticky_action}-capability-override"
 
         if settings.mode == "observe":
             effective_model = settings.observe_model

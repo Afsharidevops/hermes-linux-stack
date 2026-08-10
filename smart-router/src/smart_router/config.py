@@ -19,6 +19,7 @@ class Settings:
     mode: str
     policy: str
     upstream_base_url: str
+    upstream_health_url: str
     upstream_api_key: str | None
     client_api_key: str | None
     database_path: str
@@ -86,12 +87,16 @@ class Settings:
                 "SMART_ROUTER_LEARNED_ERROR_FALLBACK must be heuristic or calibrated"
             )
 
+        upstream_base_url = _required_env("SMART_ROUTER_UPSTREAM_BASE_URL").rstrip("/")
+        upstream_health_url = _optional_text("SMART_ROUTER_UPSTREAM_HEALTH_URL") or (
+            upstream_base_url.removesuffix("/v1") + "/health"
+        )
+
         settings = cls(
             mode=mode,
             policy=policy,
-            upstream_base_url=os.getenv(
-                "SMART_ROUTER_UPSTREAM_BASE_URL", "http://nine-router:20128/v1"
-            ).rstrip("/"),
+            upstream_base_url=upstream_base_url,
+            upstream_health_url=upstream_health_url,
             upstream_api_key=_optional_text("SMART_ROUTER_UPSTREAM_API_KEY"),
             client_api_key=_optional_text("SMART_ROUTER_CLIENT_API_KEY"),
             database_path=os.getenv(
@@ -147,12 +152,38 @@ class Settings:
             for tier in (settings.fast, settings.standard, settings.strong)
         ):
             raise ValueError("at least one tier must support vision")
+        _validate_tier_order(settings)
         return settings
 
     def tier(self, name: str) -> TierConfig:
         return {"fast": self.fast, "standard": self.standard, "strong": self.strong}[
             name
         ]
+
+
+
+def _required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise ValueError(f"{name} must be set")
+    return value
+
+
+def _validate_tier_order(settings: Settings) -> None:
+    tiers = (settings.fast, settings.standard, settings.strong)
+    names = ("fast", "standard", "strong")
+    for capability in ("supports_tools", "supports_vision"):
+        values = [bool(getattr(tier, capability)) for tier in tiers]
+        if values != sorted(values):
+            raise ValueError(
+                f"{capability} must be monotonic across fast -> standard -> strong"
+            )
+    contexts = [tier.max_context for tier in tiers]
+    if contexts != sorted(contexts):
+        raise ValueError(
+            "SMART_ROUTER_*_MAX_CONTEXT must be non-decreasing across "
+            + " -> ".join(names)
+        )
 
 
 def _tier(
