@@ -1,4 +1,4 @@
-# Hermes Smart Router v0.4.0
+# Hermes Smart Router v0.5.0
 
 Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.4.0 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
 
@@ -121,3 +121,37 @@ The bundled `examples/benchmark-synthetic-v0.4.0.jsonl` is synthetic test data o
 - `SMART_ROUTER_CONTEXT_TOKEN_SAFETY_FACTOR=1.15` applies a conservative margin to approximate prompt-token counts before context capability gates.
 - `SMART_ROUTER_ALLOW_TIER_OVERRIDES=false` prevents ordinary clients from forcing `auto-fast`, `auto-standard`, `auto-strong`, or `X-Router-Tier`. Trusted deployments may opt in.
 - The unused `SMART_ROUTER_FAIL_OPEN_MODEL` setting was removed. Learned load/inference failures continue through `SMART_ROUTER_LEARNED_ERROR_FALLBACK`.
+
+
+<!-- v0.5.0-dashboard-and-evidence -->
+## v0.5.0 measured-cost dashboard
+
+Open `http://<smart-router-host>:8080/dashboard`. When `SMART_ROUTER_CLIENT_API_KEY` is configured, the dashboard and its JSON API use the same client authentication as the OpenAI-compatible endpoints.
+
+```env
+SMART_ROUTER_COST_LEDGER_ENABLED=true
+SMART_ROUTER_COST_DATABASE_PATH=/data/cost-ledger.sqlite3
+SMART_ROUTER_PRICING_FILE=/policy/pricing-v0.5.json
+SMART_ROUTER_DASHBOARD_ENABLED=true
+```
+
+The dashboard reports **real upstream usage only**. USD values are calculated only when usage and tier pricing are both available. The strong-only baseline prices the same measured token counts at the strong-tier rates; it is not a claim that strong would generate identical tokens.
+
+### Provider profile CLI
+
+```bash
+smart-router-provider-profile examples/provider-profile-9router-v0.5.json
+smart-router-provider-profile examples/provider-profile-omniroute-v0.5.json
+```
+
+### Preference-derived labels
+
+```bash
+smart-router-preference-build outcomes.jsonl \
+  --output preference-training.jsonl \
+  --retention 0.95
+```
+
+Input rows must contain the **existing complete privacy-safe feature schema** plus measured `quality_by_tier`. The builder emits the existing `schema_version` + `features` + `label` training shape. The format example in `examples/preference-outcomes-format-v0.5.example.jsonl` is illustrative; replace its placeholder features with real Smart Router feature objects before training.
+
+See `../docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md` for evidence gates and the research roadmap.

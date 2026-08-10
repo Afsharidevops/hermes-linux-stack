@@ -60,7 +60,7 @@ services:
 
   smart-router:
     profiles: ["smart-router"]
-    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.4.0}
+    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.5.0}
     container_name: hermes-smart-router
     restart: unless-stopped
     environment:
@@ -75,6 +75,10 @@ services:
       SMART_ROUTER_PREFERRED_TOKEN_FIELD: ${SMART_ROUTER_PREFERRED_TOKEN_FIELD:-max_tokens}
       SMART_ROUTER_CONTEXT_TOKEN_SAFETY_FACTOR: ${SMART_ROUTER_CONTEXT_TOKEN_SAFETY_FACTOR:-1.15}
       SMART_ROUTER_ALLOW_TIER_OVERRIDES: ${SMART_ROUTER_ALLOW_TIER_OVERRIDES:-false}
+      SMART_ROUTER_COST_LEDGER_ENABLED: ${SMART_ROUTER_COST_LEDGER_ENABLED:-true}
+      SMART_ROUTER_COST_DATABASE_PATH: ${SMART_ROUTER_COST_DATABASE_PATH:-/data/cost-ledger.sqlite3}
+      SMART_ROUTER_PRICING_FILE: ${SMART_ROUTER_PRICING_FILE:-/policy/pricing-v0.5.json}
+      SMART_ROUTER_DASHBOARD_ENABLED: ${SMART_ROUTER_DASHBOARD_ENABLED:-true}
       SMART_ROUTER_CLIENT_API_KEY: ${SMART_ROUTER_CLIENT_API_KEY:-}
       SMART_ROUTER_UPSTREAM_API_KEY: ${SMART_ROUTER_UPSTREAM_API_KEY:-}
       SMART_ROUTER_UPSTREAM_HEALTH_URL: ${SMART_ROUTER_UPSTREAM_HEALTH_URL:-http://omniroute:20128/api/monitoring/health}

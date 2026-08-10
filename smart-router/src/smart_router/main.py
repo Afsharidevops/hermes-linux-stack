@@ -17,6 +17,8 @@ from starlette.routing import Route
 from . import __version__
 from .budget import BudgetResult, enforce_budget, propose_budget
 from .config import Settings
+from .costs import CostLedger
+from .dashboard import dashboard_enabled, dashboard_response
 from .database import RouteStore
 from .metrics import (
     ACTIVE_STREAMS,
@@ -79,6 +81,7 @@ def create_app(
     store = RouteStore(settings)
     policy_runtime = build_policy_runtime(settings)
     observations = ObservationWriter(settings.observation_file)
+    cost_ledger = CostLedger.from_env(default_database_path=settings.database_path)
     timeout = httpx.Timeout(
         connect=settings.connect_timeout_seconds,
         read=settings.read_timeout_seconds,
@@ -129,6 +132,26 @@ def create_app(
 
     async def metrics(_: Request) -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    async def dashboard(request: Request) -> Response:
+        # Static shell contains no telemetry; the JSON API remains authenticated.
+        if not dashboard_enabled():
+            return Response(status_code=404)
+        return dashboard_response(version=__version__)
+
+    async def dashboard_summary(request: Request) -> Response:
+        auth_error = _client_auth_error(request, settings)
+        if auth_error:
+            return auth_error
+        if not dashboard_enabled():
+            return Response(status_code=404)
+        try:
+            hours = float(request.query_params.get("hours", "24"))
+        except ValueError:
+            return _openai_error("hours must be numeric", "invalid_dashboard_window", 400)
+        payload = cost_ledger.summary(hours=hours)
+        payload["version"] = __version__
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
 
     async def models(request: Request) -> Response:
         auth_error = _client_auth_error(request, settings)
@@ -316,14 +339,28 @@ def create_app(
             sticky_action,
             settings.mode,
         )
-        return await _dispatch(
+        response = await _dispatch(
             request, outbound, headers, url, stream, settings.mode, "auto", started
         )
+        try:
+            cost_ledger.record_response(
+                response,
+                tier=selected_tier,
+                model=effective_model,
+                client_output_limit=budget.client_limit,
+                effective_output_limit=budget.effective_limit,
+                streaming=stream,
+            )
+        except Exception as error:
+            logger.error(json.dumps({"event": "cost_ledger_error", "reason": type(error).__name__}))
+        return response
 
     routes = [
         Route("/health", health),
         Route("/ready", ready),
         Route("/metrics", metrics),
+        Route("/dashboard", dashboard, methods=["GET"]),
+        Route("/dashboard/api/summary", dashboard_summary, methods=["GET"]),
         Route("/v1/models", models, methods=["GET"]),
         Route("/v1/chat/completions", completions, methods=["POST"]),
     ]
@@ -331,6 +368,7 @@ def create_app(
     app.state.settings = settings
     app.state.store = store
     app.state.policy_runtime = policy_runtime
+    app.state.cost_ledger = cost_ledger
     return app
 
 
