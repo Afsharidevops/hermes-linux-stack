@@ -11,7 +11,7 @@ from smart_router.config import Settings
 from smart_router.learned.metrics import classification_metrics
 from smart_router.learned.model import load_learned_policy
 from smart_router.learned.schema import load_training_rows
-from smart_router.routing import build_policy_runtime, decide
+from smart_router.routing import analyze_request, apply_capability_gates, build_policy_runtime, decide, tier_satisfies_capabilities
 
 TIERS = ("fast", "standard", "strong")
 
@@ -33,6 +33,32 @@ def _policy_predictions(rows, settings: Settings, policy: str) -> list[str]:
     return predictions
 
 
+
+def _capability_metrics(rows, predicted: list[str], settings: Settings) -> dict[str, Any]:
+    evaluated = 0
+    violations = 0
+    upgrades = 0
+    for row, proposed in zip(rows, predicted):
+        if row.request is None:
+            continue
+        evaluated += 1
+        facts = analyze_request(row.request)
+        try:
+            final_tier, _ = apply_capability_gates(proposed, facts, settings, [])
+        except ValueError:
+            violations += 1
+            continue
+        if final_tier != proposed:
+            upgrades += 1
+        if not tier_satisfies_capabilities(final_tier, facts, settings):
+            violations += 1
+    return {
+        "capability_rows_evaluated": evaluated,
+        "capability_violations": violations if evaluated else None,
+        "capability_upgrade_count": upgrades if evaluated else None,
+    }
+
+
 def report(path: Path, settings: Settings, learned_model: str | None = None, metadata: str | None = None) -> dict[str, Any]:
     rows = load_training_rows(path)
     labels = [row.label for row in rows]
@@ -48,7 +74,7 @@ def report(path: Path, settings: Settings, learned_model: str | None = None, met
         result["learned"]["fallback_rate_due_to_low_confidence"] = sum(
             learned.predict(row.features).low_confidence_fallback for row in rows
         ) / len(rows)
-        result["capability_violations"] = 0
+        result["learned"].update(_capability_metrics(rows, predicted, settings))
     requests = [row for row in rows if row.request is not None]
     if requests:
         for policy in ("heuristic", "calibrated"):

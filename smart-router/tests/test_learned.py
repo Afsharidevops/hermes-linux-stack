@@ -71,3 +71,66 @@ def test_training_is_reproducible(tmp_path):
     assert ma["metrics"] == mb["metrics"]
     assert ma["feature_schema_version"] == 1
     assert ma["training_rows"] == 60
+
+
+def test_logistic_regression_training_supported(tmp_path):
+    sample = Path(__file__).parents[1] / "examples" / "learned-routing-sample.jsonl"
+    model = tmp_path / "logistic.joblib"
+    meta = tmp_path / "logistic.json"
+    metadata = train_model(
+        str(sample), str(model), str(meta), model_type="logistic-regression", random_seed=11
+    )
+    assert metadata["model_type"] == "LogisticRegression"
+    assert model.is_file() and meta.is_file()
+
+
+def test_nine_row_balanced_training_uses_three_validation_rows(tmp_path):
+    source = Path(__file__).parents[1] / "examples" / "learned-routing-sample.jsonl"
+    rows = [json.loads(line) for line in source.read_text().splitlines() if line.strip()]
+    selected = []
+    for tier in ("fast", "standard", "strong"):
+        selected.extend([row for row in rows if row["label"] == tier][:3])
+    sample = tmp_path / "nine.jsonl"
+    sample.write_text("\n".join(json.dumps(row) for row in selected) + "\n")
+    metadata = train_model(
+        str(sample), str(tmp_path / "m.joblib"), str(tmp_path / "m.json"), random_seed=3
+    )
+    assert metadata["training_rows"] == 9
+    assert metadata["validation_rows"] == 3
+
+
+def test_invalid_probability_inference_fails_open(learned_settings):
+    broken = LearnedPolicy(
+        FixedEstimator((0.9, 0.9, -0.8)),
+        {"feature_schema_version": 1},
+        0.7,
+        "standard",
+    )
+    runtime = build_policy_runtime(learned_settings)
+    runtime = type(runtime)(runtime.calibration, broken, None)
+    decision = decide(
+        {"model": "auto", "messages": [{"role": "user", "content": "translate hello"}]},
+        learned_settings,
+        runtime=runtime,
+    )
+    assert decision.policy_fallback == "heuristic"
+    assert decision.proposed_tier == "fast"
+
+
+def test_corrupt_model_artifact_is_rejected(tmp_path):
+    model = tmp_path / "bad.joblib"
+    meta = tmp_path / "bad.json"
+    model.write_bytes(b"not-a-joblib")
+    meta.write_text(json.dumps({
+        "feature_schema_version": 1,
+        "feature_names": list(FEATURE_NAMES),
+        "classes": ["fast", "standard", "strong"],
+        "min_confidence": 0.7,
+        "fallback_tier": "standard",
+    }))
+    try:
+        load_learned_policy(str(model), str(meta))
+    except Exception:
+        pass
+    else:
+        raise AssertionError("corrupt learned artifacts must be rejected")

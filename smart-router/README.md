@@ -1,6 +1,6 @@
-# Hermes Smart Router v0.3.0
+# Hermes Smart Router v0.3.1
 
-Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.3 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
+Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.3.1 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
 
 ## Safe default
 
@@ -47,7 +47,7 @@ smart-router-report examples/learned-routing-sample.jsonl \
   --metadata policy/learned-v3.json
 ```
 
-The report includes fixed fast/standard/strong baselines and learned accuracy, per-tier precision/recall, confusion matrix, false-fast rate, strong-overroute rate, tier distribution, and low-confidence fallback rate. Capability gates remain runtime invariants; a learned proposal cannot force an incompatible tier.
+The report includes fixed fast/standard/strong baselines and learned accuracy, per-tier precision/recall, confusion matrix, false-fast rate, strong-overroute rate, tier distribution, and low-confidence fallback rate. When evaluation rows include a safe `request` object, capability violations and upgrades are measured; otherwise those capability metrics are reported as unavailable rather than fabricated. Capability gates remain runtime invariants; a learned proposal cannot force an incompatible tier.
 
 ## Client API key
 
@@ -68,6 +68,7 @@ Clients should select `model=auto`. `auto-fast`, `auto-standard`, and `auto-stro
 
 ```env
 SMART_ROUTER_UPSTREAM_BASE_URL=http://nine-router:20128/v1
+SMART_ROUTER_UPSTREAM_HEALTH_URL=http://nine-router:20128/api/health
 SMART_ROUTER_FAST_MODEL=combo-fast
 SMART_ROUTER_STANDARD_MODEL=combo-standard
 SMART_ROUTER_STRONG_MODEL=combo-strong
@@ -77,6 +78,7 @@ SMART_ROUTER_STRONG_MODEL=combo-strong
 
 ```env
 SMART_ROUTER_UPSTREAM_BASE_URL=http://omniroute:20129/v1
+SMART_ROUTER_UPSTREAM_HEALTH_URL=http://omniroute:20128/api/monitoring/health
 SMART_ROUTER_FAST_MODEL=auto
 SMART_ROUTER_STANDARD_MODEL=auto
 SMART_ROUTER_STRONG_MODEL=auto
@@ -93,3 +95,15 @@ Do not invent OmniRoute route IDs. Replace the three `auto` targets only after t
 - `POST /v1/chat/completions`
 
 Explicit non-Smart-Router model IDs pass through unchanged. Streaming response bytes are passed through without decoding/re-encoding the SSE body.
+
+
+## v0.3.1 hardening
+
+- The upstream API URL is required; the shared image no longer defaults to a 9router address.
+- `SMART_ROUTER_UPSTREAM_HEALTH_URL` supports backend-specific readiness probes.
+- Tier tool/vision capability flags and context windows must be monotonic from fast to standard to strong.
+- Sticky routing is rechecked against capability/context requirements before the final model is selected.
+- Logistic-regression training is compatible with current scikit-learn.
+- Small stratified datasets reserve enough validation rows for all three classes.
+- Learned inference latency and fail-open events are exported through Prometheus metrics.
+- Use `SMART_ROUTER_*_MAX_CONTEXT`; the legacy `*_CONTEXT_LIMIT` names are not used by v0.3.x.

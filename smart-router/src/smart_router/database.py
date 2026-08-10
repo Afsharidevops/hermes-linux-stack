@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import contextmanager
 import threading
 import time
 from dataclasses import dataclass
@@ -32,8 +33,19 @@ class RouteStore:
         connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            # sqlite3.Connection's context manager handles commit/rollback but does
+            # not close the file descriptor. Wrap it so every operation closes.
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """
@@ -60,7 +72,7 @@ class RouteStore:
 
     def purge_expired(self, now: int | None = None, limit: int = 500) -> int:
         now = now or int(time.time())
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 """
                 DELETE FROM session_routes WHERE rowid IN (
@@ -75,7 +87,7 @@ class RouteStore:
 
     def ready(self) -> bool:
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 connection.execute("SELECT 1")
                 connection.rollback()
@@ -84,7 +96,7 @@ class RouteStore:
             return False
 
     def reset(self, session_hash: str, alias: str) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "DELETE FROM session_routes WHERE session_hash = ? AND auto_alias = ?",
                 (session_hash, alias),
@@ -99,7 +111,7 @@ class RouteStore:
         now: int | None = None,
     ) -> StickyResult:
         now = now or int(time.time())
-        with self._lock, self._connect() as connection:
+        with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """

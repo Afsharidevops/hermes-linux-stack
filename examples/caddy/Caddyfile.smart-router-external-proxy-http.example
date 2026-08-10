@@ -1,10 +1,5 @@
-# Smart Router public ingress: HTTP-only origin behind an external reverse proxy
-# Branch: main
-#
-# TLS MUST terminate on the separate edge/reverse-proxy VM.
-# The explicit http:// scheme disables Caddy automatic HTTPS for these sites.
-# Replace 10.20.0.10/32 with the edge proxy's private IP/CIDR.
-
+# HTTP-only origin behind a separate TLS reverse proxy. Branch: main
+# Replace 10.20.0.10/32 with the edge proxy private IP/CIDR.
 {
     servers {
         trusted_proxies static 10.20.0.10/32
@@ -14,17 +9,7 @@
 
 http://api.example.com {
     encode zstd gzip
+    @metrics path /metrics
+    respond @metrics 404
     reverse_proxy smart-router:8080
 }
-
-# Optional Open WebUI origin.
-# http://chat.example.com {
-#     encode zstd gzip
-#     reverse_proxy open-webui:8080
-# }
-
-# Administrative origins should normally stay private and should not be
-# forwarded by the public edge proxy without additional access control.
-# http://routes-admin.example.com {
-#     reverse_proxy nine-router:20128
-# }
