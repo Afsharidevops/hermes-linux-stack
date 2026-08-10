@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -259,6 +260,15 @@ def decide(
     )
 
 
+def _required_context_tokens(facts: RequestFacts, candidate: Any, settings: Settings) -> int:
+    # Character-based token estimation is intentionally cheap but approximate.
+    # Apply a conservative prompt-only margin before a tier is declared context-safe.
+    prompt_tokens = math.ceil(
+        facts.estimated_total_tokens * settings.context_token_safety_factor
+    )
+    return prompt_tokens + (facts.requested_output_tokens or candidate.max_output)
+
+
 def tier_satisfies_capabilities(
     tier: str, facts: RequestFacts, settings: Settings
 ) -> bool:
@@ -267,9 +277,7 @@ def tier_satisfies_capabilities(
         return False
     if facts.has_vision and not candidate.supports_vision:
         return False
-    required_context = facts.estimated_total_tokens + (
-        facts.requested_output_tokens or candidate.max_output
-    )
+    required_context = _required_context_tokens(facts, candidate, settings)
     return required_context <= candidate.max_context
 
 
@@ -298,8 +306,8 @@ def _capability_reason(
         return "vision"
     if facts.has_tools and not settings.tier(original).supports_tools:
         return "tools"
-    required = facts.estimated_total_tokens + (
-        facts.requested_output_tokens or settings.tier(original).max_output
+    required = _required_context_tokens(
+        facts, settings.tier(original), settings
     )
     if required > settings.tier(original).max_context:
         return "context"

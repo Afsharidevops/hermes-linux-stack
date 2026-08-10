@@ -1,11 +1,57 @@
-name: validate
+name: Validate OmniRoute Stack
+
 on:
   push:
+    branches:
+      - hermes-omniroute-linux-stack
   pull_request:
+    branches:
+      - hermes-omniroute-linux-stack
+
+permissions:
+  contents: read
+
 jobs:
-  smoke:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Smoke tests
-        run: ./tests/smoke.sh
+
+      - name: Shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            bash -n "$file"
+          done < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: smart-router/pyproject.toml
+
+      - name: Smart Router tests and benchmark smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e './smart-router[dev,bench]'
+          python -m pip install 'PyYAML>=6,<7'
+          python -m pytest smart-router/tests
+          smart-router-benchmark \
+            smart-router/examples/benchmark-synthetic-v0.4.0.jsonl \
+            --output-dir /tmp/smart-router-benchmark-smoke \
+            --cost-config smart-router/examples/benchmark-costs-normalized.json \
+            --synthetic \
+            --min-rows 200
+
+      - name: Smart Router Docker build
+        run: docker build --file smart-router/Dockerfile --tag hermes-smart-router:validate smart-router
+
+      - name: OmniRoute stack smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tests/smoke.sh

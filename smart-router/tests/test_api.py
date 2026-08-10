@@ -35,7 +35,17 @@ def test_models_inject_aliases(settings):
     with TestClient(app) as client:
         payload = client.get("/v1/models").json()
     ids = {item["id"] for item in payload["data"]}
-    assert {"auto", "auto-fast", "auto-standard", "auto-strong"} <= ids
+    assert "auto" in ids
+    assert {"auto-fast", "auto-standard", "auto-strong"}.isdisjoint(ids)
+
+    # Trusted deployments may explicitly opt in to client tier overrides.
+    trusted = replace(settings, allow_tier_overrides=True)
+    app = create_app(trusted, httpx.MockTransport(upstream))
+    with TestClient(app) as client:
+        payload = client.get("/v1/models").json()
+
+    trusted_ids = {item["id"] for item in payload["data"]}
+    assert {"auto", "auto-fast", "auto-standard", "auto-strong"} <= trusted_ids
 
 
 def test_explicit_model_is_preserved(settings):
@@ -96,7 +106,11 @@ def test_ready_uses_configured_upstream_health_url(settings):
 def test_sticky_tier_cannot_bypass_tool_capability(settings):
     # Deliberately construct an invalid non-monotonic object after startup validation
     # to exercise the runtime belt-and-suspenders safety check.
-    unsafe = replace(settings, strong=replace(settings.strong, supports_tools=False))
+    unsafe = replace(
+        settings,
+        allow_tier_overrides=True,
+        strong=replace(settings.strong, supports_tools=False),
+    )
     app = create_app(unsafe, httpx.MockTransport(upstream))
     headers = {"x-router-session": "sticky-capability-test"}
     with TestClient(app) as client:
