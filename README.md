@@ -1,4 +1,4 @@
-# Hermes Linux Stack — 9router + Smart Router v0.4.0
+# Hermes Linux Stack — 9router + Smart Router v0.5.0
 
 A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.4.0** and **9router**.
 
@@ -252,7 +252,7 @@ Verify:
 Published image:
 
 ```text
-afsharidevops/hermes-smart-router:0.4.0
+afsharidevops/hermes-smart-router:0.5.0
 ```
 
 The Smart Router decides:
@@ -781,7 +781,7 @@ Verify:
 # Published Smart Router Image
 
 ```text
-afsharidevops/hermes-smart-router:0.4.0
+afsharidevops/hermes-smart-router:0.5.0
 ```
 
 Platforms:
@@ -844,7 +844,7 @@ SMART_ROUTER_STANDARD_MODEL=combo-standard
 SMART_ROUTER_STRONG_MODEL=combo-strong
 ```
 
-The shared v0.4.0 image is `afsharidevops/hermes-smart-router:0.4.0`. `SMART_ROUTER_HMAC_SECRET` is mandatory; generate a persistent secret with `openssl rand -hex 32` and keep the real value outside Git. Use `SMART_ROUTER_*_MAX_CONTEXT` for context limits.
+The shared v0.4.0 image is `afsharidevops/hermes-smart-router:0.5.0`. `SMART_ROUTER_HMAC_SECRET` is mandatory; generate a persistent secret with `openssl rand -hex 32` and keep the real value outside Git. Use `SMART_ROUTER_*_MAX_CONTEXT` for context limits.
 
 For external OpenAI-compatible applications, see `docs/SMART-ROUTER-CLIENT-API.md`. For standalone TLS or an external Caddy/Nginx/Traefik/other reverse proxy, see `docs/SMART-ROUTER-PUBLIC-INGRESS.md`.
 
@@ -865,3 +865,25 @@ Smart Router v0.4.0 adds RouteLLM-style cost/quality benchmarking with Pareto pl
 Client tier forcing is disabled by default, approximate context counts receive a configurable 15% safety margin, and the unused `SMART_ROUTER_FAIL_OPEN_MODEL` knob has been removed. The shared Docker image is released canonically from `main` only after `smart-router/` is identical on `main` and `hermes-omniroute-linux-stack`.
 
 The v0.4.0 OCI digest must be recorded **after** the new image is published; do not reuse the v0.3.1 digest.
+
+
+<!-- smart-router-v0.5.0-release -->
+## Smart Router v0.5.0 — measured cost, preferences, and a built-in dashboard
+
+Smart Router v0.5.0 adds a lightweight dashboard directly to the router at **`/dashboard`**. It records measured upstream token usage to a local SQLite ledger and, when real tier prices are configured, shows measured USD cost, a same-token strong-only counterfactual, savings percentage, usage/pricing coverage, tier mix, and output-budget-cap reduction. Missing usage is never silently converted into fake savings.
+
+Configure real prices by copying `smart-router/policy/pricing-v0.5.example.json` to `pricing-v0.5.json`. See [`docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md`](docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md) and [`docs/SMART-ROUTER-v0.5.0-DASHBOARD.md`](docs/SMART-ROUTER-v0.5.0-DASHBOARD.md).
+
+### Evidence figures
+
+The following v0.4 benchmark figures remain **synthetic examples, not production performance claims**:
+
+![Synthetic quality vs cost](docs/smart-router-v0.4.0/synthetic-benchmark/quality_vs_cost.png)
+
+![Synthetic tier distribution](docs/smart-router-v0.4.0/synthetic-benchmark/tier_distribution.png)
+
+The v0.5 target scorecard is a roadmap figure, not measured performance:
+
+![v0.5 improvement targets](docs/smart-router-v0.5.0/figures/v050-improvement-scorecard.png)
+
+![v0.5 dashboard measurement funnel](docs/smart-router-v0.5.0/figures/v050-dashboard-measurement-funnel.png)
