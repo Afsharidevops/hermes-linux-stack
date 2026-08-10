@@ -1,6 +1,6 @@
-# Hermes Linux Stack — 9router + Smart Router v0.3.1
+# Hermes Linux Stack — 9router + Smart Router v0.4.0
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.3.1** and **9router**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.4.0** and **9router**.
 
 > This is the **9router branch**.
 >
@@ -18,7 +18,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.3.1
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.4.0
                             │              │
 n8n / other clients ────────┘              │
                                            ├─ fast     → combo-fast
@@ -44,7 +44,7 @@ The repository intentionally keeps its routing backends separate.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.3.1
+          Smart Router v0.4.0
                   │
                   ▼
                9router
@@ -59,7 +59,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.3.1
+          Smart Router v0.4.0
                   │
                   ▼
               OmniRoute
@@ -78,7 +78,7 @@ Do not add OmniRoute to `main`, and do not add 9router to the OmniRoute branch.
 - Telegram bot/agent integration through Hermes
 - Numeric Telegram user allowlist
 - Optional Telegram home chat for cron results and notifications
-- Hermes Smart Router v0.3.1
+- Hermes Smart Router v0.4.0
 - OpenAI-compatible `auto` routing aliases
 - 9router provider/model gateway
 - Open WebUI integration
@@ -247,12 +247,12 @@ Verify:
 
 ---
 
-# Smart Router v0.3.1
+# Smart Router v0.4.0
 
 Published image:
 
 ```text
-afsharidevops/hermes-smart-router:0.3.1
+afsharidevops/hermes-smart-router:0.4.0
 ```
 
 The Smart Router decides:
@@ -706,7 +706,7 @@ python -m pip install -e "./smart-router[dev]"
 pytest -q smart-router/tests
 ```
 
-Smart Router v0.3.1 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
+Smart Router v0.4.0 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
 
 ---
 
@@ -724,7 +724,7 @@ Expected version:
 ```json
 {
   "status": "ok",
-  "version": "0.3.1"
+  "version": "0.4.0"
 }
 ```
 
@@ -781,7 +781,7 @@ Verify:
 # Published Smart Router Image
 
 ```text
-afsharidevops/hermes-smart-router:0.3.1
+afsharidevops/hermes-smart-router:0.4.0
 ```
 
 Platforms:
@@ -794,7 +794,6 @@ linux/arm64
 OCI release digest:
 
 ```text
-sha256:fab4932c7e813140ec268742e5ddfdc05998f19b77d08459d934b1449edd6f7b
 ```
 
 ---
@@ -818,7 +817,7 @@ sha256:fab4932c7e813140ec268742e5ddfdc05998f19b77d08459d934b1449edd6f7b
 
 ```text
 Branch: main
-    Smart Router: v0.3.1
+    Smart Router: v0.4.0
 Backend: 9router
 Smart Router upstream: http://nine-router:20128/v1
 
@@ -831,9 +830,9 @@ Recommended initial router mode: observe
 
 
 
-## Smart Router v0.3.1 release hardening
+## Smart Router v0.4.0 release hardening
 
-The v0.3.1 release keeps the learned classifier as a proposal layer and preserves deterministic capability, sticky-session, budget, explicit-model, streaming, privacy, and fail-open rules. The safe default remains `SMART_ROUTER_MODE=observe` with `SMART_ROUTER_POLICY=heuristic`.
+The v0.4.0 release keeps the learned classifier as a proposal layer and preserves deterministic capability, sticky-session, budget, explicit-model, streaming, privacy, and fail-open rules. The safe default remains `SMART_ROUTER_MODE=observe` with `SMART_ROUTER_POLICY=heuristic`.
 
 Branch backend: **9router**
 
@@ -845,7 +844,7 @@ SMART_ROUTER_STANDARD_MODEL=combo-standard
 SMART_ROUTER_STRONG_MODEL=combo-strong
 ```
 
-The shared v0.3.1 image is `afsharidevops/hermes-smart-router:0.3.1`. `SMART_ROUTER_HMAC_SECRET` is mandatory; generate a persistent secret with `openssl rand -hex 32` and keep the real value outside Git. Use `SMART_ROUTER_*_MAX_CONTEXT` for context limits.
+The shared v0.4.0 image is `afsharidevops/hermes-smart-router:0.4.0`. `SMART_ROUTER_HMAC_SECRET` is mandatory; generate a persistent secret with `openssl rand -hex 32` and keep the real value outside Git. Use `SMART_ROUTER_*_MAX_CONTEXT` for context limits.
 
 For external OpenAI-compatible applications, see `docs/SMART-ROUTER-CLIENT-API.md`. For standalone TLS or an external Caddy/Nginx/Traefik/other reverse proxy, see `docs/SMART-ROUTER-PUBLIC-INGRESS.md`.
 
@@ -856,3 +855,13 @@ Learned rollout remains: heuristic+observe → collect safe features → train/e
 See `LICENSE`.
 
 Third-party images and upstream projects retain their respective licenses.
+
+
+<!-- smart-router-v0.4.0-release -->
+## Smart Router v0.4.0 measurement and release hardening
+
+Smart Router v0.4.0 adds RouteLLM-style cost/quality benchmarking with Pareto plots, fixed baselines, tier distribution, confusion matrix, confidence-risk analysis, machine-readable summaries, and CI release gates. Synthetic example figures are explicitly watermarked and are not performance claims. See [`docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md`](docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md).
+
+Client tier forcing is disabled by default, approximate context counts receive a configurable 15% safety margin, and the unused `SMART_ROUTER_FAIL_OPEN_MODEL` knob has been removed. The shared Docker image is released canonically from `main` only after `smart-router/` is identical on `main` and `hermes-omniroute-linux-stack`.
+
+The v0.4.0 OCI digest must be recorded **after** the new image is published; do not reuse the v0.3.1 digest.

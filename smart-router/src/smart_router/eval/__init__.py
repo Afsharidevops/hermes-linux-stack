@@ -1,1 +1,1 @@
-"""Offline replay, calibration, and reporting utilities."""
+"""Evaluation and benchmarking helpers for Hermes Smart Router."""

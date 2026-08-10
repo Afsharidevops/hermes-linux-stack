@@ -51,5 +51,7 @@ def test_training_metadata_contains_artifact_hash(tmp_path: Path):
     meta = tmp_path / "m.json"
     metadata = train_model(str(source), str(model), str(meta), random_seed=13)
     assert len(metadata["artifact_sha256"]) == 64
-    assert metadata["router_version"] == "0.3.1"
+    from smart_router import __version__
+
+    assert metadata["router_version"] == __version__
     assert json.loads(meta.read_text())["artifact_sha256"] == metadata["artifact_sha256"]

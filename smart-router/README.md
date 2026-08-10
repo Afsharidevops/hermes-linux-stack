@@ -1,6 +1,6 @@
-# Hermes Smart Router v0.3.1
+# Hermes Smart Router v0.4.0
 
-Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.3.1 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
+Smart Router is an OpenAI-compatible `/v1` proxy for Hermes Linux Stack. Version 0.4.0 keeps the v0.2 deterministic safety path and adds an optional offline-trained, CPU-only three-tier learned proposal (`fast`, `standard`, `strong`). The learned classifier never bypasses tools, vision, context, sticky-session, or output-budget policy.
 
 ## Safe default
 
@@ -15,8 +15,8 @@ The learned policy is workload-specific. Train it offline, evaluate it, run it i
 
 ```env
 SMART_ROUTER_POLICY=learned
-SMART_ROUTER_LEARNED_MODEL_FILE=/policy/learned-v3.joblib
-SMART_ROUTER_LEARNED_METADATA_FILE=/policy/learned-v3.json
+SMART_ROUTER_LEARNED_MODEL_FILE=/policy/learned-v4.joblib
+SMART_ROUTER_LEARNED_METADATA_FILE=/policy/learned-v4.json
 SMART_ROUTER_LEARNED_MIN_CONFIDENCE=0.70
 SMART_ROUTER_LEARNED_FALLBACK=standard
 SMART_ROUTER_LEARNED_ERROR_FALLBACK=heuristic
@@ -32,8 +32,8 @@ Training input is JSONL with `schema_version`, a complete privacy-safe `features
 
 ```bash
 smart-router-train examples/learned-routing-sample.jsonl \
-  --output policy/learned-v3.joblib \
-  --metadata policy/learned-v3.json \
+  --output policy/learned-v4.joblib \
+  --metadata policy/learned-v4.json \
   --random-seed 42
 ```
 
@@ -43,8 +43,8 @@ The default classifier is `HistGradientBoostingClassifier`; `--model logistic-re
 
 ```bash
 smart-router-report examples/learned-routing-sample.jsonl \
-  --learned-model policy/learned-v3.joblib \
-  --metadata policy/learned-v3.json
+  --learned-model policy/learned-v4.joblib \
+  --metadata policy/learned-v4.json
 ```
 
 The report includes fixed fast/standard/strong baselines and learned accuracy, per-tier precision/recall, confusion matrix, false-fast rate, strong-overroute rate, tier distribution, and low-confidence fallback rate. When evaluation rows include a safe `request` object, capability violations and upgrades are measured; otherwise those capability metrics are reported as unavailable rather than fabricated. Capability gates remain runtime invariants; a learned proposal cannot force an incompatible tier.
@@ -97,7 +97,7 @@ Do not invent OmniRoute route IDs. Replace the three `auto` targets only after t
 Explicit non-Smart-Router model IDs pass through unchanged. Streaming response bytes are passed through without decoding/re-encoding the SSE body.
 
 
-## v0.3.1 hardening
+## v0.4.0 hardening
 
 - The upstream API URL is required; the shared image no longer defaults to a 9router address.
 - `SMART_ROUTER_UPSTREAM_HEALTH_URL` supports backend-specific readiness probes.
@@ -107,3 +107,17 @@ Explicit non-Smart-Router model IDs pass through unchanged. Streaming response b
 - Small stratified datasets reserve enough validation rows for all three classes.
 - Learned inference latency and fail-open events are exported through Prometheus metrics.
 - Use `SMART_ROUTER_*_MAX_CONTEXT`; the legacy `*_CONTEXT_LIMIT` names are not used by v0.3.x.
+
+
+<!-- v0.4.0-benchmarking -->
+## v0.4.0 cost/quality benchmark
+
+Install the optional benchmark tooling with `python -m pip install -e './smart-router[dev,bench]'`, then run `smart-router-benchmark`. It generates `quality_vs_cost.png`, `tier_distribution.png`, `confusion_matrix.png`, `confidence_risk.png`, `frontier.csv`, `summary.json`, and `report.md`.
+
+The bundled `examples/benchmark-synthetic-v0.4.0.jsonl` is synthetic test data only. Its plots are watermarked and must not be presented as Hermes performance. For public results, supply per-tier `quality_by_tier` scores from a representative held-out workload and a documented cost model. See `../docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md`.
+
+### v0.4.0 safety controls
+
+- `SMART_ROUTER_CONTEXT_TOKEN_SAFETY_FACTOR=1.15` applies a conservative margin to approximate prompt-token counts before context capability gates.
+- `SMART_ROUTER_ALLOW_TIER_OVERRIDES=false` prevents ordinary clients from forcing `auto-fast`, `auto-standard`, `auto-strong`, or `X-Router-Tier`. Trusted deployments may opt in.
+- The unused `SMART_ROUTER_FAIL_OPEN_MODEL` setting was removed. Learned load/inference failures continue through `SMART_ROUTER_LEARNED_ERROR_FALLBACK`.

@@ -46,6 +46,31 @@ logger = logging.getLogger("smart-router")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
+
+def _resolve_requested_tier(
+    requested_model: str, header_tier: str | None, allow_tier_overrides: bool
+) -> str | None:
+    requested_tier = AUTO_ALIASES[requested_model]
+
+    if requested_model != "auto" and not allow_tier_overrides:
+        raise PermissionError("client tier overrides are disabled")
+
+    if header_tier is not None:
+        header_tier = header_tier.strip().lower()
+
+        if header_tier not in {"fast", "standard", "strong"}:
+            raise ValueError(
+                "X-Router-Tier must be fast, standard, or strong"
+            )
+
+        if not allow_tier_overrides:
+            raise PermissionError("client tier overrides are disabled")
+
+        requested_tier = header_tier
+
+    return requested_tier
+
+
 def create_app(
     settings: Settings | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -127,7 +152,8 @@ def create_app(
             try:
                 payload = upstream.json()
                 existing = {item.get("id") for item in payload.get("data", [])}
-                for alias in AUTO_ALIASES:
+                advertised_aliases = AUTO_ALIASES if settings.allow_tier_overrides else {"auto": None}
+                for alias in advertised_aliases:
                     if alias not in existing:
                         payload.setdefault("data", []).append(
                             {"id": alias, "object": "model", "owned_by": "smart-router"}
@@ -178,10 +204,21 @@ def create_app(
                 request, raw, headers, url, stream, settings.mode, "explicit", started
             )
 
-        requested_tier = AUTO_ALIASES[requested_model]
         header_tier = request.headers.get("x-router-tier")
-        if header_tier in {"fast", "standard", "strong"}:
-            requested_tier = header_tier
+        try:
+            requested_tier = _resolve_requested_tier(
+                requested_model,
+                header_tier,
+                settings.allow_tier_overrides,
+            )
+        except PermissionError as error:
+            return _openai_error(
+                str(error), "tier_override_forbidden", 403
+            )
+        except ValueError as error:
+            return _openai_error(
+                str(error), "invalid_tier_override", 400
+            )
         try:
             decision = decide(body, settings, requested_tier, policy_runtime)
             proposal = propose_budget(body, decision, settings)

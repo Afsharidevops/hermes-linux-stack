@@ -28,7 +28,6 @@ class Settings:
     policy_version: str
     calibration_file: str
     observe_model: str
-    fail_open_model: str
     session_ttl_seconds: int
     max_session_age_seconds: int
     demotion_turns: int
@@ -44,6 +43,8 @@ class Settings:
     fast: TierConfig
     standard: TierConfig
     strong: TierConfig
+    context_token_safety_factor: float = 1.15
+    allow_tier_overrides: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -104,12 +105,11 @@ class Settings:
             ),
             observation_file=_optional_text("SMART_ROUTER_OBSERVATION_FILE"),
             hmac_secret=secret,
-            policy_version=_required_text("SMART_ROUTER_POLICY_VERSION", "3"),
+            policy_version=_required_text("SMART_ROUTER_POLICY_VERSION", "4"),
             calibration_file=os.getenv(
                 "SMART_ROUTER_CALIBRATION_FILE", "/policy/calibrated.json"
             ),
             observe_model=_required_text("SMART_ROUTER_OBSERVE_MODEL", "ai"),
-            fail_open_model=_required_text("SMART_ROUTER_FAIL_OPEN_MODEL", "ai"),
             session_ttl_seconds=_positive_int(
                 "SMART_ROUTER_SESSION_TTL_SECONDS", 2700
             ),
@@ -127,11 +127,17 @@ class Settings:
                 "SMART_ROUTER_MAX_REQUEST_BYTES", 10485760
             ),
             preferred_token_field=preferred,
+            context_token_safety_factor=_positive_float(
+                "SMART_ROUTER_CONTEXT_TOKEN_SAFETY_FACTOR", 1.15
+            ),
+            allow_tier_overrides=_bool_env(
+                "SMART_ROUTER_ALLOW_TIER_OVERRIDES", False
+            ),
             learned_model_file=os.getenv(
-                "SMART_ROUTER_LEARNED_MODEL_FILE", "/policy/learned-v3.joblib"
+                "SMART_ROUTER_LEARNED_MODEL_FILE", "/policy/learned-v4.joblib"
             ),
             learned_metadata_file=os.getenv(
-                "SMART_ROUTER_LEARNED_METADATA_FILE", "/policy/learned-v3.json"
+                "SMART_ROUTER_LEARNED_METADATA_FILE", "/policy/learned-v4.json"
             ),
             learned_min_confidence=learned_min_confidence,
             learned_fallback=learned_fallback,
@@ -142,6 +148,10 @@ class Settings:
             ),
             strong=_tier("STRONG", "combo-strong", 6144, True, True, 200000),
         )
+        if settings.context_token_safety_factor < 1.0:
+            raise ValueError(
+                "SMART_ROUTER_CONTEXT_TOKEN_SAFETY_FACTOR must be >= 1.0"
+            )
         if not any(
             tier.supports_tools
             for tier in (settings.fast, settings.standard, settings.strong)
