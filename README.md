@@ -1,6 +1,6 @@
-# Hermes Linux Stack — OmniRoute + Smart Router v0.5.0
+# Hermes Linux Stack — OmniRoute + Smart Router v0.5.1
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.5.0** and **OmniRoute**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.5.1** and **OmniRoute**.
 
 > This branch is intentionally **OmniRoute-only**.
 >
@@ -18,7 +18,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.0
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.1
                             │              │
 n8n / other clients ────────┘              │
                                            ▼
@@ -44,7 +44,7 @@ The two router backends in this repository are intentionally isolated.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.0
+          Smart Router v0.5.1
                   │
                   ▼
                9router
@@ -59,7 +59,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.0
+          Smart Router v0.5.1
                   │
                   ▼
               OmniRoute
@@ -77,7 +77,7 @@ Do not combine 9router and OmniRoute in one Compose stack.
 - Hermes Agent
 - Telegram bot/agent through Hermes
 - Numeric Telegram allowlist
-- Hermes Smart Router v0.5.0
+- Hermes Smart Router v0.5.1
 - OmniRoute dashboard and OpenAI-compatible API
 - Open WebUI
 - Optional n8n
@@ -180,7 +180,7 @@ Telegram Bot API
 Hermes Agent
      │
      ▼
-Smart Router v0.5.0
+Smart Router v0.5.1
      │
      ▼
 OmniRoute
@@ -331,12 +331,12 @@ curl -s http://127.0.0.1:20129/v1/models
 
 ---
 
-# Smart Router v0.5.0
+# Smart Router v0.5.1
 
 Published image:
 
 ```text
-afsharidevops/hermes-smart-router:0.5.0
+afsharidevops/hermes-smart-router:0.5.1
 ```
 
 Smart Router answers:
@@ -879,7 +879,7 @@ docker compose \
 Smart Router should resolve to:
 
 ```text
-afsharidevops/hermes-smart-router:0.5.0
+afsharidevops/hermes-smart-router:0.5.1
 ```
 
 Check services:
@@ -970,7 +970,7 @@ The runtime directory is intentionally owned/prepared for Smart Router UID `1000
 # Published Smart Router Image
 
 ```text
-afsharidevops/hermes-smart-router:0.5.0
+afsharidevops/hermes-smart-router:0.5.1
 ```
 
 Platforms:
@@ -1064,7 +1064,7 @@ Recommended rollout:
 
 ```text
 Branch: hermes-omniroute-linux-stack
-    Smart Router: v0.5.0
+    Smart Router: v0.5.1
 Backend: OmniRoute
 Smart Router upstream: http://omniroute:20129/v1
 
@@ -1135,3 +1135,14 @@ The v0.5 target scorecard is a roadmap figure, not measured performance:
 ![v0.5 improvement targets](docs/smart-router-v0.5.0/figures/v050-improvement-scorecard.png)
 
 ![v0.5 dashboard measurement funnel](docs/smart-router-v0.5.0/figures/v050-dashboard-measurement-funnel.png)
+
+
+---
+
+## Smart Router v0.5.1 control plane
+
+v0.5.1 adds the P0-P2 control-plane roadmap while preserving OmniRoute as this branch's provider gateway. Open `http://127.0.0.1:8787/control/` by default for RBAC, virtual keys/quotas, dynamic routing profiles, provider discovery, budgets, policies, RAG/knowledge, memory, agents/teams, plugin registry, audit and system health.
+
+See `smart-router/V0.5.1-CONTROL-PLANE.md` before enabling production authentication or HA mode.
+
+Current v0.5.1 image: `afsharidevops/hermes-smart-router:0.5.1`.
