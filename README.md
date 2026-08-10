@@ -858,7 +858,7 @@ Third-party images and upstream projects retain their respective licenses.
 
 
 <!-- smart-router-v0.4.0-release -->
-## Smart Router v0.5.0 measurement and release hardening
+## Previous release: Smart Router v0.4.0 benchmarking
 
 Smart Router v0.4.0 adds RouteLLM-style cost/quality benchmarking with Pareto plots, fixed baselines, tier distribution, confusion matrix, confidence-risk analysis, machine-readable summaries, and CI release gates. Synthetic example figures are explicitly watermarked and are not performance claims. See [`docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md`](docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md).
 
