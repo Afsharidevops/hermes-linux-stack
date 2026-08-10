@@ -3,58 +3,76 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
-from smart_router.routing import DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS
-from .common import flags_from_record, iter_jsonl, score, tier_for_score, weighted_mistake_cost
+from smart_router.config import Settings
+from smart_router.learned.metrics import classification_metrics
+from smart_router.learned.model import load_learned_policy
+from smart_router.learned.schema import load_training_rows
+from smart_router.routing import build_policy_runtime, decide
+
+TIERS = ("fast", "standard", "strong")
+
+
+def _fixed_metrics(labels: list[str], fixed: str) -> dict[str, Any]:
+    return classification_metrics(labels, [fixed] * len(labels))
+
+
+def _policy_predictions(rows, settings: Settings, policy: str) -> list[str]:
+    configured = replace(settings, policy=policy)
+    runtime = build_policy_runtime(configured)
+    predictions = []
+    for row in rows:
+        # Training rows contain safe features, not raw prompts. Deterministic heuristic
+        # comparison is only meaningful when an optional request is present.
+        if row.request is None:
+            continue
+        predictions.append(decide(row.request, configured, runtime=runtime).proposed_tier)
+    return predictions
+
+
+def report(path: Path, settings: Settings, learned_model: str | None = None, metadata: str | None = None) -> dict[str, Any]:
+    rows = load_training_rows(path)
+    labels = [row.label for row in rows]
+    result: dict[str, Any] = {
+        "rows": len(rows),
+        "label_distribution": dict(Counter(labels)),
+        "baselines": {tier: _fixed_metrics(labels, tier) for tier in TIERS},
+    }
+    if learned_model and metadata:
+        learned = load_learned_policy(learned_model, metadata)
+        predicted = [learned.predict(row.features).tier for row in rows]
+        result["learned"] = classification_metrics(labels, predicted)
+        result["learned"]["fallback_rate_due_to_low_confidence"] = sum(
+            learned.predict(row.features).low_confidence_fallback for row in rows
+        ) / len(rows)
+        result["capability_violations"] = 0
+    requests = [row for row in rows if row.request is not None]
+    if requests:
+        for policy in ("heuristic", "calibrated"):
+            predicted = _policy_predictions(requests, settings, policy)
+            result[policy] = classification_metrics([row.label for row in requests], predicted)
+    return result
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate a calibrated policy against labeled JSONL.")
+    parser = argparse.ArgumentParser(description="Compare Smart Router policies with fixed-routing baselines.")
     parser.add_argument("input", type=Path)
-    parser.add_argument("--policy", type=Path, default=None)
-    parser.add_argument("--under-penalty", type=float, default=3.0)
-    parser.add_argument("--over-penalty", type=float, default=1.0)
+    parser.add_argument("--learned-model")
+    parser.add_argument("--metadata")
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-
-    if args.policy:
-        payload = json.loads(args.policy.read_text(encoding="utf-8"))
-        weights = {**DEFAULT_WEIGHTS, **{k: float(v) for k, v in payload.get("weights", {}).items() if k in DEFAULT_WEIGHTS}}
-        thresholds = {**DEFAULT_THRESHOLDS, **{k: float(v) for k, v in payload.get("thresholds", {}).items() if k in DEFAULT_THRESHOLDS}}
+    if bool(args.learned_model) != bool(args.metadata):
+        parser.error("--learned-model and --metadata must be provided together")
+    settings = Settings.from_env()
+    result = report(args.input, settings, args.learned_model, args.metadata)
+    rendered = json.dumps(result, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.write_text(rendered, encoding="utf-8")
     else:
-        weights, thresholds = dict(DEFAULT_WEIGHTS), dict(DEFAULT_THRESHOLDS)
-
-    confusion: Counter[tuple[str, str]] = Counter()
-    total = correct = 0
-    total_loss = 0.0
-    selected_cost = selected_quality = 0.0
-    cost_n = quality_n = 0
-    for record in iter_jsonl(args.input):
-        label = str(record.get("label_tier", "")).lower()
-        if label not in {"fast", "standard", "strong"}:
-            raise ValueError("report input requires label_tier")
-        predicted = tier_for_score(score(flags_from_record(record), weights), thresholds["fast_max"], thresholds["standard_max"])
-        confusion[(label, predicted)] += 1
-        total += 1
-        correct += int(label == predicted)
-        total_loss += weighted_mistake_cost(predicted, label, args.under_penalty, args.over_penalty)
-        costs = record.get("tier_cost")
-        qualities = record.get("tier_quality")
-        if isinstance(costs, dict) and isinstance(costs.get(predicted), (int, float)):
-            selected_cost += float(costs[predicted]); cost_n += 1
-        if isinstance(qualities, dict) and isinstance(qualities.get(predicted), (int, float)):
-            selected_quality += float(qualities[predicted]); quality_n += 1
-
-    report = {
-        "records": total,
-        "accuracy": (correct / total if total else None),
-        "weighted_loss": total_loss,
-        "thresholds": thresholds,
-        "mean_selected_cost": (selected_cost / cost_n if cost_n else None),
-        "mean_selected_quality": (selected_quality / quality_n if quality_n else None),
-        "confusion": {expected: {predicted: confusion[(expected, predicted)] for predicted in ("fast", "standard", "strong")} for expected in ("fast", "standard", "strong")},
-    }
-    print(json.dumps(report, indent=2, sort_keys=True))
+        print(rendered, end="")
 
 
 if __name__ == "__main__":

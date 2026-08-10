@@ -1,0 +1,30 @@
+# Smart Router public ingress: standalone Caddy TLS
+# Branch: main
+#
+# DNS for the uncommented public domains must point to this stack VM.
+# Caddy will manage HTTPS automatically for public domain names.
+
+api.example.com {
+    encode zstd gzip
+    reverse_proxy smart-router:8080
+}
+
+# Optional public Open WebUI.
+# chat.example.com {
+#     encode zstd gzip
+#     reverse_proxy open-webui:8080
+# }
+
+# Administrative services are safer on a VPN/private network.
+# If you intentionally expose the 9router dashboard, protect it with a separate
+# authentication/access-control layer.
+# routes-admin.example.com {
+#     encode zstd gzip
+#     reverse_proxy nine-router:20128
+# }
+
+# Optional Hermes dashboard. Prefer private/VPN access.
+# hermes-admin.example.com {
+#     encode zstd gzip
+#     reverse_proxy hermes:9119
+# }

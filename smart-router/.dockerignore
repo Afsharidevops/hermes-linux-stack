@@ -1,7 +1,7 @@
-__pycache__/
-.pytest_cache/
+.git
+.pytest_cache
+__pycache__
 *.pyc
-*.pyo
-*.sqlite3
-*.jsonl
-.venv/
+*.joblib
+router.sqlite3
+observations*.jsonl

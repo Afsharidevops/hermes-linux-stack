@@ -1,1 +1,1 @@
-"""Offline evaluation and calibration tools for Smart Router v0.2."""
+"""Offline replay, calibration, and reporting utilities."""

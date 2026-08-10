@@ -2,37 +2,62 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+from dataclasses import replace
 from pathlib import Path
+from typing import Any, Iterable
 
 from smart_router.config import Settings
-from smart_router.routing import PolicyEngine, decide, feature_flags
-from .common import iter_jsonl
+from smart_router.routing import build_policy_runtime, decide
+
+
+def iter_requests(path: Path) -> Iterable[dict[str, Any]]:
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON on line {line_no}") from exc
+        if not isinstance(item, dict):
+            raise ValueError(f"line {line_no} must contain a JSON object")
+        yield item.get("request", item)
+
+
+def replay(path: Path, settings: Settings) -> list[dict[str, Any]]:
+    runtime = build_policy_runtime(settings)
+    rows: list[dict[str, Any]] = []
+    for request in iter_requests(path):
+        decision = decide(request, settings, runtime=runtime)
+        rows.append(
+            {
+                "tier": decision.proposed_tier,
+                "model": decision.proposed_model,
+                "policy": decision.policy,
+                "score": decision.score,
+                "confidence": decision.confidence,
+                "probabilities": decision.probabilities,
+                "capability_upgrade": decision.capability_upgrade,
+                "features": decision.safe_features.as_dict() if decision.safe_features else {},
+            }
+        )
+    return rows
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Replay OpenAI-compatible request JSONL through Smart Router without making model calls.")
-    parser.add_argument("input", type=Path, help="JSONL; each line is a request body or {'body': request}")
-    parser.add_argument("-o", "--output", type=Path, required=True, help="Privacy-safe decision JSONL")
+    parser = argparse.ArgumentParser(description="Replay OpenAI-compatible requests through Smart Router offline.")
+    parser.add_argument("input", type=Path)
+    parser.add_argument("--policy", choices=["heuristic", "calibrated", "learned"])
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-
-    # Settings validates the same deployment configuration as production.
     settings = Settings.from_env()
-    engine = PolicyEngine(settings)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
-    with args.output.open("w", encoding="utf-8") as handle:
-        for record in iter_jsonl(args.input):
-            body = record.get("body", record)
-            if not isinstance(body, dict):
-                raise ValueError("body must be a JSON object")
-            decision = decide(body, settings, engine)
-            safe = decision.safe_dict()
-            safe["features"] = feature_flags(decision.facts)
-            # Deliberately omit body/prompt/tool arguments.
-            handle.write(json.dumps(safe, sort_keys=True, separators=(",", ":")) + "\n")
-            count += 1
-    print(f"wrote {count} privacy-safe replay decisions to {args.output}")
+    if args.policy:
+        settings = replace(settings, policy=args.policy)
+    rows = replay(args.input, settings)
+    rendered = "\n".join(json.dumps(row, sort_keys=True) for row in rows) + ("\n" if rows else "")
+    if args.output:
+        args.output.write_text(rendered, encoding="utf-8")
+    else:
+        print(rendered, end="")
 
 
 if __name__ == "__main__":

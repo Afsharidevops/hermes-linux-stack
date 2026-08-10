@@ -2,265 +2,378 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .config import Settings, TierConfig
-from .privacy import safe_json_size
+from .config import Settings
+from .features import FEATURE_SCHEMA_VERSION, SafeFeatures, extract_safe_features
+from .learned.model import LearnedPolicy, load_learned_policy
 
-TIER_ORDER = {"fast": 0, "standard": 1, "strong": 2}
-ORDER_TIER = {value: key for key, value in TIER_ORDER.items()}
-AUTO_ALIASES = {"auto": None, "auto-fast": "fast", "auto-standard": "standard", "auto-strong": "strong"}
-
-DEFAULT_WEIGHTS: dict[str, float] = {
-    "context_gt_8k": 2.0,
-    "context_gt_25k": 2.0,
-    "context_gt_50k": 3.0,
-    "tools_present": 1.0,
-    "large_tool_schema": 1.0,
-    "large_tool_results": 1.0,
-    "multiple_code_blocks": 1.0,
-    "many_referenced_files": 2.0,
-    "structured_output": 1.0,
-    "complex_language": 2.0,
-    "simple_language": -2.0,
-    "failure_language": 2.0,
+AUTO_ALIASES = {
+    "auto": None,
+    "auto-fast": "fast",
+    "auto-standard": "standard",
+    "auto-strong": "strong",
 }
-DEFAULT_THRESHOLDS = {"fast_max": 0.0, "standard_max": 5.0}
+TIER_RANK = {"fast": 0, "standard": 1, "strong": 2}
+COMPLEX_TERMS = (
+    "architecture",
+    "security review",
+    "root cause",
+    "production incident",
+    "multi-file",
+    "migration",
+    "refactor",
+    "race condition",
+    "performance investigation",
+    "threat model",
+)
+SIMPLE_TERMS = (
+    "translate",
+    "grammar",
+    "rewrite",
+    "reformat",
+    "extract",
+    "reply briefly",
+    "summarize briefly",
+)
+FAILURE_TERMS = ("failed", "failure", "didn't work", "did not work", "try again", "error")
 
-COMPLEX_TERMS = re.compile(
-    r"\b(architect(?:ure)?|security|threat model|migration|migrate|refactor|debug|root cause|"
-    r"performance|optimi[sz]e|distributed|concurrency|race condition|database schema|"
-    r"kubernetes|terraform|docker compose|production|incident|benchmark|evaluate|compare|"
-    r"multi[- ]step|plan and implement|analy[sz]e)\b",
-    re.I,
-)
-SIMPLE_TERMS = re.compile(
-    r"\b(translate|define|meaning|spell|rewrite this|fix grammar|summari[sz]e briefly|"
-    r"one sentence|short answer|yes or no|hello|thanks)\b",
-    re.I,
-)
-FAILURE_TERMS = re.compile(
-    r"\b(error|exception|failed|failure|broken|doesn'?t work|not working|traceback|timeout|"
-    r"segfault|panic|regression|retry|still failing)\b",
-    re.I,
-)
-FILE_REF = re.compile(r"(?:^|\s)(?:[\w.-]+/)+[\w.-]+|\b[\w.-]+\.(?:py|js|ts|tsx|jsx|go|rs|java|yaml|yml|toml|json|sh|md|sql)\b", re.I)
-CODE_FENCE = re.compile(r"```")
+DEFAULT_CALIBRATION = {
+    "weights": {
+        "context_gt_8000": 2,
+        "context_gt_25000": 2,
+        "context_gt_50000": 3,
+        "tools_present": 1,
+        "large_tool_schema": 1,
+        "large_tool_results": 1,
+        "multiple_code_blocks": 1,
+        "multiple_files": 2,
+        "structured_output": 1,
+        "complex_intent": 2,
+        "simple_intent": -2,
+        "failure_language": 2,
+    },
+    "fast_max_score": 0,
+    "standard_max_score": 5,
+}
 
 
 @dataclass(frozen=True)
 class RequestFacts:
-    estimated_tokens: int
-    message_count: int
-    tools_present: bool
-    tool_count: int
-    large_tool_schema: bool
-    large_tool_results: bool
-    vision_present: bool
+    estimated_message_tokens: int
+    estimated_tool_schema_tokens: int
+    estimated_tool_result_tokens: int
+    estimated_total_tokens: int
+    has_tools: bool
+    has_vision: bool
     structured_output: bool
-    code_block_count: int
-    referenced_file_count: int
-    complex_language: bool
-    simple_language: bool
-    failure_language: bool
-
-
-@dataclass(frozen=True)
-class PolicyResult:
-    tier: str
-    score: float
-    reasons: list[str]
-    policy: str
+    code_blocks: int
+    referenced_files: int
+    requested_output_tokens: int
+    text: str
 
 
 @dataclass(frozen=True)
 class Decision:
-    requested_model: str
     proposed_tier: str
-    selected_tier: str
-    selected_model: str
-    score: float
-    reasons: list[str]
-    policy: str
-    capability_upgraded: bool
+    proposed_model: str
+    score: int
+    reasons: tuple[str, ...]
     facts: RequestFacts
-
-    def safe_dict(self) -> dict[str, Any]:
-        result = asdict(self)
-        result["facts"] = asdict(self.facts)
-        return result
-
-
-def _content_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        pieces: list[str] = []
-        for item in content:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") in {"text", "input_text"} and isinstance(item.get("text"), str):
-                pieces.append(item["text"])
-        return "\n".join(pieces)
-    return ""
+    policy: str = "heuristic"
+    confidence: float | None = None
+    probabilities: dict[str, float] | None = None
+    learned_raw_tier: str | None = None
+    policy_fallback: str | None = None
+    capability_upgrade: str | None = None
+    feature_schema_version: int = FEATURE_SCHEMA_VERSION
+    safe_features: SafeFeatures | None = None
 
 
-def _has_vision(content: Any) -> bool:
-    if not isinstance(content, list):
-        return False
-    for item in content:
-        if not isinstance(item, dict):
+@dataclass(frozen=True)
+class PolicyRuntime:
+    calibration: dict[str, Any]
+    learned: LearnedPolicy | None
+    learned_load_error: str | None = None
+
+
+def build_policy_runtime(settings: Settings) -> PolicyRuntime:
+    calibration = _load_calibration(settings.calibration_file)
+    learned: LearnedPolicy | None = None
+    learned_error: str | None = None
+    if settings.policy == "learned":
+        try:
+            learned = load_learned_policy(
+                settings.learned_model_file,
+                settings.learned_metadata_file,
+                min_confidence=settings.learned_min_confidence,
+                fallback_tier=settings.learned_fallback,
+            )
+        except Exception as exc:  # fail-open is deliberate at startup
+            learned_error = type(exc).__name__
+    return PolicyRuntime(calibration, learned, learned_error)
+
+
+def analyze_request(body: dict[str, Any]) -> RequestFacts:
+    messages = body.get("messages") or []
+    text_parts: list[str] = []
+    non_tool_parts: list[str] = []
+    message_chars = 0
+    tool_result_chars = 0
+    has_vision = False
+    for message in messages:
+        if not isinstance(message, dict):
             continue
-        if item.get("type") in {"image_url", "input_image", "image"}:
-            return True
+        content = message.get("content", "")
+        serialized = _stable_text(content)
+        if message.get("role") == "tool":
+            tool_result_chars += len(serialized)
+        else:
+            message_chars += len(serialized)
+            non_tool_parts.append(serialized)
+        text_parts.append(serialized)
+        has_vision = has_vision or _contains_image(content)
+    tools = body.get("tools") or []
+    tool_chars = len(json.dumps(tools, sort_keys=True, separators=(",", ":")))
+    text = "\n".join(text_parts).lower()
+    non_tool_text = "\n".join(non_tool_parts).lower()
+    code_chars = sum(len(block) for block in re.findall(r"```.*?```", non_tool_text, re.S))
+    message_tokens = max(1, (message_chars - code_chars) // 4 + code_chars // 3)
+    tool_schema_tokens = tool_chars * 2 // 7
+    tool_result_tokens = tool_result_chars // 3
+    total = message_tokens + tool_schema_tokens + tool_result_tokens
+    referenced_files = len(
+        set(re.findall(r"(?:^|\s)(?:[\w.-]+/)+[\w.-]+", text, re.M))
+    )
+    response_format = body.get("response_format")
+    structured = bool(
+        response_format
+        and isinstance(response_format, dict)
+        and response_format.get("type") in {"json_object", "json_schema"}
+    )
+    requested_outputs = [
+        int(body[field])
+        for field in ("max_completion_tokens", "max_tokens")
+        if isinstance(body.get(field), int) and int(body[field]) >= 0
+    ]
+    return RequestFacts(
+        estimated_message_tokens=message_tokens,
+        estimated_tool_schema_tokens=tool_schema_tokens,
+        estimated_tool_result_tokens=tool_result_tokens,
+        estimated_total_tokens=total,
+        has_tools=bool(tools),
+        has_vision=has_vision,
+        structured_output=structured,
+        code_blocks=text.count("```") // 2,
+        referenced_files=referenced_files,
+        requested_output_tokens=min(requested_outputs) if requested_outputs else 0,
+        text=text,
+    )
+
+
+def decide(
+    body: dict[str, Any],
+    settings: Settings,
+    requested_tier: str | None = None,
+    runtime: PolicyRuntime | None = None,
+) -> Decision:
+    facts = analyze_request(body)
+    safe_features = extract_safe_features(
+        body, strongest_context=settings.strong.max_context
+    )
+    reasons: list[str] = []
+    score = 0
+    policy = settings.policy
+    confidence: float | None = None
+    probabilities: dict[str, float] | None = None
+    learned_raw_tier: str | None = None
+    policy_fallback: str | None = None
+
+    if requested_tier is not None:
+        tier = requested_tier
+        policy = "forced-alias"
+        reasons.append(f"forced_{requested_tier}")
+    else:
+        runtime = runtime or build_policy_runtime(settings)
+        if settings.policy == "learned":
+            if runtime.learned is None:
+                policy_fallback = settings.learned_error_fallback
+                reasons.append(
+                    f"learned_unavailable_{runtime.learned_load_error or 'unknown'}"
+                )
+                tier, score, fallback_reasons = _fallback_policy(
+                    facts, runtime, settings.learned_error_fallback
+                )
+                reasons.extend(fallback_reasons)
+            else:
+                try:
+                    prediction = runtime.learned.predict(safe_features)
+                    tier = prediction.tier
+                    confidence = prediction.confidence
+                    probabilities = prediction.probabilities
+                    learned_raw_tier = prediction.raw_tier
+                    if prediction.low_confidence_fallback:
+                        reasons.append("learned_low_confidence_fallback")
+                    else:
+                        reasons.append("learned_argmax")
+                except Exception as exc:
+                    policy_fallback = settings.learned_error_fallback
+                    reasons.append(f"learned_inference_error_{type(exc).__name__}")
+                    tier, score, fallback_reasons = _fallback_policy(
+                        facts, runtime, settings.learned_error_fallback
+                    )
+                    reasons.extend(fallback_reasons)
+        elif settings.policy == "calibrated":
+            tier, score, reasons = _calibrated_decision(
+                facts, runtime.calibration
+            )
+        else:
+            tier, score, reasons = _heuristic_decision(facts)
+
+    gated_tier, capability_upgrade = apply_capability_gates(
+        tier, facts, settings, reasons
+    )
+    return Decision(
+        proposed_tier=gated_tier,
+        proposed_model=settings.tier(gated_tier).model,
+        score=score,
+        reasons=tuple(reasons or [f"default_{gated_tier}"]),
+        facts=facts,
+        policy=policy,
+        confidence=confidence,
+        probabilities=probabilities,
+        learned_raw_tier=learned_raw_tier,
+        policy_fallback=policy_fallback,
+        capability_upgrade=capability_upgrade,
+        safe_features=safe_features,
+    )
+
+
+def apply_capability_gates(
+    tier: str, facts: RequestFacts, settings: Settings, reasons: list[str]
+) -> tuple[str, str | None]:
+    if facts.has_vision:
+        reasons.append("vision_required")
+    requested_rank = TIER_RANK[tier]
+    for rank in range(requested_rank, TIER_RANK["strong"] + 1):
+        candidate_name = _tier_name(rank)
+        candidate = settings.tier(candidate_name)
+        if facts.has_tools and not candidate.supports_tools:
+            continue
+        if facts.has_vision and not candidate.supports_vision:
+            continue
+        required_context = (
+            facts.estimated_total_tokens
+            + (facts.requested_output_tokens or candidate.max_output)
+        )
+        if required_context > candidate.max_context:
+            continue
+        if candidate_name != tier:
+            reason = _capability_reason(tier, candidate_name, facts, settings)
+            reasons.append(f"capability_upgrade_{tier}_to_{candidate_name}")
+            return candidate_name, reason
+        return candidate_name, None
+    raise ValueError("no configured tier can satisfy request capabilities and context")
+
+
+def _capability_reason(
+    original: str, selected: str, facts: RequestFacts, settings: Settings
+) -> str:
+    if facts.has_vision and not settings.tier(original).supports_vision:
+        return "vision"
+    if facts.has_tools and not settings.tier(original).supports_tools:
+        return "tools"
+    required = facts.estimated_total_tokens + (
+        facts.requested_output_tokens or settings.tier(original).max_output
+    )
+    if required > settings.tier(original).max_context:
+        return "context"
+    return f"upgrade_to_{selected}"
+
+
+def _heuristic_decision(facts: RequestFacts) -> tuple[str, int, list[str]]:
+    score, reasons = _score_facts(facts, DEFAULT_CALIBRATION["weights"])
+    tier = "fast" if score <= 0 else "standard" if score <= 5 else "strong"
+    return tier, score, reasons
+
+
+def _calibrated_decision(
+    facts: RequestFacts, calibration: dict[str, Any]
+) -> tuple[str, int, list[str]]:
+    weights = calibration.get("weights", DEFAULT_CALIBRATION["weights"])
+    score, reasons = _score_facts(facts, weights)
+    fast_max = int(calibration.get("fast_max_score", 0))
+    standard_max = int(calibration.get("standard_max_score", 5))
+    tier = "fast" if score <= fast_max else "standard" if score <= standard_max else "strong"
+    return tier, score, reasons
+
+
+def _fallback_policy(
+    facts: RequestFacts, runtime: PolicyRuntime, fallback: str
+) -> tuple[str, int, list[str]]:
+    if fallback == "calibrated":
+        tier, score, reasons = _calibrated_decision(facts, runtime.calibration)
+        return tier, score, ["fallback_calibrated", *reasons]
+    tier, score, reasons = _heuristic_decision(facts)
+    return tier, score, ["fallback_heuristic", *reasons]
+
+
+def _score_facts(
+    facts: RequestFacts, weights: dict[str, Any]
+) -> tuple[int, list[str]]:
+    score = 0
+    reasons: list[str] = []
+
+    def add(condition: bool, name: str) -> None:
+        nonlocal score
+        if condition:
+            score += int(weights.get(name, 0))
+            reasons.append(name)
+
+    add(facts.estimated_total_tokens > 8_000, "context_gt_8000")
+    add(facts.estimated_total_tokens > 25_000, "context_gt_25000")
+    add(facts.estimated_total_tokens > 50_000, "context_gt_50000")
+    add(facts.has_tools, "tools_present")
+    add(facts.estimated_tool_schema_tokens > 2_000, "large_tool_schema")
+    add(facts.estimated_tool_result_tokens > 2_000, "large_tool_results")
+    add(facts.code_blocks > 2, "multiple_code_blocks")
+    add(facts.referenced_files > 3, "multiple_files")
+    add(facts.structured_output, "structured_output")
+    add(any(term in facts.text for term in COMPLEX_TERMS), "complex_intent")
+    add(any(term in facts.text for term in SIMPLE_TERMS), "simple_intent")
+    add(any(term in facts.text for term in FAILURE_TERMS), "failure_language")
+    return score, reasons
+
+
+def _load_calibration(path: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("calibration must be a JSON object")
+        return payload
+    except (OSError, ValueError, json.JSONDecodeError):
+        return DEFAULT_CALIBRATION.copy()
+
+
+def _tier_name(rank: int) -> str:
+    return ("fast", "standard", "strong")[rank]
+
+
+def _contains_image(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(_contains_image(item) for item in value)
+    if isinstance(value, dict):
+        kind = str(value.get("type", "")).lower()
+        mime = str(value.get("mime_type", value.get("media_type", ""))).lower()
+        return kind in {"image", "image_url", "input_image"} or mime.startswith("image/") or any(
+            _contains_image(child) for child in value.values()
+        )
     return False
 
 
-def extract_facts(body: dict[str, Any]) -> RequestFacts:
-    messages = body.get("messages") if isinstance(body.get("messages"), list) else []
-    text_parts: list[str] = []
-    vision = False
-    large_tool_results = False
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        content = msg.get("content")
-        text = _content_text(content)
-        if text:
-            text_parts.append(text)
-        vision = vision or _has_vision(content)
-        if msg.get("role") == "tool" and safe_json_size(msg) > 8000:
-            large_tool_results = True
-
-    text = "\n".join(text_parts)
-    tools = body.get("tools") if isinstance(body.get("tools"), list) else []
-    tool_schema_size = safe_json_size(tools)
-    # Approximate token count without sending prompt text to another model/tokenizer.
-    request_bytes = safe_json_size(messages) + tool_schema_size
-    estimated_tokens = max(1, (request_bytes + 3) // 4)
-    response_format = body.get("response_format")
-    structured_output = bool(response_format) or bool(body.get("json_schema"))
-    return RequestFacts(
-        estimated_tokens=estimated_tokens,
-        message_count=len(messages),
-        tools_present=bool(tools),
-        tool_count=len(tools),
-        large_tool_schema=tool_schema_size > 12000,
-        large_tool_results=large_tool_results,
-        vision_present=vision,
-        structured_output=structured_output,
-        code_block_count=len(CODE_FENCE.findall(text)) // 2,
-        referenced_file_count=len(FILE_REF.findall(text)),
-        complex_language=bool(COMPLEX_TERMS.search(text)),
-        simple_language=bool(SIMPLE_TERMS.search(text)),
-        failure_language=bool(FAILURE_TERMS.search(text)),
-    )
-
-
-def feature_flags(facts: RequestFacts) -> dict[str, float]:
-    return {
-        "context_gt_8k": float(facts.estimated_tokens > 8000),
-        "context_gt_25k": float(facts.estimated_tokens > 25000),
-        "context_gt_50k": float(facts.estimated_tokens > 50000),
-        "tools_present": float(facts.tools_present),
-        "large_tool_schema": float(facts.large_tool_schema),
-        "large_tool_results": float(facts.large_tool_results),
-        "multiple_code_blocks": float(facts.code_block_count > 2),
-        "many_referenced_files": float(facts.referenced_file_count > 3),
-        "structured_output": float(facts.structured_output),
-        "complex_language": float(facts.complex_language),
-        "simple_language": float(facts.simple_language),
-        "failure_language": float(facts.failure_language),
-    }
-
-
-def _load_calibration(path: Path) -> tuple[dict[str, float], dict[str, float], str]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    weights = dict(DEFAULT_WEIGHTS)
-    thresholds = dict(DEFAULT_THRESHOLDS)
-    for name, value in payload.get("weights", {}).items():
-        if name in weights:
-            weights[name] = float(value)
-    for name in ("fast_max", "standard_max"):
-        if name in payload.get("thresholds", {}):
-            thresholds[name] = float(payload["thresholds"][name])
-    if thresholds["fast_max"] >= thresholds["standard_max"]:
-        raise ValueError("calibrated fast_max must be below standard_max")
-    return weights, thresholds, str(payload.get("name", path.stem))
-
-
-class PolicyEngine:
-    def __init__(self, settings: Settings):
-        self.settings = settings
-        self.weights = dict(DEFAULT_WEIGHTS)
-        self.thresholds = dict(DEFAULT_THRESHOLDS)
-        self.name = "heuristic-v1"
-        if settings.policy == "calibrated":
-            self.weights, self.thresholds, loaded_name = _load_calibration(settings.calibration_file)
-            self.name = f"calibrated:{loaded_name}"
-
-    def evaluate(self, facts: RequestFacts) -> PolicyResult:
-        flags = feature_flags(facts)
-        score = sum(self.weights[key] * value for key, value in flags.items())
-        reasons = [f"{key}:{self.weights[key]:+g}" for key, value in flags.items() if value]
-        if score <= self.thresholds["fast_max"]:
-            tier = "fast"
-        elif score <= self.thresholds["standard_max"]:
-            tier = "standard"
-        else:
-            tier = "strong"
-        return PolicyResult(tier=tier, score=score, reasons=reasons, policy=self.name)
-
-    def describe(self) -> dict[str, Any]:
-        return {"name": self.name, "weights": self.weights, "thresholds": self.thresholds}
-
-
-def _tier_can_handle(tier: TierConfig, facts: RequestFacts) -> bool:
-    if facts.tools_present and not tier.supports_tools:
-        return False
-    if facts.vision_present and not tier.supports_vision:
-        return False
-    # Leave a small output/system overhead margin rather than route at exact ceiling.
-    if facts.estimated_tokens > int(tier.context_limit * 0.92):
-        return False
-    return True
-
-
-def apply_capability_gate(proposed: str, facts: RequestFacts, tiers: dict[str, TierConfig]) -> tuple[str, bool, list[str]]:
-    start = TIER_ORDER[proposed]
-    reasons: list[str] = []
-    for index in range(start, 3):
-        tier_name = ORDER_TIER[index]
-        if _tier_can_handle(tiers[tier_name], facts):
-            upgraded = index != start
-            if upgraded:
-                reasons.append(f"capability_gate:{proposed}->{tier_name}")
-            return tier_name, upgraded, reasons
-    # Strong is the final safety tier even if operator configuration claims it lacks a capability.
-    reasons.append("capability_gate:no_declared_tier_satisfies_request")
-    return "strong", proposed != "strong", reasons
-
-
-def decide(body: dict[str, Any], settings: Settings, engine: PolicyEngine | None = None) -> Decision:
-    engine = engine or PolicyEngine(settings)
-    requested_model = str(body.get("model") or "auto")
-    forced = AUTO_ALIASES.get(requested_model.lower(), "not-auto")
-    facts = extract_facts(body)
-    if forced != "not-auto" and forced is not None:
-        policy_result = PolicyResult(tier=forced, score=0.0, reasons=[f"alias:{requested_model}"], policy="explicit-alias")
-    else:
-        policy_result = engine.evaluate(facts)
-    gated, upgraded, gate_reasons = apply_capability_gate(policy_result.tier, facts, settings.tiers)
-    return Decision(
-        requested_model=requested_model,
-        proposed_tier=policy_result.tier,
-        selected_tier=gated,
-        selected_model=settings.tiers[gated].model,
-        score=policy_result.score,
-        reasons=policy_result.reasons + gate_reasons,
-        policy=policy_result.policy,
-        capability_upgraded=upgraded,
-        facts=facts,
-    )
+def _stable_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
