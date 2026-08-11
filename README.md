@@ -1,5 +1,7 @@
 # Hermes Linux Stack — 9router + Smart Router v0.5.2
 
+> **v0.5.2 easy installer restored:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.2 Smart Router and 9router architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
+
 A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.2** and **9router**.
 
 > This is the **9router branch**.
