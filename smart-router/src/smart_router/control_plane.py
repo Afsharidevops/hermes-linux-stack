@@ -43,7 +43,7 @@ from .provider_health import ProviderHealthRegistry
 from .shared_state import RedisCoordinator
 from .secrets_v52 import env_or_file, redacted_url
 from .metrics import ACL_DENIES, REDIS_READINESS, SSO_LOGINS
-from .panel_v51 import PANEL_HTML
+from .panel_v53 import PANEL_HTML
 from .policy_v51 import PolicyEngine, TIER_ORDER
 from .security_v51 import Identity, ROLE_PERMISSIONS, SecurityManager, bearer
 
@@ -58,9 +58,9 @@ class FinalRoute:
 
 
 class ControlPlane:
-    """Hermes Smart Router v0.5.2 control plane.
+    """Hermes Smart Router v0.5.3 control plane (v0.5.2 persisted schema).
 
-    v0.5.2 preserves the deterministic capability-safety path while adding shared
+    v0.5.3 preserves the v0.5.2 deterministic capability-safety path while adding shared
     health/circuit state, Redis-backed HA counters, OIDC, ACL-aware retrieval and
     file/Docker-secret loading.
     """
@@ -281,7 +281,7 @@ class ControlPlane:
     async def panel(self, _: Request) -> Response:
         if not self.enabled:
             return Response(status_code=404)
-        return HTMLResponse(PANEL_HTML.replace("__VERSION__", "0.5.2"))
+        return HTMLResponse(PANEL_HTML.replace("__VERSION__", "0.5.3"))
 
     async def login(self, request: Request) -> Response:
         if self.oidc.enabled and not self.oidc.local_login_enabled:
@@ -843,7 +843,7 @@ class ControlPlane:
         redis_ok = self.redis.ping()
         REDIS_READINESS.set(1 if redis_ok else 0)
         return JSONResponse({
-            "version": "0.5.2", "control_db": redacted_url(self.db_url), "database_ok": self.db.ping(), "ha_mode": self.ha_mode,
+            "version": "0.5.3", "control_db": redacted_url(self.db_url), "database_ok": self.db.ping(), "ha_mode": self.ha_mode,
             "require_auth": self.require_auth, "upstream": self.settings.upstream_base_url, "upstream_health": self.settings.upstream_health_url,
             "router_mode": self.settings.mode, "router_policy": self.settings.policy,
             "redis_enabled": self.redis.enabled, "redis_ok": redis_ok, "oidc_enabled": self.oidc.enabled,

@@ -1,6 +1,6 @@
-# Easy installer compatibility layer for v0.5.2
+# Easy installer compatibility layer for v0.5.3
 
-This package restores the interactive v0.1-style installer and management flow while keeping the v0.5.2 Compose, Smart Router, execution-broker, and policy files.
+This package restores the interactive v0.1-style installer and management flow while keeping the v0.5.3 Compose, Smart Router, execution-broker, and policy files.
 
 Branch target: `main`
 Backend: 9router
@@ -12,17 +12,17 @@ chmod +x install.sh manage.sh scripts/*.sh 2>/dev/null || true
 ./install.sh
 ```
 
-The wizard can select/reconfigure Hermes, Smart Router, Open WebUI, n8n, n8n MCP (Instance or Trigger), Caddy, Telegram, API/dashboard bindings, and preserves v0.5.2-only `.env` settings.
+The wizard can select/reconfigure Hermes, Smart Router, Open WebUI, n8n, n8n MCP (Instance or Trigger), Caddy, Telegram, API/dashboard bindings, and preserves v0.5.3-only `.env` settings.
 
 Use `./manage.sh help` for n8n provisioning, MCP token rotation, Telegram, execution, Smart Router policy/evaluation, backup/update, and diagnostics commands.
 
-## Smart Router v0.5.2 installer/manager integration
+## Smart Router v0.5.3 installer/manager integration
 
-The easy installer is synchronized with the Smart Router v0.5.2 runtime surface. It configures the router bind/port, `observe` or `route` mode, `heuristic`/`calibrated`/`learned` policy, optional tier-override aliases, built-in telemetry dashboard, Control Plane authentication, provider-health/circuit-breaker support, and fast/standard/strong/coding/vision route-profile defaults.
+The easy installer is synchronized with the Smart Router v0.5.3 runtime surface. It configures the router bind/port, `observe` or `route` mode, `heuristic`/`calibrated`/`learned` policy, optional tier-override aliases, built-in telemetry dashboard, Control Plane authentication, provider-health/circuit-breaker support, and fast/standard/strong/coding/vision route-profile defaults.
 
 Smart routing is applied to `model=auto`. The aliases `auto-fast`, `auto-standard`, and `auto-strong` are advertised only when `SMART_ROUTER_ALLOW_TIER_OVERRIDES=true`. Explicit upstream model names pass through without automatic tier selection. In `observe` mode, automatic requests are evaluated/logged but dispatched through `SMART_ROUTER_OBSERVE_MODEL`; in `route` mode the selected route profile is applied.
 
-The built-in Smart Router surfaces share one listener (default `127.0.0.1:8787`): `/v1` for the OpenAI-compatible API, `/dashboard` for measured routing/cost telemetry, and `/control/` for the v0.5.2 Control Plane. `./manage.sh menu` has a dedicated **Smart Router v0.5.2 management** submenu for status, access information, telemetry summary, route profiles, provider health, system state, mode, and policy. Run `./manage.sh router-access --show-secrets` only when you intentionally need to reveal local dashboard/control credentials.
+The built-in Smart Router surfaces share one listener (default `127.0.0.1:8787`): `/v1` for the OpenAI-compatible API, `/dashboard` for measured routing/cost telemetry, and `/control/` for the v0.5.3 Control Plane. `./manage.sh menu` has a dedicated **Smart Router v0.5.3 management** submenu for status, access information, telemetry summary, route profiles, provider health, system state, mode, and policy. Run `./manage.sh router-access --show-secrets` only when you intentionally need to reveal local dashboard/control credentials.
 
 HA/Redis and OIDC remain advanced infrastructure settings in `.env`; the installer preserves them instead of resetting them. The Control Plane itself manages users/API keys, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and dynamic route profiles.
 
@@ -38,3 +38,11 @@ When n8n + Hermes MCP is selected, the normal installer now uses a two-phase flo
 Instance MCP validation is capability-aware: it requires the stable workflow core (`search_workflows`, `get_workflow_details`, `execute_workflow`) but does not reject valid tokens merely because the installed n8n image lacks newer version-gated tools such as `search_executions` or `list_credentials`.
 
 Current n8n releases add MCP tools incrementally (for example `search_executions` is version-gated), so the stack treats those extra tools as optional during token authentication and reports compatibility through verification instead of rejecting an otherwise valid token.
+
+## v0.5.3 manager UX
+
+Running `./manage.sh` with no arguments now opens a grouped interactive manager. Direct commands remain compatible for automation.
+
+## Hermes Flight Deck
+
+The Smart Router dashboard is redesigned as the Hermes Flight Deck, and the Control Plane navigation is grouped into Observe, Routing, Access, Intelligence, and System. Finite-value forms use selects/dropdowns where practical.

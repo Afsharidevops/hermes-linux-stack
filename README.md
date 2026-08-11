@@ -1,8 +1,8 @@
-# Hermes Linux Stack — 9router + Smart Router v0.5.2
+# Hermes Linux Stack — 9router + Smart Router v0.5.3
 
-> **v0.5.2 easy installer restored:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.2 Smart Router and 9router architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
+> **v0.5.3 UX release:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.3 Smart Router and 9router architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.2** and **9router**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.3** and **9router**.
 
 > This is the **9router branch**.
 >
@@ -20,7 +20,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.2
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.3
                             │              │
 n8n / other clients ────────┘              │
                                            ├─ fast     → combo-fast
@@ -46,7 +46,7 @@ The repository intentionally keeps its routing backends separate.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.2
+          Smart Router v0.5.3
                   │
                   ▼
                9router
@@ -61,7 +61,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.2
+          Smart Router v0.5.3
                   │
                   ▼
               OmniRoute
@@ -80,7 +80,7 @@ Do not add OmniRoute to `main`, and do not add 9router to the OmniRoute branch.
 - Telegram bot/agent integration through Hermes
 - Numeric Telegram user allowlist
 - Optional Telegram home chat for cron results and notifications
-- Hermes Smart Router v0.5.2
+- Hermes Smart Router v0.5.3
 - OpenAI-compatible `auto` routing aliases
 - 9router provider/model gateway
 - Open WebUI integration
@@ -249,7 +249,7 @@ Verify:
 
 ---
 
-# Smart Router v0.5.2
+# Smart Router v0.5.3
 
 Published image:
 
@@ -721,7 +721,7 @@ python -m pip install -e "./smart-router[dev]"
 pytest -q smart-router/tests
 ```
 
-Smart Router v0.5.2 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
+Smart Router v0.5.3 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
 
 ---
 
@@ -739,7 +739,7 @@ Expected version:
 ```json
 {
   "status": "ok",
-  "version": "0.5.2"
+  "version": "0.5.3"
 }
 ```
 
@@ -906,11 +906,11 @@ The v0.5 target scorecard is a roadmap figure, not measured performance:
 
 ---
 
-## Smart Router v0.5.2 dashboard and Control Plane
+## Smart Router v0.5.3 Flight Deck and Control Plane
 
-Smart Router v0.5.2 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Control Plane at `/control/`, while preserving 9router as this branch's provider gateway. The Control Plane covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
+Smart Router v0.5.3 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Control Plane at `/control/`, while preserving 9router as this branch's provider gateway. The Control Plane covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
 
-The easy installer now configures the v0.5.2 core switches instead of silently relying on Compose defaults, and `./manage.sh menu` exposes a Smart Router submenu. Useful commands include `router-status`, `router-access`, `router-summary`, `router-routes`, `router-provider-health`, `router-system`, `router-info`, `router-policy`, `router-calibrate`, `router-report`, and `router-replay`.
+The easy installer now configures the v0.5.3 core switches instead of silently relying on Compose defaults, and `./manage.sh menu` exposes a Smart Router submenu. Useful commands include `router-status`, `router-access`, `router-summary`, `router-routes`, `router-provider-health`, `router-system`, `router-info`, `router-policy`, `router-calibrate`, `router-report`, and `router-replay`.
 
 Routing semantics are important: Smart Router policy applies to `model=auto`; `auto-fast`/`auto-standard`/`auto-strong` are available only when tier overrides are enabled. Explicit upstream model names pass through without automatic tier selection. `observe` evaluates/logs automatic requests but dispatches them through `SMART_ROUTER_OBSERVE_MODEL`; `route` applies the selected route profile.
 
@@ -919,7 +919,7 @@ Default local URLs are `http://127.0.0.1:8787/v1`, `http://127.0.0.1:8787/dashbo
 Default Smart Router image: `afsharidevops/hermes-smart-router:latest`; pin `SMART_ROUTER_IMAGE_TAG` in `.env` when you want a stable release.
 
 
-## Image tag policy (v0.5.2)
+## Image tag policy (v0.5.3)
 
 Application images intentionally default to mutable tags so normal `docker compose pull` tracks upstream releases. You can pin any service later by changing only `.env`; Compose does not need to be edited.
 
