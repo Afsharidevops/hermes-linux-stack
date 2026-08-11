@@ -1,5 +1,7 @@
 # Hermes Linux Stack — OmniRoute + Smart Router v0.5.2
 
+> **v0.5.2 easy installer restored:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.2 Smart Router and OmniRoute architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
+
 A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.5.2** and **OmniRoute**.
 
 > This branch is intentionally **OmniRoute-only**.
