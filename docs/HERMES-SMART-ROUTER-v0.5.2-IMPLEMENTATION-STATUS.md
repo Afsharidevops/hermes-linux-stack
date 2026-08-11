@@ -1,6 +1,6 @@
 # Hermes Smart Router v0.5.2 — Implementation Status
 
-This package implements the **v0.5.2 reliability/security foundation** while preserving the v0.5.1 OpenAI-compatible data-plane behavior. It does not claim that every long-range item in `plan5.2.md` is production-complete.
+This package implements the **v0.5.2 reliability/security foundation** while preserving the v0.5.1 OpenAI-compatible data-plane behavior. It does not claim that every long-range item in `docs/HERMES-SMART-ROUTER-v0.5.2-PLAN.md` is production-complete.
 
 ## Implemented in this package
 
@@ -42,4 +42,4 @@ The following plan items require substantial integration, external infrastructur
 
 ## Release truthfulness
 
-The target scores and benchmark numbers in `plan5.2.md` remain **engineering targets, not release claims**. Production-ready status should only be applied after the external HA, security, upgrade, Kubernetes, and real benchmark gates in the plan are actually executed and published.
+The target scores and benchmark numbers in `docs/HERMES-SMART-ROUTER-v0.5.2-PLAN.md` remain **engineering targets, not release claims**. Production-ready status should only be applied after the external HA, security, upgrade, Kubernetes, and real benchmark gates in the plan are actually executed and published.

@@ -11,3 +11,11 @@
 - reconciled package version/documentation to Smart Router v0.5.2
 
 See `docs/HERMES-SMART-ROUTER-v0.5.2-IMPLEMENTATION-STATUS.md` for items still open and not claimed complete.
+
+## Post-review cleanup
+
+- Replaced the Docker execution GID 0 fallback with fail-closed sentinel GID 65534; `install.sh` still detects the actual Docker socket GID when available.
+- Removed a dead duplicate `/router/info` handler definition.
+- Deduplicated Redis/Authlib dependency constraints to their prior effective versions.
+- Removed the duplicate root `plan5.2.md`; the canonical roadmap is `docs/HERMES-SMART-ROUTER-v0.5.2-PLAN.md`.
+- Updated smoke validation for configurable Smart Router image tags (`latest` by default, pinnable via `.env`).

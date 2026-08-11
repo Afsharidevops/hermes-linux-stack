@@ -219,7 +219,7 @@ services:
     # Runs as the local operator so mode-0600 broker state stays unreadable to
     # every other uid, and joins the docker group only to reach the socket.
     user: "${EXECUTION_RUN_AS:-10003:10003}"
-    group_add: ["${EXECUTION_DOCKER_GID:-0}"]
+    group_add: ["${EXECUTION_DOCKER_GID:-65534}"]
     environment:
       BROKER_MODE: docker
       BROKER_STATE: /state/capabilities.sqlite3
