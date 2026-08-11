@@ -906,11 +906,15 @@ The v0.5 target scorecard is a roadmap figure, not measured performance:
 
 ---
 
-## Smart Router v0.5.2 control plane
+## Smart Router v0.5.2 dashboard and Control Plane
 
-v0.5.1 adds the P0-P2 control-plane roadmap while preserving 9router as this branch's provider gateway. Open `http://127.0.0.1:8787/control/` by default for RBAC, virtual keys/quotas, dynamic routing profiles, provider discovery, budgets, policies, RAG/knowledge, memory, agents/teams, plugin registry, audit and system health.
+Smart Router v0.5.2 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Control Plane at `/control/`, while preserving 9router as this branch's provider gateway. The Control Plane covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
 
-See `smart-router/V0.5.1-CONTROL-PLANE.md` before enabling production authentication or HA mode.
+The easy installer now configures the v0.5.2 core switches instead of silently relying on Compose defaults, and `./manage.sh menu` exposes a Smart Router submenu. Useful commands include `router-status`, `router-access`, `router-summary`, `router-routes`, `router-provider-health`, `router-system`, `router-info`, `router-policy`, `router-calibrate`, `router-report`, and `router-replay`.
+
+Routing semantics are important: Smart Router policy applies to `model=auto`; `auto-fast`/`auto-standard`/`auto-strong` are available only when tier overrides are enabled. Explicit upstream model names pass through without automatic tier selection. `observe` evaluates/logs automatic requests but dispatches them through `SMART_ROUTER_OBSERVE_MODEL`; `route` applies the selected route profile.
+
+Default local URLs are `http://127.0.0.1:8787/v1`, `http://127.0.0.1:8787/dashboard`, and `http://127.0.0.1:8787/control/`. See `smart-router/V0.5.1-CONTROL-PLANE.md` and `smart-router/V0.5.2-RELEASE-NOTES.md` before enabling production authentication, OIDC, or HA mode.
 
 Default Smart Router image: `afsharidevops/hermes-smart-router:latest`; pin `SMART_ROUTER_IMAGE_TAG` in `.env` when you want a stable release.
 
