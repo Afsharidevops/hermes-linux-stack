@@ -60,6 +60,8 @@ Commands:
   set-execution-approval-bot-token Silently configure the dedicated approval bot token
   rotate-execution-broker-secret Rotate control secret and revoke pending operations
   purge-execution               Delete execution state and SSH keys after confirmation
+  n8n-menu                      Open interactive n8n provisioning/MCP management
+  n8n-status                    Show n8n provisioning/MCP status without revealing secrets
   set-n8n-api-key               Validate and securely store an owner-created API key
   set-n8n-instance-mcp-token    Validate/store an n8n-generated Instance MCP token
   remove-n8n-instance-mcp-token Remove a stored Instance token when mode is not instance
@@ -212,7 +214,8 @@ interactive_menu() {
     printf '%s\n' '7) Follow logs'
     printf '%s\n' '8) Reconfigure installation'
     printf '%s\n' '9) Smart Router v0.5.2 management'
-    printf '%s\n' '10) Uninstall stack'
+    printf '%s\n' '10) n8n provisioning / MCP management'
+    printf '%s\n' '11) Uninstall stack'
     printf '%s\n' '0) Exit'
     read -r -p 'Choose: ' choice
     case "$choice" in
@@ -279,7 +282,8 @@ interactive_menu() {
           esac
         done
         ;;
-      10)
+      10) "$ROOT_DIR/manage.sh" n8n-menu ;;
+      11)
         printf '%s\n' 'Uninstall options:'
         printf '%s\n' '  1) Remove containers/network only (KEEP configuration and data)'
         printf '%s\n' '  2) Remove containers/network AND PURGE local configuration/data/secrets'
@@ -614,6 +618,97 @@ env_value() {
   printf '%s' "$value"
 }
 
+
+n8n_status() {
+  local profiles mode public_url
+  profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
+  if [[ ",$profiles," != *,n8n,* ]]; then
+    printf 'n8n is not enabled in COMPOSE_PROFILES. Run ./manage.sh configure to enable it.\n'
+    return 1
+  fi
+  mode="$(n8n_mcp_mode 2>/dev/null || printf invalid)"
+  public_url="$(env_value "$ENV_FILE" N8N_PUBLIC_URL)"
+  if [[ -z "$public_url" ]]; then
+    public_url="http://$(env_value "$ENV_FILE" N8N_BIND_IP):$(env_value "$ENV_FILE" N8N_PORT)"
+  fi
+  printf 'n8n provisioning status\n'
+  printf '  URL: %s\n' "$public_url"
+  printf '  MCP mode: %s\n' "$mode"
+  if [[ -n "$(n8n_api_key 2>/dev/null || true)" ]]; then
+    printf '  owner API key: stored (secret not shown)\n'
+  else
+    printf '  owner API key: NOT stored; managed workflow reconciliation is pending\n'
+  fi
+  if [[ -f "$HERMES_ENV" && -n "$(env_value "$HERMES_ENV" N8N_INSTANCE_MCP_TOKEN 2>/dev/null || true)" ]]; then
+    printf '  Instance MCP token: stored (secret not shown)\n'
+  else
+    printf '  Instance MCP token: not stored\n'
+  fi
+  if [[ -f "$HERMES_ENV" && -n "$(env_value "$HERMES_ENV" N8N_TRIGGER_MCP_TOKEN 2>/dev/null || true)" ]]; then
+    printf '  Trigger MCP token: stored (secret not shown)\n'
+  else
+    printf '  Trigger MCP token: not stored\n'
+  fi
+  if [[ -f "$N8N_BOOTSTRAP_STATE" && ! -L "$N8N_BOOTSTRAP_STATE" ]]; then
+    printf '  managed n8n state: present\n'
+  else
+    printf '  managed n8n state: pending\n'
+  fi
+  case "$mode" in
+    instance)
+      printf '  Instance setup: Settings -> Instance-level MCP -> Enable MCP access -> Connection details -> Access Token\n'
+      ;;
+    trigger)
+      printf '  Trigger setup: stack-managed MCP Server Trigger workflow\n'
+      ;;
+  esac
+}
+
+n8n_menu() {
+  local choice value
+  while true; do
+    printf '\nn8n Provisioning / MCP Manager\n'
+    printf '%s\n' '=============================='
+    printf '%s\n' '1) Show provisioning / MCP status'
+    printf '%s\n' '2) Store or replace owner API key'
+    printf '%s\n' '3) Store or replace Instance-level MCP token'
+    printf '%s\n' '4) Select MCP mode (instance / trigger / off)'
+    printf '%s\n' '5) Bootstrap / reconcile stack-owned n8n objects'
+    printf '%s\n' '6) Verify current n8n + MCP configuration'
+    printf '%s\n' '7) Rotate retained Trigger-mode bearer token'
+    printf '%s\n' '8) Remove stored owner API key'
+    printf '%s\n' '9) Remove stored Instance MCP token (when mode is not instance)'
+    printf '%s\n' '0) Back'
+    read -r -p 'Choose: ' choice
+    case "$choice" in
+      1) "$ROOT_DIR/manage.sh" n8n-status ;;
+      2)
+        printf '%s\n' 'Create the key in n8n as the owner/admin, then paste it at the hidden prompt.'
+        "$ROOT_DIR/manage.sh" set-n8n-api-key
+        ;;
+      3)
+        printf '%s\n' 'In n8n: Settings -> Instance-level MCP -> enable access -> Connection details -> Access Token.'
+        printf '%s\n' 'Generate/copy the token, then paste it at the hidden prompt.'
+        "$ROOT_DIR/manage.sh" set-n8n-instance-mcp-token
+        ;;
+      4)
+        printf '%s\n' '  instance - n8n built-in Instance-level MCP endpoint'
+        printf '%s\n' '  trigger  - stack-managed MCP Server Trigger workflow'
+        printf '%s\n' '  off      - disconnect Hermes from n8n MCP'
+        read -r -p 'Mode (instance/trigger/off): ' value
+        "$ROOT_DIR/manage.sh" set-n8n-mcp-mode "$value"
+        ;;
+      5) "$ROOT_DIR/manage.sh" bootstrap-n8n ;;
+      6) "$ROOT_DIR/manage.sh" verify-n8n ;;
+      7) "$ROOT_DIR/manage.sh" rotate-n8n-trigger-token ;;
+      8) "$ROOT_DIR/manage.sh" remove-n8n-bootstrap-key ;;
+      9) "$ROOT_DIR/manage.sh" remove-n8n-instance-mcp-token ;;
+      0) return 0 ;;
+      *) printf 'Unknown choice.\n' >&2 ;;
+    esac
+  done
+}
+
 require_profiles() {
   local profiles required
   profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
@@ -880,9 +975,11 @@ n8n_instance_mcp_check() {
           await request({jsonrpc:"2.0",method:"notifications/initialized",params:{}});
           const listed = await request({jsonrpc:"2.0",id:2,method:"tools/list",params:{}});
           const tools = listed.find(item => item?.id === 2)?.result?.tools;
-          for (const name of ["search_workflows","get_workflow_details","execute_workflow",
-            "publish_workflow","unpublish_workflow","list_credentials","search_executions"]) {
-            if (!Array.isArray(tools) || !tools.some(tool => tool?.name === name)) throw new Error(`Instance MCP tool ${name} is missing`);
+          // n8n adds Instance MCP capabilities over time. Require the stable
+          // workflow core so a valid token is not rejected only because newer,
+          // version-gated tools are absent from this installed n8n image.
+          for (const name of ["search_workflows","get_workflow_details","execute_workflow"]) {
+            if (!Array.isArray(tools) || !tools.some(tool => tool?.name === name)) throw new Error(`Instance MCP core tool ${name} is missing`);
           }
         } catch (error) {
           failure = error;
@@ -1113,6 +1210,8 @@ check_hermes_file() {
 command="${1:-}"
 case "$command" in
   menu) interactive_menu ;;
+  n8n-menu) n8n_menu ;;
+  n8n-status) n8n_status ;;
   uninstall)
     shift
     uninstall_stack "${1:-}"
@@ -1838,10 +1937,12 @@ PY
     [[ -n "$token" && "$token" != *[[:space:]]* ]] || {
       printf 'A non-empty token without whitespace is required.\n' >&2; exit 2;
     }
-    [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || {
-      printf 'Paste only the n8n Instance MCP token, without Bearer, quotes, JSON, or the connection URL.\n' >&2
-      exit 2
-    }
+    case "$token" in
+      Bearer\ *|bearer\ *|http://*|https://*|\"*|\'*)
+        printf 'Paste only the n8n Instance MCP token, without Bearer, quotes, JSON, or the connection URL.\n' >&2
+        exit 2
+        ;;
+    esac
     n8n_instance_mcp_check "$token" || {
       printf 'n8n rejected the Instance MCP token or required tools are unavailable; nothing was stored.\n' >&2
       exit 1

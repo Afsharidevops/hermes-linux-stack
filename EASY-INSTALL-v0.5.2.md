@@ -29,3 +29,12 @@ HA/Redis and OIDC remain advanced infrastructure settings in `.env`; the install
 ## Uninstall
 
 `./manage.sh menu` includes **Uninstall stack**. The default uninstall removes containers/network while preserving local configuration and data. `./manage.sh uninstall --purge` additionally deletes local stack configuration, runtime data, and secrets after requiring the exact confirmation word `PURGE`; source files and external backups are preserved.
+
+
+## n8n same-run provisioning
+
+When n8n + Hermes MCP is selected, the normal installer now uses a two-phase flow. It starts n8n first because the owner account must exist before n8n can issue user-bound credentials. Once n8n is healthy, the same wizard offers to pause while you claim/confirm the owner account, then securely prompts for the owner API key. In Instance-level MCP mode it also guides you to **Settings -> Instance-level MCP -> Connection details -> Access Token**, validates the n8n-generated token, stores it without printing it, and reconciles/verifies the managed n8n integration. You can skip this phase and resume at any time with `./manage.sh n8n-menu`.
+
+Instance MCP validation is capability-aware: it requires the stable workflow core (`search_workflows`, `get_workflow_details`, `execute_workflow`) but does not reject valid tokens merely because the installed n8n image lacks newer version-gated tools such as `search_executions` or `list_credentials`.
+
+Current n8n releases add MCP tools incrementally (for example `search_executions` is version-gated), so the stack treats those extra tools as optional during token authentication and reports compatibility through verification instead of rejecting an otherwise valid token.

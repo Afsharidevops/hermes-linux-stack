@@ -1193,3 +1193,10 @@ docker compose --env-file .env up -d
 ```
 
 For a reproducible snapshot of currently resolved image digests, use `./manage.sh lock-images` and `./manage.sh verify-images`.
+
+
+### n8n guided provisioning
+
+For n8n + Hermes MCP installations, `./install.sh` starts n8n first and then offers to finish owner/API/MCP provisioning in the same wizard session. The owner API key and Instance MCP access token remain user-created n8n credentials; the installer validates and stores them through hidden prompts after owner setup. Use `./manage.sh n8n-menu` later to inspect status, replace credentials, change MCP mode, reconcile, verify, or rotate the Trigger token. Instance MCP validation follows the stable core tool surface instead of requiring every newer version-gated n8n MCP tool.
+
+Instance-level MCP capabilities are n8n-version-dependent; the stack validates the stable workflow core and does not require newer optional tools such as `search_executions` just to accept a valid access token.

@@ -399,14 +399,13 @@ export async function verifyMcp({
     }
     const toolNames = new Set(tools.tools.map((tool) => tool?.name).filter((name) => typeof name === "string"));
     if (selectedMode === "instance") {
+      // Require the stable Instance MCP workflow core. Newer n8n releases
+      // expose additional version-gated tools that are useful but not required
+      // to authenticate Hermes to the Instance MCP endpoint.
       for (const requiredName of [
         "search_workflows",
         "get_workflow_details",
         "execute_workflow",
-        "publish_workflow",
-        "unpublish_workflow",
-        "list_credentials",
-        "search_executions",
       ]) {
         if (!toolNames.has(requiredName)) {
           throw new VerifyError(`Instance MCP ${requiredName} tool is missing`, {
