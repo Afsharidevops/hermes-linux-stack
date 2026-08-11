@@ -31,6 +31,12 @@ Commands:
   logs [hermes|omniroute|smart-router|webui|n8n|caddy]
                                 Follow all or one service's logs
   set-router-mode MODE          Set Smart Router mode to observe or route
+  router-status                 Show v0.5.2 router mode/policy/features and URLs
+  router-access [--show-secrets] Show dashboard/control URLs and local access credentials
+  router-summary [HOURS]        Show authenticated dashboard telemetry summary
+  router-routes                 Show Control Plane route profiles
+  router-provider-health        Show v0.5.2 provider/model health and circuit state
+  router-system                 Show Control Plane system/feature state
   uninstall [--purge]           Remove stack containers/network; optionally purge local runtime data
   doctor                        Validate files and show diagnostics
   configure                     Run the interactive installer again
@@ -156,6 +162,42 @@ uninstall_stack() {
 
 valid_ids() { [[ "$1" =~ ^[0-9]+(,[0-9]+)*$ ]]; }
 
+router_local_base_url() {
+  local bind port
+  bind="$(env_value "$ENV_FILE" SMART_ROUTER_BIND_IP)"; bind="${bind:-127.0.0.1}"
+  port="$(env_value "$ENV_FILE" SMART_ROUTER_PORT)"; port="${port:-8787}"
+  case "$bind" in
+    0.0.0.0|'') bind=127.0.0.1 ;;
+  esac
+  printf 'http://%s:%s' "$bind" "$port"
+}
+
+router_api_get() {
+  local path="$1" key="${2:-}" base
+  base="$(router_local_base_url)"
+  if command -v curl >/dev/null 2>&1; then
+    if [[ -n "$key" ]]; then
+      curl -fsS --connect-timeout 3 --max-time 10 -H "Authorization: Bearer $key" "$base$path"
+    else
+      curl -fsS --connect-timeout 3 --max-time 10 "$base$path"
+    fi
+  else
+    # urllib fallback keeps management usable on minimal hosts.
+    ROUTER_URL="$base$path" ROUTER_KEY="$key" python3 - <<'PYROUTER'
+import os, urllib.request
+req=urllib.request.Request(os.environ['ROUTER_URL'])
+if os.environ.get('ROUTER_KEY'):
+    req.add_header('Authorization','Bearer '+os.environ['ROUTER_KEY'])
+with urllib.request.urlopen(req, timeout=10) as r:
+    print(r.read().decode(), end='')
+PYROUTER
+  fi
+}
+
+pretty_json() {
+  python3 -m json.tool 2>/dev/null || cat
+}
+
 interactive_menu() {
   local choice value service
   while true; do
@@ -169,7 +211,7 @@ interactive_menu() {
     printf '%s\n' '6) Update official images'
     printf '%s\n' '7) Follow logs'
     printf '%s\n' '8) Reconfigure installation'
-    printf '%s\n' '9) Change Smart Router mode'
+    printf '%s\n' '9) Smart Router v0.5.2 management'
     printf '%s\n' '10) Uninstall stack'
     printf '%s\n' '0) Exit'
     read -r -p 'Choose: ' choice
@@ -199,10 +241,43 @@ interactive_menu() {
         ;;
       8) exec "$ROOT_DIR/install.sh" ;;
       9)
-        printf '%s\n' '  observe - Analyze/log decisions without actively switching tiers'
-        printf '%s\n' '  route   - Actively route automatic requests across configured tiers'
-        read -r -p 'Smart Router mode (observe/route) [observe]: ' value
-        "$ROOT_DIR/manage.sh" set-router-mode "${value:-observe}"
+        while true; do
+          printf '\nSmart Router v0.5.2\n'
+          printf '%s\n' '-------------------'
+          printf '%s\n' '1) Status, active features, and URLs'
+          printf '%s\n' '2) Dashboard / Control Plane access'
+          printf '%s\n' '3) Telemetry dashboard summary'
+          printf '%s\n' '4) Route profiles (fast/standard/strong/coding/vision)'
+          printf '%s\n' '5) Provider/model health + circuit state'
+          printf '%s\n' '6) Control Plane system state'
+          printf '%s\n' '7) Change router mode'
+          printf '%s\n' '8) Change routing policy'
+          printf '%s\n' '0) Back'
+          read -r -p 'Choose: ' value
+          case "$value" in
+            1) "$ROOT_DIR/manage.sh" router-status ;;
+            2) "$ROOT_DIR/manage.sh" router-access ;;
+            3) read -r -p 'Hours [24]: ' service; "$ROOT_DIR/manage.sh" router-summary "${service:-24}" ;;
+            4) "$ROOT_DIR/manage.sh" router-routes ;;
+            5) "$ROOT_DIR/manage.sh" router-provider-health ;;
+            6) "$ROOT_DIR/manage.sh" router-system ;;
+            7)
+              printf '%s\n' '  observe - evaluate model=auto decisions, but dispatch through SMART_ROUTER_OBSERVE_MODEL'
+              printf '%s\n' '  route   - apply Smart Router route profiles to model=auto requests; explicit upstream models pass through'
+              read -r -p 'Smart Router mode (observe/route) [observe]: ' service
+              "$ROOT_DIR/manage.sh" set-router-mode "${service:-observe}"
+              ;;
+            8)
+              printf '%s\n' '  heuristic  - built-in deterministic policy (safe default)'
+              printf '%s\n' '  calibrated - use smart-router/policy/calibrated.json'
+              printf '%s\n' '  learned    - use trained learned-v4 artifacts with configured fallback'
+              read -r -p 'Policy (heuristic/calibrated/learned) [heuristic]: ' service
+              "$ROOT_DIR/manage.sh" router-policy "${service:-heuristic}"
+              ;;
+            0|'') break ;;
+            *) printf 'Unknown Smart Router choice.\n' >&2 ;;
+          esac
+        done
         ;;
       10)
         printf '%s\n' 'Uninstall options:'
@@ -1978,6 +2053,71 @@ PY
   health) shift; ops health "$@" ;;
   version) ops version ;;
   backup|backup-list|restore|rollback|lock-images|verify-images) cmd="$1"; shift; ops "$cmd" "$@" ;;
+  router-status)
+    profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
+    if [[ ",$profiles," != *,smart-router,* ]]; then
+      printf 'Smart Router is not enabled in COMPOSE_PROFILES. Run ./manage.sh configure to enable it.\n'
+      exit 1
+    fi
+    base="$(router_local_base_url)"
+    printf 'Smart Router v0.5.2 stack integration\n'
+    printf '  image: %s:%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_REPOSITORY)" "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_TAG)"
+    printf '  base URL: %s\n' "$base"
+    printf '  OpenAI API: %s/v1\n' "$base"
+    printf '  mode: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_MODE)"
+    printf '  policy: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_POLICY)"
+    printf '  tier override aliases: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_ALLOW_TIER_OVERRIDES)"
+    printf '  dashboard: %s (%s/dashboard)\n' "$(env_value "$ENV_FILE" SMART_ROUTER_DASHBOARD_ENABLED)" "$base"
+    printf '  control plane: %s (%s/control/)\n' "$(env_value "$ENV_FILE" SMART_ROUTER_CONTROL_PLANE_ENABLED)" "$base"
+    printf '  require auth: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_REQUIRE_AUTH)"
+    printf '  provider health/circuit breakers: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_PROVIDER_HEALTH_ENABLED)"
+    printf '  OIDC: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_OIDC_ENABLED)"
+    printf '  HA mode: %s; Redis required: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_HA_MODE)" "$(env_value "$ENV_FILE" SMART_ROUTER_REDIS_REQUIRED)"
+    printf '  route profiles: fast=%s standard=%s strong=%s coding=%s vision=%s\n' \
+      "$(env_value "$ENV_FILE" SMART_ROUTER_FAST_MODEL)" "$(env_value "$ENV_FILE" SMART_ROUTER_STANDARD_MODEL)" \
+      "$(env_value "$ENV_FILE" SMART_ROUTER_STRONG_MODEL)" "$(env_value "$ENV_FILE" SMART_ROUTER_CODING_MODEL)" \
+      "$(env_value "$ENV_FILE" SMART_ROUTER_VISION_MODEL)"
+    printf '\nRuntime /router/info:\n'
+    router_api_get /router/info | pretty_json || printf 'Runtime info unavailable; is smart-router running?\n' >&2
+    ;;
+  router-access)
+    base="$(router_local_base_url)"
+    printf 'Dashboard:     %s/dashboard\n' "$base"
+    printf 'Control Plane: %s/control/\n' "$base"
+    printf 'OpenAI API:    %s/v1\n' "$base"
+    printf 'Admin user:    %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_BOOTSTRAP_ADMIN_USER)"
+    printf 'Dashboard telemetry uses SMART_ROUTER_CLIENT_API_KEY. Control Plane accepts the bootstrap admin user/password or SMART_ROUTER_ADMIN_API_KEY.\n'
+    if [[ "${2:-}" == --show-secrets ]]; then
+      [[ -r /dev/tty && -w /dev/tty ]] || { printf 'A controlling terminal is required to reveal secrets.\n' >&2; exit 1; }
+      read -r -p 'Reveal Smart Router access secrets on this terminal? [y/N]: ' answer </dev/tty
+      [[ "$answer" =~ ^[Yy]$ ]] || { printf 'Secrets not shown.\n'; exit 0; }
+      printf 'SMART_ROUTER_CLIENT_API_KEY=%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_CLIENT_API_KEY)"
+      printf 'SMART_ROUTER_ADMIN_API_KEY=%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_ADMIN_API_KEY)"
+      printf 'SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD=%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD)"
+    elif [[ -n "${2:-}" ]]; then
+      printf 'Usage: ./manage.sh router-access [--show-secrets]\n' >&2; exit 2
+    else
+      printf 'Use ./manage.sh router-access --show-secrets only when you need to reveal local credentials.\n'
+    fi
+    ;;
+  router-summary)
+    hours="${2:-24}"
+    [[ "$hours" =~ ^[0-9]+([.][0-9]+)?$ ]] || { printf 'Hours must be numeric.\n' >&2; exit 2; }
+    key="$(env_value "$ENV_FILE" SMART_ROUTER_CLIENT_API_KEY)"
+    router_api_get "/dashboard/api/summary?hours=$hours" "$key" | pretty_json
+    ;;
+  router-routes)
+    key="$(env_value "$ENV_FILE" SMART_ROUTER_ADMIN_API_KEY)"
+    router_api_get /control/api/routes "$key" | pretty_json
+    ;;
+  router-provider-health)
+    key="$(env_value "$ENV_FILE" SMART_ROUTER_ADMIN_API_KEY)"
+    router_api_get /control/api/provider-health "$key" | pretty_json
+    ;;
+  router-system)
+    key="$(env_value "$ENV_FILE" SMART_ROUTER_ADMIN_API_KEY)"
+    router_api_get /control/api/system "$key" | pretty_json
+    ;;
   router-policy)
     policy="${2:-}"; [[ "$policy" == heuristic || "$policy" == calibrated || "$policy" == learned ]] || { printf 'heuristic|calibrated|learned required\n' >&2; exit 2; }
     [[ "$policy" != calibrated || -s "$ROOT_DIR/smart-router/policy/calibrated.json" ]] || { printf 'calibrated policy missing\n' >&2; exit 1; }

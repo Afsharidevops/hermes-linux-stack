@@ -681,13 +681,25 @@ telegram_ids="$(existing_hermes_env_value TELEGRAM_ALLOWED_USERS)"
 telegram_home="$(existing_hermes_env_value TELEGRAM_HOME_CHANNEL)"
 api_enabled="$(existing_hermes_env_value API_SERVER_ENABLED)"; api_enabled="${api_enabled:-false}"
 api_key="$(existing_hermes_env_value API_SERVER_KEY)"
-smart_router_image="$(existing_env_value SMART_ROUTER_IMAGE)"; smart_router_image="${smart_router_image:-afsharidevops/hermes-smart-router:0.1.0@sha256:4290667e8c90940a5dd97bcd6fd1575c0f1b822db507f9cc5076abe126708bef}"
+smart_router_image_repository="$(existing_env_value SMART_ROUTER_IMAGE_REPOSITORY)"; smart_router_image_repository="${smart_router_image_repository:-afsharidevops/hermes-smart-router}"
+smart_router_image_tag="$(existing_env_value SMART_ROUTER_IMAGE_TAG)"; smart_router_image_tag="${smart_router_image_tag:-latest}"
+smart_router_bind="$(existing_env_value SMART_ROUTER_BIND_IP)"; smart_router_bind="${smart_router_bind:-127.0.0.1}"
+smart_router_port="$(existing_env_value SMART_ROUTER_PORT)"; smart_router_port="${smart_router_port:-8787}"
 smart_router_mode="$(existing_env_value SMART_ROUTER_MODE)"; smart_router_mode="${smart_router_mode:-observe}"
+smart_router_policy="$(existing_env_value SMART_ROUTER_POLICY)"; smart_router_policy="${smart_router_policy:-heuristic}"
+smart_router_allow_tier_overrides="$(existing_env_value SMART_ROUTER_ALLOW_TIER_OVERRIDES)"; smart_router_allow_tier_overrides="${smart_router_allow_tier_overrides:-false}"
+smart_router_dashboard_enabled="$(existing_env_value SMART_ROUTER_DASHBOARD_ENABLED)"; smart_router_dashboard_enabled="${smart_router_dashboard_enabled:-true}"
+smart_router_control_plane_enabled="$(existing_env_value SMART_ROUTER_CONTROL_PLANE_ENABLED)"; smart_router_control_plane_enabled="${smart_router_control_plane_enabled:-true}"
+smart_router_require_auth="$(existing_env_value SMART_ROUTER_REQUIRE_AUTH)"; smart_router_require_auth="${smart_router_require_auth:-true}"
+smart_router_provider_health_enabled="$(existing_env_value SMART_ROUTER_PROVIDER_HEALTH_ENABLED)"; smart_router_provider_health_enabled="${smart_router_provider_health_enabled:-true}"
+smart_router_coding_model="$(existing_env_value SMART_ROUTER_CODING_MODEL)"
+smart_router_vision_model="$(existing_env_value SMART_ROUTER_VISION_MODEL)"
 smart_router_secret="$(existing_env_value SMART_ROUTER_HMAC_SECRET)"; smart_router_secret="${smart_router_secret:-$(random_hex 32)}"
-smart_router_policy="$(existing_env_value SMART_ROUTER_POLICY_VERSION)"; smart_router_policy="${smart_router_policy:-4}"
 smart_router_fast_model="$(existing_env_value SMART_ROUTER_FAST_MODEL)"; smart_router_fast_model="${smart_router_fast_model:-auto}"
 smart_router_standard_model="$(existing_env_value SMART_ROUTER_STANDARD_MODEL)"; smart_router_standard_model="${smart_router_standard_model:-auto}"
 smart_router_strong_model="$(existing_env_value SMART_ROUTER_STRONG_MODEL)"; smart_router_strong_model="${smart_router_strong_model:-auto}"
+smart_router_coding_model="${smart_router_coding_model:-auto}"
+smart_router_vision_model="${smart_router_vision_model:-auto}"
 smart_router_observe_model="$(existing_env_value SMART_ROUTER_OBSERVE_MODEL)"; smart_router_observe_model="${smart_router_observe_model:-auto}"
 smart_router_fail_open_model="auto"
 smart_router_ttl="$(existing_env_value SMART_ROUTER_SESSION_TTL_SECONDS)"; smart_router_ttl="${smart_router_ttl:-2700}"
@@ -749,18 +761,49 @@ case "$n8n_mcp_mode" in
 esac
 
 if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; then
-  printf '\nHermes Smart Router settings\n'
-  printf '%s\n' '----------------------------'
-  printf '%s\n' 'Available modes:'
-  printf '%s\n' '  observe - Analyze/log routing decisions without actively switching tiers (recommended first)'
-  printf '%s\n' '  route   - Actively route automatic requests across fast/standard/strong tiers'
+  printf '\nHermes Smart Router v0.5.2 settings\n'
+  printf '%s\n' '-----------------------------------'
+  printf '%s\n' 'Smart routing applies to model=auto. Tier aliases auto-fast/auto-standard/auto-strong are exposed only when tier overrides are enabled.'
+  printf '%s\n' 'Explicit upstream model names pass through without automatic tier selection.'
+  printf '%s\n' ''
+  printf '%s\n' 'Router modes:'
+  printf '%s\n' '  observe - evaluate auto requests and record decisions, but dispatch through SMART_ROUTER_OBSERVE_MODEL (recommended first)'
+  printf '%s\n' '  route   - apply Smart Router decisions/profiles to auto requests; explicit model names still pass through'
+  smart_router_bind="$(prompt_bind_ip "Smart Router bind address" "$smart_router_bind")"
+  smart_router_port="$(prompt_port "Smart Router HTTP/API/dashboard/control-plane port" "$smart_router_port")"
   smart_router_mode="$(prompt "Initial mode: observe or route" "$smart_router_mode")"
   [[ "$smart_router_mode" == observe || "$smart_router_mode" == route ]] \
     || die "Smart Router mode must be observe or route."
-  smart_router_fast_model="$(prompt "Fast-tier OmniRoute model/alias" "$smart_router_fast_model")"
-  smart_router_standard_model="$(prompt "Standard-tier OmniRoute model/alias" "$smart_router_standard_model")"
-  smart_router_strong_model="$(prompt "Strong-tier OmniRoute model/alias" "$smart_router_strong_model")"
-  info "Configure the fast/standard/strong model aliases in OmniRoute/Smart Router before route mode."
+  printf '%s\n' 'Routing policies: heuristic (built-in/default), calibrated (requires calibrated.json), learned (requires learned model artifacts).'
+  smart_router_policy="$(prompt "Routing policy: heuristic, calibrated, or learned" "$smart_router_policy")"
+  [[ "$smart_router_policy" == heuristic || "$smart_router_policy" == calibrated || "$smart_router_policy" == learned ]] \
+    || die "Smart Router policy must be heuristic, calibrated, or learned."
+  if [[ "$smart_router_policy" == calibrated && ! -s "$ROOT_DIR/smart-router/policy/calibrated.json" ]]; then
+    die "calibrated policy selected but smart-router/policy/calibrated.json is missing."
+  fi
+  if [[ "$smart_router_policy" == learned && ! -s "$ROOT_DIR/smart-router/policy/learned-v4.joblib" ]]; then
+    warn "learned policy selected but smart-router/policy/learned-v4.joblib is currently missing; create/train the artifact before starting route mode."
+  fi
+  if confirm "Expose tier override aliases auto-fast/auto-standard/auto-strong?" "$([[ "$smart_router_allow_tier_overrides" == true ]] && printf y || printf n)"; then
+    smart_router_allow_tier_overrides=true
+  else
+    smart_router_allow_tier_overrides=false
+  fi
+  if confirm "Enable the Smart Router telemetry dashboard (/dashboard)?" "$([[ "$smart_router_dashboard_enabled" == true ]] && printf y || printf n)"; then smart_router_dashboard_enabled=true; else smart_router_dashboard_enabled=false; fi
+  if confirm "Enable the v0.5.2 Control Plane (/control)?" "$([[ "$smart_router_control_plane_enabled" == true ]] && printf y || printf n)"; then smart_router_control_plane_enabled=true; else smart_router_control_plane_enabled=false; fi
+  if [[ "$smart_router_control_plane_enabled" == true ]]; then
+    if confirm "Require authentication for Smart Router API/control-plane requests?" "$([[ "$smart_router_require_auth" == true ]] && printf y || printf n)"; then smart_router_require_auth=true; else smart_router_require_auth=false; fi
+    [[ "$smart_router_require_auth" == true ]] || warn "Authentication is disabled. Keep the Smart Router bound to loopback unless you fully understand the exposure risk."
+  fi
+  if confirm "Enable provider/model health registry and circuit-breaker fallback?" "$([[ "$smart_router_provider_health_enabled" == true ]] && printf y || printf n)"; then smart_router_provider_health_enabled=true; else smart_router_provider_health_enabled=false; fi
+  smart_router_fast_model="$(prompt "Fast route-profile OmniRoute model/alias" "$smart_router_fast_model")"
+  smart_router_standard_model="$(prompt "Standard route-profile OmniRoute model/alias" "$smart_router_standard_model")"
+  smart_router_strong_model="$(prompt "Strong route-profile OmniRoute model/alias" "$smart_router_strong_model")"
+  smart_router_coding_model="$(prompt "Coding route-profile OmniRoute model/alias" "$smart_router_coding_model")"
+  smart_router_vision_model="$(prompt "Vision route-profile OmniRoute model/alias" "$smart_router_vision_model")"
+  info "The fast/standard/strong values are Smart Router route-profile defaults. OmniRoute controls the actual upstream model/provider behavior behind those aliases."
+  info "Dashboard URL after start: http://$(service_url_host "$smart_router_bind"):$smart_router_port/dashboard"
+  info "Control Plane URL after start: http://$(service_url_host "$smart_router_bind"):$smart_router_port/control/"
 fi
 
 if [[ "$configure_n8n" == true && "$install_n8n" == true ]]; then
@@ -1091,10 +1134,22 @@ replace_env_value "$tmp_env" EXECUTION_SANDBOX_IMAGE "$execution_sandbox_image"
 replace_env_value "$tmp_env" EXECUTION_RUN_AS "$execution_run_as"
 replace_env_value "$tmp_env" EXECUTION_DOCKER_GID "$execution_docker_gid"
 replace_env_value "$tmp_env" EXECUTION_WORKSPACE_HOST_PATH "$execution_workspace"
+replace_env_value "$tmp_env" SMART_ROUTER_IMAGE_REPOSITORY "$smart_router_image_repository"
+replace_env_value "$tmp_env" SMART_ROUTER_IMAGE_TAG "$smart_router_image_tag"
+replace_env_value "$tmp_env" SMART_ROUTER_BIND_IP "$smart_router_bind"
+replace_env_value "$tmp_env" SMART_ROUTER_PORT "$smart_router_port"
 replace_env_value "$tmp_env" SMART_ROUTER_MODE "$smart_router_mode"
+replace_env_value "$tmp_env" SMART_ROUTER_POLICY "$smart_router_policy"
+replace_env_value "$tmp_env" SMART_ROUTER_ALLOW_TIER_OVERRIDES "$smart_router_allow_tier_overrides"
+replace_env_value "$tmp_env" SMART_ROUTER_DASHBOARD_ENABLED "$smart_router_dashboard_enabled"
+replace_env_value "$tmp_env" SMART_ROUTER_CONTROL_PLANE_ENABLED "$smart_router_control_plane_enabled"
+replace_env_value "$tmp_env" SMART_ROUTER_REQUIRE_AUTH "$smart_router_require_auth"
+replace_env_value "$tmp_env" SMART_ROUTER_PROVIDER_HEALTH_ENABLED "$smart_router_provider_health_enabled"
 replace_env_value "$tmp_env" SMART_ROUTER_FAST_MODEL "$smart_router_fast_model"
 replace_env_value "$tmp_env" SMART_ROUTER_STANDARD_MODEL "$smart_router_standard_model"
 replace_env_value "$tmp_env" SMART_ROUTER_STRONG_MODEL "$smart_router_strong_model"
+replace_env_value "$tmp_env" SMART_ROUTER_CODING_MODEL "$smart_router_coding_model"
+replace_env_value "$tmp_env" SMART_ROUTER_VISION_MODEL "$smart_router_vision_model"
 replace_env_value "$tmp_env" OPENWEBUI_BIND_IP "$openwebui_bind"
 replace_env_value "$tmp_env" OPENWEBUI_PORT "$openwebui_port"
 replace_env_value "$tmp_env" OPENWEBUI_URL "$(dotenv_quote "$openwebui_url")"
@@ -1457,7 +1512,11 @@ if [[ -n "$hermes_key_status" ]]; then
   fi
 fi
 if [[ "$install_smart_router" == true ]]; then
-  printf 'Hermes Smart Router: enabled (%s mode)\n' "$smart_router_mode"
+  printf 'Hermes Smart Router: enabled (%s mode, %s policy)\n' "$smart_router_mode" "$smart_router_policy"
+  printf 'Smart Router API: http://%s:%s/v1\n' "$(service_url_host "$smart_router_bind")" "$smart_router_port"
+  [[ "$smart_router_dashboard_enabled" == true ]] && printf 'Smart Router dashboard: http://%s:%s/dashboard\n' "$(service_url_host "$smart_router_bind")" "$smart_router_port"
+  [[ "$smart_router_control_plane_enabled" == true ]] && printf 'Smart Router control plane: http://%s:%s/control/\n' "$(service_url_host "$smart_router_bind")" "$smart_router_port"
+  [[ "$smart_router_control_plane_enabled" == true ]] && printf 'Control-plane access: ./manage.sh router-access\n'
   printf 'Smart Router tier models: %s\n' "$smart_router_combo_status"
 fi
 if [[ "$install_hermes" == true && -n "$telegram_token" ]]; then
