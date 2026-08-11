@@ -50,4 +50,3 @@ gateway:
     telegram:
       extra:
         disable_link_previews: true
-

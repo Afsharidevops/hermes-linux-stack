@@ -6,11 +6,11 @@ dd71b98bea56ebc0e0672da8861a05d8e75e3a38d581d599d138518bd305faa9  ./.github/work
 f3dd80a36abd42ce04359471c5b463e7253f2c90f8e648e0e50b35cfa7ab8adc  ./.github/workflows/validate.yml
 7708af7852c6a99df6a4c25b48fd544356f6fa4fbf77359c07523a51b54670d8  ./.gitignore
 d356ee33f7cdbdb1d46f822dbda872f42534c6c19580f6417f2a0771f1cc7b0c  ./CHANGELOG-v0.5.2.md
-46eb1393af83ed3adb0da49013177d5a05fec99475ee969d63af59d4a08064ff  ./EASY-INSTALL-v0.5.2.md
+53ef9c5fda89b15194687de69fddbef67b386979cb304eb52d3db46422f2f6e3  ./EASY-INSTALL-v0.5.2.md
 136c5aeb6c02dbfdab4ad3dd804df2c0db8e0a39a68ca2424428a13b0f1fcd77  ./IMPLEMENTATION.md
 ecafcebc0f616dba3be7e6262e8764f76b7e5b5d10f9b89f9034198c2f882645  ./LICENSE
 b23965772995fae3729c1dfc3c9c69d841373c67d4045436e44bdb5359e81598  ./PACKAGE_SCOPE.md
-a18b160d0f253428bc615ac9b1943c67ffcc5896138866b421eb82b6e39836b9  ./README.md
+e3c515cbbccc184e1758a8b9bf407ce86fb2b570ee98e6193b51854ef58892d4  ./README.md
 8ea95ea5946016fedd0da9765b040c93183fef450222693aa4222297d3eb022c  ./README.upstream.md
 2fabc655b3efdd2604bfd27a02d8e1f038982e684a9cd1dc7654df9c3887b10d  ./RELEASE-COMMANDS-v0.5.2.md
 6b516b549481e1191985e918d9af3ab69a8ca5ad38c6065d1adc10599300e93c  ./ROADMAP.md
@@ -77,8 +77,8 @@ a3f25da07bbd442da7699f8de1a01d3cbd7b2742f855c64cf6e5f7b21f1f21f5  ./execution-br
 8712b285c9d4a75b7f24f0f31bcc7f241e7da3e84a7b470a56d2015c60224ed3  ./execution-broker/src/broker/ssh.py
 6b7ea776e22ebe10e6c40491d1aac4cda271f6c19afe4617cad978e9d8fc8724  ./execution-broker/src/broker/store.py
 66211081a60ab4390bf2073b09461e0798f924f3552383dff7bcd06cf45e7575  ./execution-broker/ssh-askpass.py
-d88e6e9d2a63c7b7ce60dca28230e3b6545aa82c40d268d46d255803ac53314c  ./install.sh
-e644600bb531db20ad331591e93833165603f345b6a304d28acf0fdb5c4b2028  ./manage.sh
+8ae6499d687f0efd340b64f063efdc9328435eebd96d25b49dda9e388428e731  ./install.sh
+741b23248df00bbe69c3956a4d3e59c68dcd74bf712fd369abdc938941d37fbc  ./manage.sh
 dd11e59b4ec8f860138b98460519309ca3e6c2fdf56841b6290854bc0296a39f  ./plugins/stack-execution-policy/__init__.py
 5544b17cc4cc7190d2c20ab35f5ec5336df7ab5211a5bdcfa61997236afed473  ./plugins/stack-execution-policy/plugin.yaml
 fed4f1621a4e0edc091ae80a03415c3c9da0dde29e1ae6c9397a1994834705fa  ./plugins/stack-package-policy/__init__.py
@@ -173,7 +173,7 @@ b127cce098b341215dc3391ed1a53455608846fef6a05f371a5c1aa23ccc53b4  ./smart-router
 fd46723130d25e84cd46ebf249e59a6a7adb0f558e4a04ba4cb3e849614618e4  ./smart-router/tests/test_v050_preference_data.py
 b16df7879b1d39f7dcd8e0dbb56b0ab8deda369d09e37cebe70026822d549072  ./smart-router/tests/test_v050_provider_registry.py
 1cee0447bbfad13249a57204ef5e5950aad3208eee771f9f116d19c6f77a9613  ./smart-router/tests/test_v052_hardening.py
-c7f84c1ee9c066d7227e344630e936067d6078722f50a1a3034ee10547639f80  ./templates/hermes-config.yaml.template
+b24929d0097be3fd4bee66d28f798e4b3b386b1fea3ef6e4a9fa6719c145923d  ./templates/hermes-config.yaml.template
 8540f0355cd0bc9e110e707ba1ef2f4a3102bf46e92ea9b75461ec7267f14dd5  ./tests/smoke.sh
 92af20d6e029acd9da7170e6ef5fb4ac93f43def58bd95826c260e1f2de6891f  ./tests/test-bootstrap-n8n.mjs
 1fd7ed1292f2e3ddaa602808bdc8f1c95d244079746343b49c5b50a301d665d2  ./tests/test-manage-n8n.sh

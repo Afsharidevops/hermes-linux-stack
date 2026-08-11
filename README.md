@@ -529,6 +529,19 @@ Common operations:
 ./manage.sh status
 ./manage.sh doctor
 ./manage.sh configure
+./manage.sh uninstall
+```
+
+Uninstall containers/network but keep configuration and data:
+
+```bash
+./manage.sh uninstall
+```
+
+Permanently purge local stack configuration, runtime data, and secrets (source files and external backups are kept):
+
+```bash
+./manage.sh uninstall --purge
 ```
 
 Logs:
