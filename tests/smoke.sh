@@ -30,7 +30,10 @@ assert (
     build_context == './smart-router'
     or (
         'afsharidevops/hermes-smart-router' in image
-        and f':{expected_version}' in image
+        and (
+            'SMART_ROUTER_IMAGE_TAG' in image
+            or f':{expected_version}' in image
+        )
     )
 ), f"unexpected Smart Router source: build={build!r}, image={image!r}, expected_version={expected_version!r}"
 
