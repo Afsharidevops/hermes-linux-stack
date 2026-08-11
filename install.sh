@@ -473,6 +473,7 @@ existing_install=false
 smart_router_was_enabled=false
 n8n_was_enabled=false
 change_bind_ips=false
+n8n_ready=false
 
 if [[ -f "$ENV_FILE" ]]; then
   existing_install=true
@@ -837,7 +838,7 @@ if [[ "$install_hermes" == true && "$install_n8n" == true ]]; then
   fi
   if [[ "$choose_n8n_mcp" == true && "$n8n_mcp_mode" != off ]] \
     || [[ "$choose_n8n_mcp" == true && "$n8n_mcp_previous_mode" == off ]]; then
-    printf '%s\n' '1) Instance-level MCP (broad n8n workflow-management access)'
+    printf '%s\n' '1) Instance-level MCP (user-scoped n8n MCP access; tools depend on installed n8n version)'
     printf '%s\n' '2) MCP Server Trigger (only explicitly connected workflow tools)'
     while true; do
       n8n_mcp_selection="$(prompt "Choose n8n MCP mode" "1")"
@@ -861,7 +862,7 @@ if [[ "$install_hermes" == true && "$install_n8n" == true ]]; then
         install_n8n_mcp=true
       else
         install_n8n_mcp=false
-        warn "Instance-level MCP is selected but pending. After owner setup, generate its token in n8n and run ./manage.sh set-n8n-instance-mcp-token."
+        warn "Instance-level MCP needs an n8n owner account first. After n8n starts, this wizard will offer to collect the owner API key and n8n-generated MCP token securely; you can also finish later with ./manage.sh n8n-menu."
       fi
       ;;
     off) install_n8n_mcp=false ;;
@@ -1522,6 +1523,53 @@ if [[ "$install_n8n" == true ]]; then
   [[ "$n8n_ready" == true ]] || warn "n8n did not report healthy yet; check ./manage.sh logs n8n."
 fi
 
+
+# The owner/API/MCP credentials are user-bound credentials n8n creates only
+# after its first owner/admin account exists. Start n8n first, then keep this
+# install session open while the operator creates them in the browser and pastes
+# them into hidden validation prompts.
+if [[ "$install_n8n" == true && "$install_hermes" == true && "${n8n_ready:-false}" == true \
+  && "${n8n_mcp_mode:-off}" != off && ( "$configure_n8n" == true || "$configure_hermes" == true ) ]]; then
+  printf '\nn8n post-start provisioning\n'
+  printf '%s\n' '---------------------------'
+  printf 'n8n is running at: %s\n' "$n8n_public_url"
+  printf '%s\n' 'The owner API key and Instance MCP token are created by n8n only after the owner/admin account exists.'
+  if confirm "Finish n8n owner/API/MCP provisioning now in this wizard?" y; then
+    printf '%s\n' '1. Open the n8n URL above and create/confirm the owner account.'
+    printf '%s\n' '2. Create an owner API key in n8n for stack-managed workflow reconciliation.'
+    read -r -p 'Press Enter when the owner account and API key are ready... ' _
+    if "$ROOT_DIR/manage.sh" set-n8n-api-key; then
+      n8n_api_ready=true
+    else
+      n8n_api_ready=false
+      warn "The n8n owner API key was not stored. Retry later with ./manage.sh n8n-menu."
+    fi
+
+    if [[ "$n8n_mcp_mode" == instance ]]; then
+      printf '%s\n' '3. In n8n: Settings -> Instance-level MCP -> enable MCP access.'
+      printf '%s\n' '4. Open Connection details -> Access Token, generate/copy the personal MCP token.'
+      read -r -p 'Press Enter when the Instance MCP token is ready... ' _
+      if [[ "$n8n_api_ready" == true ]]; then
+        if "$ROOT_DIR/manage.sh" set-n8n-instance-mcp-token; then
+          ok "n8n Instance MCP token stored; managed n8n objects reconciled and verified."
+        else
+          warn "Instance MCP setup is incomplete. Retry with ./manage.sh n8n-menu."
+        fi
+      else
+        warn "Skipping Instance token activation until the owner API key is stored, avoiding a half-reconciled managed n8n state."
+      fi
+    elif [[ "$n8n_mcp_mode" == trigger && "$n8n_api_ready" == true ]]; then
+      if "$ROOT_DIR/manage.sh" bootstrap-n8n; then
+        ok "Managed n8n hosted chat and Trigger MCP workflow reconciled and verified."
+      else
+        warn "Managed n8n provisioning is incomplete. Retry with ./manage.sh n8n-menu."
+      fi
+    fi
+  else
+    warn "n8n post-start provisioning skipped. Resume later with ./manage.sh n8n-menu."
+  fi
+fi
+
 if [[ "$install_nine" == true && "$install_webui" == true ]]; then
   if [[ "$openwebui_db_preexisting" == true || "$configure_smart_router" == true ]]; then
     info "Synchronizing the Open WebUI backend connection without deleting its data..."
@@ -1586,16 +1634,17 @@ if [[ "$install_n8n" == true ]]; then
   case "$n8n_mcp_mode" in
     instance)
       printf '%s\n' 'Hermes n8n MCP mode: Instance-level (http://n8n:5678/mcp-server/http)'
-      printf '%s\n' 'In n8n Settings -> Instance-level MCP, enable access and generate a token, then run:'
-      printf '%s\n' '  ./manage.sh set-n8n-instance-mcp-token'
+      if [[ -n "$(sed -n 's/^N8N_INSTANCE_MCP_TOKEN=//p' "$HERMES_DIR/.env" 2>/dev/null | tail -n1)" ]]; then
+        printf '%s\n' 'Instance MCP token: configured (secret not printed)'
+      else
+        printf '%s\n' 'Instance MCP token: pending; use ./manage.sh n8n-menu to finish setup.'
+      fi
       ;;
     trigger)
       printf '%s\n' 'Hermes n8n MCP mode: MCP Server Trigger (http://n8n:5678/mcp/hermes)'
       ;;
   esac
-  printf '%s\n' 'For managed hosted chat and Trigger-mode reconciliation, create an n8n API key, then run:'
-  printf '%s\n' '  ./manage.sh set-n8n-api-key'
-  printf '%s\n' '  ./manage.sh bootstrap-n8n'
+  printf '%s\n' 'n8n provisioning manager: ./manage.sh n8n-menu'
 fi
 if [[ "$install_caddy" == true ]]; then
   [[ -n "$caddy_nine_domain" ]] && printf '9router HTTPS: https://%s\n' "$caddy_nine_domain"

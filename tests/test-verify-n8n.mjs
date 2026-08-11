@@ -291,7 +291,22 @@ test("supports Instance MCP without a server session", async (t) => {
   assert.equal(server.calls.filter((call) => call.method === "DELETE").length, 0);
 });
 
-test("fails when required Instance MCP tools or search results are invalid", async (t) => {
+test("accepts Instance MCP when newer version-gated tools are absent", async (t) => {
+  for (const missingInstanceTool of ["publish_workflow", "unpublish_workflow", "list_credentials", "search_executions"]) {
+    await t.test(missingInstanceTool, async (t) => {
+      const server = await fixture(t, { unpublishedMcp: true, missingInstanceTool });
+      const result = await verifyN8n(
+        input(server, await stateFile(t), {
+          mcpMode: "instance",
+          mcpUrl: `${server.baseUrl}/mcp-server/http`,
+        }),
+      );
+      assert.equal(result.checks.mcp, "ok");
+    });
+  }
+});
+
+test("fails when required Instance MCP core tools or search results are invalid", async (t) => {
   for (const options of [
     { unpublishedMcp: true, missingInstanceTool: "get_workflow_details" },
     { unpublishedMcp: true, invalidInstanceSearch: true },

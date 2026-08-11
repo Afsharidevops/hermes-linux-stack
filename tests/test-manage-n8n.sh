@@ -55,8 +55,10 @@ value() {
 }
 joined=" $* "
 if [[ "$joined" == *hermes-n8n-token-validator* ]]; then
-  [[ "$(value N8N_INSTANCE_MCP_TOKEN)" == eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature ]]
-  exit
+  case "$(value N8N_INSTANCE_MCP_TOKEN)" in
+    eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature|opaque-fixture-token) exit 0 ;;
+    *) exit 1 ;;
+  esac
 fi
 if [[ "$joined" == *'/stack/scripts/bootstrap-n8n.mjs'* ]]; then
   printf 'reconcile mode=%s router=%s model=%s\n' \
@@ -150,22 +152,26 @@ fi
 grep -q 'do not pass the Instance MCP token in argv' "$stack/output"
 ! grep -q 'argv-secret' "$stack/data/hermes/.env"
 
-# A rejected token must not change the secret file. A valid token is written only
-# after validation, remains redacted from output, and preserves mode 0600.
+# A rejected token must not change the secret file. Token representation is not
+# hard-coded: live MCP authentication is authoritative and future n8n releases may
+# use JWT-like or opaque tokens. Valid tokens remain redacted from output.
 stack="$(new_fixture token-validation off)"
 remove_before="$(sha256sum "$stack/data/hermes/.env")"
-if printf '%s\n' invalid-instance-token | run_manage "$stack" "$stack/invalid.out" set-n8n-instance-mcp-token; then
-  printf 'Invalid Instance token unexpectedly passed.\n' >&2
+if printf '%s\n' definitely-rejected-token | run_manage "$stack" "$stack/invalid.out" set-n8n-instance-mcp-token; then
+  printf 'Rejected Instance token unexpectedly passed.\n' >&2
   exit 1
 fi
 test "$remove_before" = "$(sha256sum "$stack/data/hermes/.env")"
-grep -q 'Paste only the n8n Instance MCP token' "$stack/invalid.out"
-! grep -Fq invalid-instance-token "$stack/invalid.out"
+grep -q 'rejected the Instance MCP token' "$stack/invalid.out"
+! grep -Fq definitely-rejected-token "$stack/invalid.out"
 valid_instance_token='eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature'
 printf '%s\n' "$valid_instance_token" | run_manage "$stack" "$stack/valid.out" set-n8n-instance-mcp-token
-grep -Fq "N8N_INSTANCE_MCP_TOKEN=$valid_instance_token" "$stack/data/hermes/.env"
+printf '%s\n' opaque-fixture-token | run_manage "$stack" "$stack/opaque.out" set-n8n-instance-mcp-token
+grep -Fq 'N8N_INSTANCE_MCP_TOKEN=opaque-fixture-token' "$stack/data/hermes/.env"
+! grep -Fq "N8N_INSTANCE_MCP_TOKEN=$valid_instance_token" "$stack/data/hermes/.env"
 test "$(stat -c '%a' "$stack/data/hermes/.env")" = 600
-! grep -Fq eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature "$stack/valid.out"
+! grep -Fq "$valid_instance_token" "$stack/valid.out"
+! grep -Fq opaque-fixture-token "$stack/opaque.out"
 
 # An active Instance-mode replacement retains the validated new token and emits
 # precise recovery guidance if a later reconciliation stage fails.
