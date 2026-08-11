@@ -18,3 +18,10 @@ ACTIVE_STREAMS = Gauge("smart_router_active_streams", "Active streaming requests
 READINESS = Gauge("smart_router_readiness", "Readiness components", ["component"])
 LEARNED_INFERENCE_SECONDS = Histogram("smart_router_learned_inference_seconds", "Learned policy inference time")
 LEARNED_FALLBACKS = Counter("smart_router_learned_fallbacks_total", "Learned policy fallbacks", ["reason"])
+
+PROVIDER_HEALTH_SCORE = Gauge("smart_router_provider_health_score", "Provider/model health score 0-100", ["model"])
+PROVIDER_CIRCUIT_STATE = Gauge("smart_router_provider_circuit_state", "Circuit state: 0 closed, 0.5 half-open, 1 open", ["model"])
+PROVIDER_FALLBACKS = Counter("smart_router_provider_fallbacks_total", "Fallbacks caused by provider/model circuit state", ["model"])
+ACL_DENIES = Counter("smart_router_acl_denies_total", "Fine-grained ACL denials", ["resource_type", "permission"])
+SSO_LOGINS = Counter("smart_router_sso_logins_total", "SSO login attempts", ["provider", "status"])
+REDIS_READINESS = Gauge("smart_router_redis_readiness", "Redis shared-state readiness")

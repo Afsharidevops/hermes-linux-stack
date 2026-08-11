@@ -694,18 +694,28 @@ safe_update() {
   die "update and image rollback both failed readiness. Restore backup if needed: ${backup_path:-none}"
 }
 
+value_or() {
+  local key="$1" fallback="$2" value
+  value="$(env_value "$key")"
+  printf '%s' "${value:-$fallback}"
+}
+
 image_catalog() {
-  # env-key|default-ref. Keep this list aligned with docker-compose.yml.
-  cat <<'CATALOG'
-NINEROUTER_IMAGE|decolua/9router:latest
-HERMES_IMAGE|nousresearch/hermes-agent:latest
-EXECUTION_BROKER_IMAGE|afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed
-EXECUTION_SANDBOX_IMAGE|python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419
-SMART_ROUTER_IMAGE|afsharidevops/hermes-smart-router:0.1.0@sha256:4290667e8c90940a5dd97bcd6fd1575c0f1b822db507f9cc5076abe126708bef
-OPENWEBUI_IMAGE|ghcr.io/open-webui/open-webui:main
-N8N_IMAGE|n8nio/n8n:latest
-CADDY_IMAGE|caddy:2-alpine
-CATALOG
+  printf 'NINEROUTER_IMAGE|%s:%s\n' "$(value_or NINEROUTER_IMAGE_REPOSITORY decolua/9router)" "$(value_or NINEROUTER_IMAGE_TAG latest)"
+  printf 'HERMES_IMAGE|%s:%s
+' "$(value_or HERMES_IMAGE_REPOSITORY nousresearch/hermes-agent)" "$(value_or HERMES_IMAGE_TAG latest)"
+  printf 'SMART_ROUTER_IMAGE|%s:%s
+' "$(value_or SMART_ROUTER_IMAGE_REPOSITORY afsharidevops/hermes-smart-router)" "$(value_or SMART_ROUTER_IMAGE_TAG latest)"
+  printf 'OPENWEBUI_IMAGE|%s:%s
+' "$(value_or OPENWEBUI_IMAGE_REPOSITORY ghcr.io/open-webui/open-webui)" "$(value_or OPENWEBUI_IMAGE_TAG main)"
+  printf 'N8N_IMAGE|%s:%s
+' "$(value_or N8N_IMAGE_REPOSITORY n8nio/n8n)" "$(value_or N8N_IMAGE_TAG latest)"
+  printf 'EXECUTION_BROKER_IMAGE|%s
+' "$(value_or EXECUTION_BROKER_IMAGE afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed)"
+  printf 'EXECUTION_SANDBOX_IMAGE|%s
+' "$(value_or EXECUTION_SANDBOX_IMAGE python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419)"
+  printf 'CADDY_IMAGE|%s
+' "$(value_or CADDY_IMAGE caddy:2-alpine)"
 }
 
 lock_images() {
@@ -718,10 +728,10 @@ lock_images() {
   done
   ensure_configured
   init_docker
-  local tmp key default ref image_id digests resolved
+  local tmp key ref image_id digests resolved
   tmp="$(mktemp)"
-  while IFS='|' read -r key default; do
-    ref="$(env_value "$key")"; ref="${ref:-$default}"
+  while IFS='|' read -r key ref; do
+    [[ -n "$ref" ]] || continue
     log "resolving $key ($ref)" >&2
     "${DOCKER[@]}" pull "$ref" >/dev/null
     image_id="$("${DOCKER[@]}" image inspect --format '{{.Id}}' "$ref")"

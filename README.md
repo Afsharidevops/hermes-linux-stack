@@ -1,6 +1,6 @@
-# Hermes Linux Stack — 9router + Smart Router v0.5.1
+# Hermes Linux Stack — 9router + Smart Router v0.5.2
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.1** and **9router**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.2** and **9router**.
 
 > This is the **9router branch**.
 >
@@ -18,7 +18,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.1
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.2
                             │              │
 n8n / other clients ────────┘              │
                                            ├─ fast     → combo-fast
@@ -44,7 +44,7 @@ The repository intentionally keeps its routing backends separate.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.1
+          Smart Router v0.5.2
                   │
                   ▼
                9router
@@ -59,7 +59,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.1
+          Smart Router v0.5.2
                   │
                   ▼
               OmniRoute
@@ -78,7 +78,7 @@ Do not add OmniRoute to `main`, and do not add 9router to the OmniRoute branch.
 - Telegram bot/agent integration through Hermes
 - Numeric Telegram user allowlist
 - Optional Telegram home chat for cron results and notifications
-- Hermes Smart Router v0.5.1
+- Hermes Smart Router v0.5.2
 - OpenAI-compatible `auto` routing aliases
 - 9router provider/model gateway
 - Open WebUI integration
@@ -247,12 +247,12 @@ Verify:
 
 ---
 
-# Smart Router v0.5.1
+# Smart Router v0.5.2
 
 Published image:
 
 ```text
-afsharidevops/hermes-smart-router:0.5.1
+afsharidevops/hermes-smart-router:latest
 ```
 
 The Smart Router decides:
@@ -621,7 +621,7 @@ Typical defaults:
 | Hermes API | `127.0.0.1:8642` |
 | Hermes dashboard | `127.0.0.1:9119` |
 | n8n | `127.0.0.1:5678` |
-| Smart Router | Docker network only |
+| Smart Router | Docker network + loopback host binding by default |
 
 Telegram uses outbound polling and does not require an inbound Telegram port.
 
@@ -706,7 +706,7 @@ python -m pip install -e "./smart-router[dev]"
 pytest -q smart-router/tests
 ```
 
-Smart Router v0.5.1 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
+Smart Router v0.5.2 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
 
 ---
 
@@ -724,7 +724,7 @@ Expected version:
 ```json
 {
   "status": "ok",
-  "version": "0.5.0"
+  "version": "0.5.2"
 }
 ```
 
@@ -781,7 +781,7 @@ Verify:
 # Published Smart Router Image
 
 ```text
-afsharidevops/hermes-smart-router:0.5.1
+afsharidevops/hermes-smart-router:latest
 ```
 
 Platforms:
@@ -891,10 +891,33 @@ The v0.5 target scorecard is a roadmap figure, not measured performance:
 
 ---
 
-## Smart Router v0.5.1 control plane
+## Smart Router v0.5.2 control plane
 
 v0.5.1 adds the P0-P2 control-plane roadmap while preserving 9router as this branch's provider gateway. Open `http://127.0.0.1:8787/control/` by default for RBAC, virtual keys/quotas, dynamic routing profiles, provider discovery, budgets, policies, RAG/knowledge, memory, agents/teams, plugin registry, audit and system health.
 
 See `smart-router/V0.5.1-CONTROL-PLANE.md` before enabling production authentication or HA mode.
 
-Current v0.5.1 image: `afsharidevops/hermes-smart-router:0.5.1`.
+Default Smart Router image: `afsharidevops/hermes-smart-router:latest`; pin `SMART_ROUTER_IMAGE_TAG` in `.env` when you want a stable release.
+
+
+## Image tag policy (v0.5.2)
+
+Application images intentionally default to mutable tags so normal `docker compose pull` tracks upstream releases. You can pin any service later by changing only `.env`; Compose does not need to be edited.
+
+```env
+NINEROUTER_IMAGE_TAG=latest
+HERMES_IMAGE_TAG=latest
+SMART_ROUTER_IMAGE_TAG=latest
+OPENWEBUI_IMAGE_TAG=main
+N8N_IMAGE_TAG=latest
+```
+
+For example, replace one or more tag values with a version you have tested, then run:
+
+```bash
+docker compose --env-file .env pull
+docker compose --env-file .env up -d
+./manage.sh doctor
+```
+
+For a reproducible snapshot of currently resolved image digests, use `./manage.sh lock-images` and `./manage.sh verify-images`.

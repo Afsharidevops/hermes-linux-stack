@@ -4,6 +4,8 @@ import math
 import os
 from dataclasses import dataclass
 
+from .secrets_v52 import env_or_file
+
 
 @dataclass(frozen=True)
 class TierConfig:
@@ -60,7 +62,7 @@ class Settings:
         if preferred not in {"max_tokens", "max_completion_tokens"}:
             raise ValueError("SMART_ROUTER_PREFERRED_TOKEN_FIELD is invalid")
 
-        secret = os.getenv("SMART_ROUTER_HMAC_SECRET", "")
+        secret = env_or_file("SMART_ROUTER_HMAC_SECRET", "") or ""
         if (
             len(secret.strip()) < 32
             or secret.startswith("CHANGE_ME")
@@ -98,8 +100,8 @@ class Settings:
             policy=policy,
             upstream_base_url=upstream_base_url,
             upstream_health_url=upstream_health_url,
-            upstream_api_key=_optional_text("SMART_ROUTER_UPSTREAM_API_KEY"),
-            client_api_key=_optional_text("SMART_ROUTER_CLIENT_API_KEY"),
+            upstream_api_key=env_or_file("SMART_ROUTER_UPSTREAM_API_KEY"),
+            client_api_key=env_or_file("SMART_ROUTER_CLIENT_API_KEY"),
             database_path=os.getenv(
                 "SMART_ROUTER_DATABASE_PATH", "/data/router.sqlite3"
             ),

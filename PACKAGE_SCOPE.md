@@ -1,7 +1,7 @@
-# Package scope
+# Package scope — v0.5.2
 
-This ZIP is a self-contained enhanced deployment package for the requested Hermes -> Smart Router -> gateway path. It retains the current branch Compose topology and the relevant branch reference README, while replacing the Smart Router implementation and lightweight installer/manager with the v0.2 calibrated implementation in this archive.
+This ZIP is a self-contained enhanced deployment package for the `main` branch and its Hermes -> Smart Router -> **9router** path. The Smart Router source is intended to remain identical to the other supported gateway branch; gateway-specific behavior should be configuration rather than a second router implementation.
 
-The default profiles are gateway + Smart Router + Hermes + Open WebUI. Optional n8n/Caddy/execution services remain represented in Compose but are not enabled by default. The calibrated routing path does not require the optional execution plugin source.
+The default application image policy intentionally remains mutable (`latest`, and `main` for Open WebUI) at operator request. Repository/tag pairs are exposed in `.env.example`, so a stable version can later be pinned without editing `docker-compose.yml`.
 
-For a byte-for-byte preservation of every unrelated development helper from the upstream branch, apply the Smart Router/Compose/env changes from this archive on top of a normal Git checkout of the same branch. This package intentionally does not claim that unrelated helper scripts are exact copies of upstream.
+The package includes the v0.5.2 reliability/security foundation, operational scripts, HA Compose reference, and a Helm foundation. It does **not** claim completion of the entire long-range `plan5.2.md`; the precise implemented/open list is in `docs/HERMES-SMART-ROUTER-v0.5.2-IMPLEMENTATION-STATUS.md`.

@@ -1,21 +1,21 @@
-# Smart Router v0.2 implementation notes
+# Smart Router v0.5.2 implementation notes
 
-This package extends the `main`/9router topology without adding RouteLLM as a runtime dependency.
+This branch uses the shared Smart Router v0.5.2 implementation in front of **9router**.
 
 ## Data plane
 
-`Hermes / Open WebUI / n8n -> Smart Router -> 9router -> provider/model`
+`Hermes / Open WebUI / n8n -> Smart Router v0.5.2 -> 9router -> provider/model`
 
-The Smart Router proposes fast/standard/strong, enforces capability gates, applies session stickiness, and in route mode clamps output budgets. 9router remains responsible for model/combo/provider fallback.
+Smart Router owns deterministic capability floors, tier/profile selection, authentication/authorization, shared routing state, provider-health/circuit logic, budgets, outcome metadata, and control-plane policy. **9router** remains the delivery gateway and performs its provider/model delivery behavior.
 
-## Calibration rollout
+## v0.5.2 rollout
 
-1. Start with `SMART_ROUTER_MODE=observe` and `SMART_ROUTER_POLICY=heuristic`.
-2. Collect privacy-safe `data/smart-router/observations.jsonl` plus your external quality/cost labels.
-3. Build a labeled JSONL (see `smart-router/examples/labeled-workload.jsonl`).
-4. Run `./manage.sh router-calibrate PATH` and `./manage.sh router-report PATH`.
-5. Review `smart-router/policy/calibrated.json` in version control.
-6. Run `./manage.sh router-policy calibrated`; keep observe mode while validating.
-7. Finally run `./manage.sh router-mode route`.
+1. Run `./install.sh --no-start` and review `.env`.
+2. Keep `SMART_ROUTER_MODE=observe` while validating your gateway/model mappings.
+3. Run `./manage.sh doctor`.
+4. Start with `docker compose --env-file .env up -d` (or your normal profiles).
+5. Validate `/health`, `/ready`, `/router/info`, Open WebUI/Hermes access, and provider health.
+6. For HA, configure PostgreSQL + Redis and use the v0.5.2 HA reference Compose file; Redis sticky state is selected automatically when configured.
+7. Move to route/enforcement modes only after your own smoke, security, and benchmark gates pass.
 
-Capability gates remain authoritative regardless of calibrated scores.
+Capability gates remain authoritative regardless of calibrated or learned scores. See `docs/HERMES-SMART-ROUTER-v0.5.2-IMPLEMENTATION-STATUS.md` for the exact implemented/open boundary.

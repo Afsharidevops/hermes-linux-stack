@@ -1,11 +1,20 @@
-# Security notes for the calibrated router package
+# Security notes — Smart Router v0.5.2
 
-Keep `.env`, `data/hermes/.env`, gateway state, `data/smart-router/router.sqlite3`, observations, n8n credentials and execution secrets out of version control.
+Keep `.env`, `data/hermes/.env`, gateway state, Smart Router databases, observations, n8n credentials, generated backups, and execution secrets out of version control.
 
-Smart Router v0.2 deliberately keeps capability gates deterministic. A calibrated score can propose a tier but cannot downgrade past declared tool/vision/context requirements. Session identifiers are HMAC-pseudonymized before persistence.
+Smart Router v0.5.2 keeps deterministic capability floors authoritative. Health scoring, calibrated/adaptive signals, provider quality, and fallbacks cannot intentionally bypass tool, vision, context, policy, ACL, budget, or execution-approval constraints.
 
-Observation JSONL is designed for derived metadata only. Treat it as operational telemetry anyway: protect it with the same host access controls as other stack state. If you create calibration datasets containing full request bodies, keep those offline and private; prefer derived `features`/`facts` records.
+## Secure defaults in this package
 
-The router is internal-only in Compose. 9router dashboard/API and Open WebUI default to loopback bindings in `.env.example`. Do not publish them broadly without authentication, TLS/reverse proxy, firewall policy, and gateway-specific hardening.
+- Smart Router client authentication and control-plane authentication default to enabled.
+- Open WebUI signup defaults to disabled.
+- Public host bindings remain loopback-first unless the operator explicitly changes them.
+- Installer-generated secrets replace blank/`CHANGE_ME*` placeholders and are written to `.env` with restrictive permissions.
+- Supported `*_FILE` variables allow secret-file/Docker/Kubernetes secret mounting.
+- Control-plane status redacts database credentials and never returns configured secret values.
+- Execution profiles remain disabled until explicitly enabled; Docker execution verifies the host Docker socket GID instead of assuming a fixed group.
+- Execution brokers retain read-only/rootfs/capability restrictions from the existing security architecture.
 
-The optional execution services in the retained Compose file are high-trust features and remain disabled unless their profiles are explicitly selected. Review the upstream security documentation (`SECURITY.upstream.md` when present) before enabling them.
+Mutable application tags (`latest`/`main`) are retained by operator request. For stronger supply-chain reproducibility, pin `*_IMAGE_TAG` values in `.env`, run `./manage.sh lock-images`, commit only the non-secret lock metadata if appropriate, and verify with `./manage.sh verify-images` before an upgrade.
+
+OIDC, ACLs, Redis/PostgreSQL HA, RAG ingestion, plugin endpoints, and execution paths expand the attack surface. Enable only the components you need, terminate public traffic behind authenticated TLS, apply firewall/NetworkPolicy restrictions, and keep the security CI workflow passing. See `docs/HERMES-SMART-ROUTER-v0.5.2-IMPLEMENTATION-STATUS.md` for features that are not yet claimed production-complete.

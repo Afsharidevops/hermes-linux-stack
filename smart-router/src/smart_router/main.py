@@ -20,7 +20,7 @@ from .config import Settings
 from .control_plane import ControlPlane
 from .costs import CostLedger
 from .dashboard import dashboard_enabled, dashboard_response
-from .database import RouteStore
+from .database import create_route_store
 from .metrics import (
     ACTIVE_STREAMS,
     BUDGET_ENFORCEMENTS,
@@ -79,11 +79,11 @@ def create_app(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> Starlette:
     settings = settings or Settings.from_env()
-    store = RouteStore(settings)
+    store = create_route_store(settings)
     policy_runtime = build_policy_runtime(settings)
     observations = ObservationWriter(settings.observation_file)
     cost_ledger = CostLedger.from_env(default_database_path=settings.database_path)
-    control_plane = ControlPlane(settings)  # Hermes Smart Router v0.5.1 control-plane hook
+    control_plane = ControlPlane(settings)  # Hermes Smart Router v0.5.2 control-plane hook
     timeout = httpx.Timeout(
         connect=settings.connect_timeout_seconds,
         read=settings.read_timeout_seconds,
@@ -121,19 +121,32 @@ def create_app(
             upstream_ok = response.is_success
         except httpx.HTTPError:
             pass
+        control_db_ok = control_plane.db.ping()
+        redis_ok = control_plane.redis.ping()
         READINESS.labels("database").set(int(database_ok))
+        READINESS.labels("control_database").set(int(control_db_ok))
+        READINESS.labels("redis").set(int(redis_ok))
         READINESS.labels("upstream").set(int(upstream_ok))
-        ready_ok = database_ok and upstream_ok
+        ready_ok = database_ok and control_db_ok and upstream_ok and redis_ok
         return JSONResponse(
             {
                 "status": "ready" if ready_ok else "not-ready",
-                "components": {"database": database_ok, "upstream": upstream_ok},
+                "components": {"database": database_ok, "control_database": control_db_ok, "redis": redis_ok, "upstream": upstream_ok},
             },
             status_code=200 if ready_ok else 503,
         )
 
     async def metrics(_: Request) -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    async def router_info(_: Request) -> JSONResponse:
+        # Intentionally contains no credentials or mutable control-plane state.
+        return JSONResponse({
+            "version": __version__,
+            "mode": settings.mode,
+            "policy": settings.policy,
+            "control_plane": bool(control_plane.enabled),
+        })
     async def dashboard(request: Request) -> Response:
         # Static shell contains no telemetry; the JSON API remains authenticated.
         if not dashboard_enabled():
@@ -369,10 +382,23 @@ def create_app(
             logger.error(json.dumps({"event": "v51_control_telemetry_error", "reason": type(error).__name__}))
         return response
 
+    async def router_info(_: Request) -> Response:
+        return JSONResponse({
+            "version": __version__,
+            "mode": settings.mode,
+            "policy": settings.policy,
+            "control_plane": control_plane.enabled,
+            "ha_mode": control_plane.ha_mode,
+            "redis_enabled": control_plane.redis.enabled,
+            "sticky_backend": type(store).__name__,
+        }, headers={"Cache-Control": "no-store"})
+
     routes = [
         Route("/health", health),
         Route("/ready", ready),
         Route("/metrics", metrics),
+        Route("/router/info", router_info, methods=["GET"]),
+        Route("/router/policy", router_info, methods=["GET"]),  # v0.5.1 manage.sh compatibility
         Route("/dashboard", dashboard, methods=["GET"]),
         Route("/dashboard/api/summary", dashboard_summary, methods=["GET"]),
         Mount("/control", app=control_plane.app),

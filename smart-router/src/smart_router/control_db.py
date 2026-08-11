@@ -193,6 +193,72 @@ class RateCounter(Base):
     tokens: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class SchemaVersion(Base):
+    __tablename__ = "schema_versions"
+    component: Mapped[str] = mapped_column(String(80), primary_key=True)
+    version: Mapped[str] = mapped_column(String(40), default="0.5.2")
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class ExternalIdentity(Base):
+    __tablename__ = "v52_external_identities"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    subject: Mapped[str] = mapped_column(String(240), index=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    groups_json: Mapped[str] = mapped_column(Text, default="[]")
+    last_login_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class RevokedSession(Base):
+    __tablename__ = "v52_revoked_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[int] = mapped_column(Integer, default=0, index=True)
+
+
+class ACLRule(Base):
+    __tablename__ = "v52_acl_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subject_type: Mapped[str] = mapped_column(String(40), index=True)
+    subject_value: Mapped[str] = mapped_column(String(180), index=True)
+    resource_type: Mapped[str] = mapped_column(String(80), index=True)
+    resource_id: Mapped[str] = mapped_column(String(180), index=True)
+    permission: Mapped[str] = mapped_column(String(120), index=True)
+    effect: Mapped[str] = mapped_column(String(16), default="allow")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class ProviderHealthState(Base):
+    __tablename__ = "v52_provider_health"
+    model: Mapped[str] = mapped_column(String(240), primary_key=True)
+    state: Mapped[str] = mapped_column(String(30), default="HEALTHY", index=True)
+    total_requests: Mapped[int] = mapped_column(Integer, default=0)
+    successes: Mapped[int] = mapped_column(Integer, default=0)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ema_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    circuit_open_until: Mapped[float] = mapped_column(Float, default=0.0)
+    fallback_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_failure_at: Mapped[str] = mapped_column(String(40), default="")
+    last_success_at: Mapped[str] = mapped_column(String(40), default="")
+    last_recovery_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class OutcomeEvent(Base):
+    __tablename__ = "v52_outcome_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[str] = mapped_column(String(40), default=utcnow, index=True)
+    request_id: Mapped[str] = mapped_column(String(80), default="", index=True)
+    actor: Mapped[str] = mapped_column(String(160), default="anonymous", index=True)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    task_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    tool_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    execution_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fallback_required: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    manually_changed_tier: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
 class ControlDB:
     def __init__(self, url: str):
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
@@ -202,6 +268,14 @@ class ControlDB:
             with self.engine.begin() as conn:
                 conn.execute(text("PRAGMA journal_mode=WAL"))
                 conn.execute(text("PRAGMA busy_timeout=5000"))
+        with Session(self.engine) as session:
+            row = session.get(SchemaVersion, "smart-router-control")
+            if row is None:
+                session.add(SchemaVersion(component="smart-router-control", version="0.5.2"))
+            else:
+                row.version = "0.5.2"
+                row.updated_at = utcnow()
+            session.commit()
 
     @contextmanager
     def session(self) -> Iterator[Session]:
