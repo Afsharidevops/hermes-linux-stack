@@ -31,6 +31,7 @@ Commands:
   logs [hermes|omniroute|smart-router|webui|n8n|caddy]
                                 Follow all or one service's logs
   set-router-mode MODE          Set Smart Router mode to observe or route
+  uninstall [--purge]           Remove stack containers/network; optionally purge local runtime data
   doctor                        Validate files and show diagnostics
   configure                     Run the interactive installer again
   add-telegram-user ID          Add one numeric Telegram user ID
@@ -102,6 +103,57 @@ compose() {
 }
 ops() { "$ROOT_DIR/scripts/stack-ops.sh" "$@"; }
 
+uninstall_stack() {
+  local purge=false answer dir
+  case "${1:-}" in
+    "") ;;
+    --purge) purge=true ;;
+    *)
+      printf 'Usage: ./manage.sh uninstall [--purge]\n' >&2
+      return 2
+      ;;
+  esac
+
+  if [[ "$purge" == true ]]; then
+    printf '%s\n' 'WARNING: --purge permanently deletes local stack configuration, secrets, and runtime data.'
+    printf '%s\n' 'The Git/source directory and backups stored outside this repository are kept.'
+    read -r -p 'Type PURGE to continue: ' answer
+    [[ "$answer" == PURGE ]] || { printf 'Uninstall cancelled.\n'; return 0; }
+  else
+    printf '%s\n' 'This removes stack containers and the Compose network.'
+    printf '%s\n' 'Your .env, Hermes/n8n/OpenWebUI data, secrets, and source files will be kept.'
+    read -r -p 'Continue? [y/N]: ' answer
+    [[ "$answer" =~ ^[Yy]$ ]] || { printf 'Uninstall cancelled.\n'; return 0; }
+  fi
+
+  # Enable every Compose profile so services started under optional profiles are
+  # included even if COMPOSE_PROFILES has changed since installation.
+  compose --profile '*' down --remove-orphans
+  printf 'Stack containers and network removed.\n'
+
+  if [[ "$purge" == true ]]; then
+    rm -f -- "$ENV_FILE"
+
+    for dir in 9router caddy hermes n8n open-webui stack-secrets; do
+      if [[ -d "$ROOT_DIR/data/$dir" ]]; then
+        find "$ROOT_DIR/data/$dir" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf -- {} +
+      fi
+    done
+
+    rm -rf -- "$ROOT_DIR/data/smart-router"
+
+    if [[ -d "$ROOT_DIR/data/stack-state" ]]; then
+      find "$ROOT_DIR/data/stack-state" -mindepth 1 -maxdepth 1 ! -name 'ops.lock' -exec rm -rf -- {} +
+      : > "$ROOT_DIR/data/stack-state/ops.lock"
+    fi
+
+    printf '%s\n' 'Local stack configuration, secrets, and runtime data purged.'
+    printf '%s\n' 'Source files were kept. Run ./install.sh to install again.'
+  else
+    printf '%s\n' 'Local data was preserved. Run ./manage.sh start to bring the stack back.'
+  fi
+}
+
 valid_ids() { [[ "$1" =~ ^[0-9]+(,[0-9]+)*$ ]]; }
 
 interactive_menu() {
@@ -118,6 +170,7 @@ interactive_menu() {
     printf '%s\n' '7) Follow logs'
     printf '%s\n' '8) Reconfigure installation'
     printf '%s\n' '9) Change Smart Router mode'
+    printf '%s\n' '10) Uninstall stack'
     printf '%s\n' '0) Exit'
     read -r -p 'Choose: ' choice
     case "$choice" in
@@ -146,8 +199,23 @@ interactive_menu() {
         ;;
       8) exec "$ROOT_DIR/install.sh" ;;
       9)
+        printf '%s\n' '  observe - Analyze/log decisions without actively switching tiers'
+        printf '%s\n' '  route   - Actively route automatic requests across configured tiers'
         read -r -p 'Smart Router mode (observe/route) [observe]: ' value
         "$ROOT_DIR/manage.sh" set-router-mode "${value:-observe}"
+        ;;
+      10)
+        printf '%s\n' 'Uninstall options:'
+        printf '%s\n' '  1) Remove containers/network only (KEEP configuration and data)'
+        printf '%s\n' '  2) Remove containers/network AND PURGE local configuration/data/secrets'
+        printf '%s\n' '  0) Cancel'
+        read -r -p 'Choose: ' value
+        case "$value" in
+          1) "$ROOT_DIR/manage.sh" uninstall ;;
+          2) "$ROOT_DIR/manage.sh" uninstall --purge ;;
+          0|"") ;;
+          *) printf 'Unknown uninstall choice.\n' >&2 ;;
+        esac
         ;;
       0) return 0 ;;
       *) printf 'Unknown choice.\n' >&2 ;;
@@ -970,6 +1038,10 @@ check_hermes_file() {
 command="${1:-}"
 case "$command" in
   menu) interactive_menu ;;
+  uninstall)
+    shift
+    uninstall_stack "${1:-}"
+    ;;
   start) compose up -d --build ;;
   stop) compose stop ;;
   restart) compose restart ;;

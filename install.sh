@@ -751,7 +751,10 @@ esac
 if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; then
   printf '\nHermes Smart Router settings\n'
   printf '%s\n' '----------------------------'
-  smart_router_mode="$(prompt "Initial mode (observe is safest)" "$smart_router_mode")"
+  printf '%s\n' 'Available modes:'
+  printf '%s\n' '  observe - Analyze/log routing decisions without actively switching tiers (recommended first)'
+  printf '%s\n' '  route   - Actively route automatic requests across fast/standard/strong tiers'
+  smart_router_mode="$(prompt "Initial mode: observe or route" "$smart_router_mode")"
   [[ "$smart_router_mode" == observe || "$smart_router_mode" == route ]] \
     || die "Smart Router mode must be observe or route."
   smart_router_fast_model="$(prompt "Fast-tier OmniRoute model/alias" "$smart_router_fast_model")"

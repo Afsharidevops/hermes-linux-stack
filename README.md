@@ -652,6 +652,12 @@ Configure additional n8n integration deliberately rather than assuming `main` ma
 
 The current OmniRoute branch supports these `manage.sh` commands.
 
+Interactive menu:
+
+```bash
+./manage.sh menu
+```
+
 ## Stack lifecycle
 
 ```bash
@@ -660,6 +666,18 @@ The current OmniRoute branch supports these `manage.sh` commands.
 ./manage.sh restart
 ./manage.sh status
 ./manage.sh update
+```
+
+Safe uninstall (keeps local configuration/data):
+
+```bash
+./manage.sh uninstall
+```
+
+Destructive local-data purge (keeps source files and external backups):
+
+```bash
+./manage.sh uninstall --purge
 ```
 
 ## Logs
@@ -692,8 +710,8 @@ Specific services:
 ## Smart Router
 
 ```bash
-./manage.sh router-mode observe
-./manage.sh router-mode route
+./manage.sh set-router-mode observe
+./manage.sh set-router-mode route
 
 ./manage.sh router-policy heuristic
 ./manage.sh router-policy calibrated
