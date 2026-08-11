@@ -1,8 +1,8 @@
-# Security notes — Smart Router v0.5.2
+# Security notes — Smart Router v0.5.3
 
 Keep `.env`, `data/hermes/.env`, gateway state, Smart Router databases, observations, n8n credentials, generated backups, and execution secrets out of version control.
 
-Smart Router v0.5.2 keeps deterministic capability floors authoritative. Health scoring, calibrated/adaptive signals, provider quality, and fallbacks cannot intentionally bypass tool, vision, context, policy, ACL, budget, or execution-approval constraints.
+Smart Router v0.5.3 keeps deterministic capability floors authoritative. Health scoring, calibrated/adaptive signals, provider quality, and fallbacks cannot intentionally bypass tool, vision, context, policy, ACL, budget, or execution-approval constraints.
 
 ## Secure defaults in this package
 

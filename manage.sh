@@ -19,77 +19,62 @@ trap cleanup_temp_secrets EXIT
 
 usage() {
   cat <<'EOF'
-Usage: ./manage.sh COMMAND [ARGUMENT]
+Hermes Linux Stack Manager v0.5.3
 
-Commands:
-  menu                          Open the interactive server-management menu
-  start                         Start selected services
-  stop                          Stop selected services
-  restart                       Restart selected services
-  update                        Pull current official images and recreate
-  status                        Show container status
-  logs [hermes|omniroute|smart-router|webui|n8n|caddy]
-                                Follow all or one service's logs
-  set-router-mode MODE          Set Smart Router mode to observe or route
-  router-status                 Show v0.5.2 router mode/policy/features and URLs
-  router-access [--show-secrets] Show dashboard/control URLs and local access credentials
-  router-summary [HOURS]        Show authenticated dashboard telemetry summary
-  router-routes                 Show Control Plane route profiles
-  router-provider-health        Show v0.5.2 provider/model health and circuit state
-  router-system                 Show Control Plane system/feature state
-  uninstall [--purge]           Remove stack containers/network; optionally purge local runtime data
-  doctor                        Validate files and show diagnostics
-  configure                     Run the interactive installer again
-  add-telegram-user ID          Add one numeric Telegram user ID
-  set-telegram-users ID1,ID2    Replace the complete Telegram allowlist
-  show-telegram-users           Display the current Telegram allowlist
-  set-backend-api-key KEY       Update Hermes's omniroute/OpenAI endpoint key
-  restart-hermes                Recreate Hermes so config and MCP tools reload
-  set-agent-max-turns N         Set the agent iteration budget (10-500; 90 recommended)
-  set-upstream-terminal STATE   Enable or disable upstream terminal/code_execution
-  execution-status              Show execution features, users, and SSH profiles
-  enable-execution FEATURE      Enable sandbox, ssh, docker, or all
-  disable-execution FEATURE     Disable sandbox, ssh, docker, or all
-  set-execution-users IDS       Replace execution users (Telegram allowlist subset)
-  add-execution-user ID         Add one execution user
-  remove-execution-user ID      Remove one execution user
-  add-ssh-profile NAME          Create/import and pin one SSH profile
-  verify-ssh-profile NAME       Verify pinned host key and SSH access
-  set-ssh-profile-password NAME Rotate one password profile credential
-  remove-ssh-profile NAME       Remove one local SSH profile
-  set-execution-approval-bot-token Silently configure the dedicated approval bot token
-  rotate-execution-broker-secret Rotate control secret and revoke pending operations
-  purge-execution               Delete execution state and SSH keys after confirmation
-  n8n-menu                      Open interactive n8n provisioning/MCP management
-  n8n-status                    Show n8n provisioning/MCP status without revealing secrets
-  set-n8n-api-key               Validate and securely store an owner-created API key
-  set-n8n-instance-mcp-token    Validate/store an n8n-generated Instance MCP token
-  remove-n8n-instance-mcp-token Remove a stored Instance token when mode is not instance
-  set-n8n-mcp-mode MODE         Select instance, trigger, or off
-  bootstrap-n8n                 Reconcile hosted chat and the selected MCP mode
-  reconcile-n8n                 Reconcile existing stack-owned n8n objects
-  verify-n8n                    Verify hosted chat and the selected MCP mode
-  rotate-n8n-trigger-token      Atomically rotate the Trigger-mode bearer credential
-  rotate-n8n-token              Compatibility alias for Trigger-token rotation
-  remove-n8n-bootstrap-key      Remove the stored owner API key, retaining state
-  health [--json]               v0.5.2 per-service health
-  version                       Show stack/component versions
-  backup [options]              Create stack backup via stack-ops
-  backup-list [options]         List backups
-  restore ARCHIVE [options]     Restore a backup
-  rollback [STATE_ID]           Roll back update state
-  lock-images                   Pin current image digests
-  verify-images                 Verify pinned image policy
-  router-policy POLICY          heuristic, calibrated, or learned
-  router-info                   Show Smart Router v0.5.2 info
-  router-calibrate FILE         Build calibrated policy from labeled JSONL
-  router-report FILE            Evaluate policy against labeled JSONL
-  router-replay FILE [OUT]      Replay requests offline
+Usage:
+  ./manage.sh                 Open the interactive manager
+  ./manage.sh menu            Open the interactive manager
+  ./manage.sh help            Show this grouped command reference
+
+Interactive groups:
+  services                    Containers, status, start/stop/restart, logs
+  router                      Smart Router dashboard, routing, health, policy
+  hermes                      Hermes Agent, Telegram, API and agent settings
+  n8n                         n8n provisioning and MCP integration
+  execution                   Sandbox, Docker execution, SSH and approvals
+  maintenance                 Update, backups, restore and rollback
+  security                    Diagnostics, image integrity and access info
+
+Common direct commands:
+  status                      Show container status
+  health [--json]             Show per-service health
+  logs [SERVICE]              Follow logs (hermes/omniroute/smart-router/webui/n8n/caddy)
+  configure                   Re-run the interactive installer
+  uninstall [--purge]         Remove containers; --purge also removes local runtime data
+
+Smart Router automation:
+  set-router-mode MODE        observe | route
+  router-policy POLICY        heuristic | calibrated | learned
+  router-status               Mode, policy, active features and URLs
+  router-access [--show-secrets]
+                              Dashboard/control URLs and local credentials
+  router-summary [HOURS]      Authenticated telemetry summary
+  router-routes               Route profiles
+  router-provider-health      Provider/model health and circuit state
+  router-system               Control Plane system/feature state
+  router-info                 Runtime router information
+  router-calibrate FILE       Build calibrated policy from labeled JSONL
+  router-report FILE          Evaluate policy against labeled JSONL
+  router-replay FILE [OUT]    Replay requests offline
+
+n8n automation:
+  n8n-status                  Provisioning/MCP status without secrets
+  set-n8n-api-key             Store owner API key
+  set-n8n-instance-mcp-token  Store/validate Instance MCP token
+  set-n8n-mcp-mode MODE       instance | trigger | off
+  bootstrap-n8n               Bootstrap/reconcile managed n8n objects
+  reconcile-n8n               Reconcile managed n8n objects
+  verify-n8n                  Verify hosted chat and MCP integration
+  rotate-n8n-trigger-token    Rotate Trigger-mode bearer token
+
+Advanced commands remain backward compatible. Use the interactive groups for
+normal administration; use direct commands for automation and scripts.
 EOF
 }
 
 case "${1:-}" in
-  -h|--help|help|"") usage; exit 0 ;;
+  -h|--help|help) usage; exit 0 ;;
+  "") set -- menu ;;
 esac
 
 [[ -f "$ENV_FILE" ]] || {
@@ -200,102 +185,311 @@ pretty_json() {
   python3 -m json.tool 2>/dev/null || cat
 }
 
-interactive_menu() {
-  local choice value service
+menu_title() {
+  printf '\n\033[1;36m%s\033[0m\n' "$1"
+  printf '%s\n' '============================================================'
+}
+
+menu_pause() {
+  [[ -r /dev/tty ]] || return 0
+  read -r -p 'Press Enter to continue...' _ </dev/tty || true
+}
+
+services_menu() {
+  local choice service
   while true; do
-    printf '\nHermes Linux Stack Manager\n'
-    printf '%s\n' '=========================='
-    printf '%s\n' '1) Service status'
-    printf '%s\n' '2) Show Telegram users'
-    printf '%s\n' '3) Add Telegram user'
-    printf '%s\n' '4) Replace Telegram users'
-    printf '%s\n' '5) Restart services'
-    printf '%s\n' '6) Update official images'
-    printf '%s\n' '7) Follow logs'
-    printf '%s\n' '8) Reconfigure installation'
-    printf '%s\n' '9) Smart Router v0.5.2 management'
-    printf '%s\n' '10) n8n provisioning / MCP management'
-    printf '%s\n' '11) Uninstall stack'
-    printf '%s\n' '0) Exit'
-    read -r -p 'Choose: ' choice
-    case "$choice" in
-      1) "$ROOT_DIR/manage.sh" status ;;
-      2) "$ROOT_DIR/manage.sh" show-telegram-users ;;
-      3)
-        read -r -p 'Numeric Telegram user ID: ' value
-        "$ROOT_DIR/manage.sh" add-telegram-user "$value"
-        ;;
-      4)
-        read -r -p 'Complete comma-separated ID list: ' value
-        "$ROOT_DIR/manage.sh" set-telegram-users "$value"
-        ;;
-      5) "$ROOT_DIR/manage.sh" restart ;;
+    menu_title 'Services & Logs'
+    printf '%s\n' '1) Status                 Show all containers and ports'
+    printf '%s\n' '2) Health                 Run v0.5.3 service health checks'
+    printf '%s\n' '3) Start                  Start selected stack services'
+    printf '%s\n' '4) Stop                   Stop running stack services'
+    printf '%s\n' '5) Restart                Restart running stack services'
+    printf '%s\n' '6) Follow logs            Choose one service or all'
+    printf '%s\n' '0) Back'
+    read -r -p 'Choose [0]: ' choice
+    case "${choice:-0}" in
+      1) "$ROOT_DIR/manage.sh" status; menu_pause ;;
+      2) "$ROOT_DIR/manage.sh" health; menu_pause ;;
+      3) "$ROOT_DIR/manage.sh" start; menu_pause ;;
+      4) "$ROOT_DIR/manage.sh" stop; menu_pause ;;
+      5) "$ROOT_DIR/manage.sh" restart; menu_pause ;;
       6)
-        read -r -p 'Pull and recreate selected services? [y/N]: ' value
-        [[ "$value" =~ ^[Yy]$ ]] && "$ROOT_DIR/manage.sh" update
-        ;;
-      7)
-        read -r -p 'Service (all/hermes/omniroute/smart-router/webui/n8n/caddy) [all]: ' service
-        if [[ -n "$service" && "$service" != all ]]; then
-          "$ROOT_DIR/manage.sh" logs "$service" || true
-        else
-          "$ROOT_DIR/manage.sh" logs || true
-        fi
-        ;;
-      8) exec "$ROOT_DIR/install.sh" ;;
-      9)
-        while true; do
-          printf '\nSmart Router v0.5.2\n'
-          printf '%s\n' '-------------------'
-          printf '%s\n' '1) Status, active features, and URLs'
-          printf '%s\n' '2) Dashboard / Control Plane access'
-          printf '%s\n' '3) Telemetry dashboard summary'
-          printf '%s\n' '4) Route profiles (fast/standard/strong/coding/vision)'
-          printf '%s\n' '5) Provider/model health + circuit state'
-          printf '%s\n' '6) Control Plane system state'
-          printf '%s\n' '7) Change router mode'
-          printf '%s\n' '8) Change routing policy'
-          printf '%s\n' '0) Back'
-          read -r -p 'Choose: ' value
-          case "$value" in
-            1) "$ROOT_DIR/manage.sh" router-status ;;
-            2) "$ROOT_DIR/manage.sh" router-access ;;
-            3) read -r -p 'Hours [24]: ' service; "$ROOT_DIR/manage.sh" router-summary "${service:-24}" ;;
-            4) "$ROOT_DIR/manage.sh" router-routes ;;
-            5) "$ROOT_DIR/manage.sh" router-provider-health ;;
-            6) "$ROOT_DIR/manage.sh" router-system ;;
-            7)
-              printf '%s\n' '  observe - evaluate model=auto decisions, but dispatch through SMART_ROUTER_OBSERVE_MODEL'
-              printf '%s\n' '  route   - apply Smart Router route profiles to model=auto requests; explicit upstream models pass through'
-              read -r -p 'Smart Router mode (observe/route) [observe]: ' service
-              "$ROOT_DIR/manage.sh" set-router-mode "${service:-observe}"
-              ;;
-            8)
-              printf '%s\n' '  heuristic  - built-in deterministic policy (safe default)'
-              printf '%s\n' '  calibrated - use smart-router/policy/calibrated.json'
-              printf '%s\n' '  learned    - use trained learned-v4 artifacts with configured fallback'
-              read -r -p 'Policy (heuristic/calibrated/learned) [heuristic]: ' service
-              "$ROOT_DIR/manage.sh" router-policy "${service:-heuristic}"
-              ;;
-            0|'') break ;;
-            *) printf 'Unknown Smart Router choice.\n' >&2 ;;
-          esac
-        done
-        ;;
-      10) "$ROOT_DIR/manage.sh" n8n-menu ;;
-      11)
-        printf '%s\n' 'Uninstall options:'
-        printf '%s\n' '  1) Remove containers/network only (KEEP configuration and data)'
-        printf '%s\n' '  2) Remove containers/network AND PURGE local configuration/data/secrets'
-        printf '%s\n' '  0) Cancel'
-        read -r -p 'Choose: ' value
-        case "$value" in
-          1) "$ROOT_DIR/manage.sh" uninstall ;;
-          2) "$ROOT_DIR/manage.sh" uninstall --purge ;;
-          0|"") ;;
-          *) printf 'Unknown uninstall choice.\n' >&2 ;;
+        printf '%s\n' 'Log choices:'
+        printf '%s\n' '  1) all          2) Hermes       3) backend gateway'
+        printf '%s\n' '  4) Smart Router 5) Open WebUI   6) n8n          7) Caddy'
+        read -r -p 'Choose [1]: ' service
+        case "${service:-1}" in
+          1) "$ROOT_DIR/manage.sh" logs || true ;;
+          2) "$ROOT_DIR/manage.sh" logs hermes || true ;;
+          3) "$ROOT_DIR/manage.sh" logs omniroute || true ;;
+          4) "$ROOT_DIR/manage.sh" logs smart-router || true ;;
+          5) "$ROOT_DIR/manage.sh" logs webui || true ;;
+          6) "$ROOT_DIR/manage.sh" logs n8n || true ;;
+          7) "$ROOT_DIR/manage.sh" logs caddy || true ;;
+          *) printf 'Unknown log choice.\n' >&2 ;;
         esac
         ;;
+      0) return 0 ;;
+      *) printf 'Unknown choice.\n' >&2 ;;
+    esac
+  done
+}
+
+router_menu() {
+  local choice value file
+  while true; do
+    menu_title 'Hermes Smart Router v0.5.3'
+    printf '%s\n' 'Observe & access'
+    printf '%s\n' '  1) Status & URLs            Mode, policy, features and endpoints'
+    printf '%s\n' '  2) Dashboard / Control      URLs and credential guidance'
+    printf '%s\n' '  3) Telemetry summary         Choose 1h / 24h / 7d / 30d'
+    printf '%s\n' '  4) Provider health           Health scores and circuit state'
+    printf '%s\n' 'Routing'
+    printf '%s\n' '  5) Route profiles            fast / standard / strong / coding / vision'
+    printf '%s\n' '  6) Change mode               observe | route'
+    printf '%s\n' '  7) Change policy             heuristic | calibrated | learned'
+    printf '%s\n' '  8) Control Plane system      DB, HA, auth, OIDC and upstream state'
+    printf '%s\n' 'Evaluate / tune'
+    printf '%s\n' '  9) Router runtime info'
+    printf '%s\n' ' 10) Calibrate from JSONL'
+    printf '%s\n' ' 11) Evaluate/report JSONL'
+    printf '%s\n' ' 12) Replay requests JSONL'
+    printf '%s\n' '  0) Back'
+    read -r -p 'Choose [0]: ' choice
+    case "${choice:-0}" in
+      1) "$ROOT_DIR/manage.sh" router-status; menu_pause ;;
+      2) "$ROOT_DIR/manage.sh" router-access; menu_pause ;;
+      3)
+        printf '%s\n' 'Telemetry window: 1) 1 hour  2) 24 hours  3) 7 days  4) 30 days'
+        read -r -p 'Choose [2]: ' value
+        case "${value:-2}" in 1) value=1;; 2) value=24;; 3) value=168;; 4) value=720;; *) printf 'Unknown window.\n' >&2; continue;; esac
+        "$ROOT_DIR/manage.sh" router-summary "$value"; menu_pause
+        ;;
+      4) "$ROOT_DIR/manage.sh" router-provider-health; menu_pause ;;
+      5) "$ROOT_DIR/manage.sh" router-routes; menu_pause ;;
+      6)
+        printf '%s\n' 'Mode choices:'
+        printf '%s\n' '  1) observe  Evaluate model=auto decisions but dispatch through the observe model'
+        printf '%s\n' '  2) route    Apply route profiles to model=auto requests'
+        printf '%s\n' 'Explicit upstream model names pass through in both modes.'
+        read -r -p 'Choose [1]: ' value
+        case "${value:-1}" in 1) value=observe;; 2) value=route;; *) printf 'Unknown mode.\n' >&2; continue;; esac
+        "$ROOT_DIR/manage.sh" set-router-mode "$value"; menu_pause
+        ;;
+      7)
+        printf '%s\n' 'Policy choices:'
+        printf '%s\n' '  1) heuristic   Built-in deterministic policy; safest default'
+        printf '%s\n' '  2) calibrated  Uses policy/calibrated.json from your labeled data'
+        printf '%s\n' '  3) learned     Uses trained learned-routing artifacts with fallback'
+        read -r -p 'Choose [1]: ' value
+        case "${value:-1}" in 1) value=heuristic;; 2) value=calibrated;; 3) value=learned;; *) printf 'Unknown policy.\n' >&2; continue;; esac
+        "$ROOT_DIR/manage.sh" router-policy "$value"; menu_pause
+        ;;
+      8) "$ROOT_DIR/manage.sh" router-system; menu_pause ;;
+      9) "$ROOT_DIR/manage.sh" router-info; menu_pause ;;
+      10)
+        read -r -p 'Labeled calibration JSONL path: ' file
+        [[ -n "$file" ]] && "$ROOT_DIR/manage.sh" router-calibrate "$file"
+        menu_pause
+        ;;
+      11)
+        read -r -p 'Labeled evaluation JSONL path: ' file
+        [[ -n "$file" ]] && "$ROOT_DIR/manage.sh" router-report "$file"
+        menu_pause
+        ;;
+      12)
+        read -r -p 'Requests JSONL path: ' file
+        [[ -n "$file" ]] && "$ROOT_DIR/manage.sh" router-replay "$file"
+        menu_pause
+        ;;
+      0) return 0 ;;
+      *) printf 'Unknown Smart Router choice.\n' >&2 ;;
+    esac
+  done
+}
+
+hermes_menu() {
+  local choice value
+  while true; do
+    menu_title 'Hermes Agent & Telegram'
+    printf '%s\n' 'Agent'
+    printf '%s\n' '  1) Restart Hermes Agent'
+    printf '%s\n' '  2) Set max agent turns        10-500; 90 recommended'
+    printf '%s\n' '  3) Upstream terminal tools    enable | disable'
+    printf '%s\n' '  4) Update backend API key'
+    printf '%s\n' 'Telegram'
+    printf '%s\n' '  5) Show allowed users'
+    printf '%s\n' '  6) Add allowed user'
+    printf '%s\n' '  7) Replace allowed users'
+    printf '%s\n' '0) Back'
+    read -r -p 'Choose [0]: ' choice
+    case "${choice:-0}" in
+      1) "$ROOT_DIR/manage.sh" restart-hermes; menu_pause ;;
+      2) read -r -p 'Max turns [90]: ' value; "$ROOT_DIR/manage.sh" set-agent-max-turns "${value:-90}"; menu_pause ;;
+      3)
+        printf '%s\n' '1) enable terminal/code_execution  2) disable terminal/code_execution'
+        read -r -p 'Choose [2]: ' value
+        case "${value:-2}" in 1) value=enable;; 2) value=disable;; *) printf 'Unknown choice.\n' >&2; continue;; esac
+        "$ROOT_DIR/manage.sh" set-upstream-terminal "$value"; menu_pause
+        ;;
+      4)
+        read -r -s -p 'New backend API key: ' value; printf '\n'
+        [[ -n "$value" ]] && "$ROOT_DIR/manage.sh" set-backend-api-key "$value"
+        menu_pause
+        ;;
+      5) "$ROOT_DIR/manage.sh" show-telegram-users; menu_pause ;;
+      6) read -r -p 'Numeric Telegram user ID: ' value; "$ROOT_DIR/manage.sh" add-telegram-user "$value"; menu_pause ;;
+      7) read -r -p 'Complete comma-separated ID list: ' value; "$ROOT_DIR/manage.sh" set-telegram-users "$value"; menu_pause ;;
+      0) return 0 ;;
+      *) printf 'Unknown Hermes choice.\n' >&2 ;;
+    esac
+  done
+}
+
+execution_menu() {
+  local choice value feature name
+  while true; do
+    menu_title 'Execution, Sandbox & SSH'
+    printf '%s\n' '1) Execution status'
+    printf '%s\n' '2) Enable feature             sandbox | ssh | docker | all'
+    printf '%s\n' '3) Disable feature            sandbox | ssh | docker | all'
+    printf '%s\n' '4) Set execution users'
+    printf '%s\n' '5) Add execution user'
+    printf '%s\n' '6) Remove execution user'
+    printf '%s\n' '7) Add SSH profile'
+    printf '%s\n' '8) Verify SSH profile'
+    printf '%s\n' '9) Change SSH profile password'
+    printf '%s\n' '10) Remove SSH profile'
+    printf '%s\n' '11) Configure approval bot token'
+    printf '%s\n' '12) Rotate execution broker secret'
+    printf '%s\n' '13) PURGE execution state / SSH keys'
+    printf '%s\n' '0) Back'
+    read -r -p 'Choose [0]: ' choice
+    case "${choice:-0}" in
+      1) "$ROOT_DIR/manage.sh" execution-status; menu_pause ;;
+      2|3)
+        printf '%s\n' 'Feature: 1) sandbox  2) ssh  3) docker  4) all'
+        read -r -p 'Choose [1]: ' value
+        case "${value:-1}" in 1) feature=sandbox;; 2) feature=ssh;; 3) feature=docker;; 4) feature=all;; *) printf 'Unknown feature.\n' >&2; continue;; esac
+        if [[ "$choice" == 2 ]]; then "$ROOT_DIR/manage.sh" enable-execution "$feature"; else "$ROOT_DIR/manage.sh" disable-execution "$feature"; fi
+        menu_pause
+        ;;
+      4) read -r -p 'Comma-separated Telegram IDs: ' value; "$ROOT_DIR/manage.sh" set-execution-users "$value"; menu_pause ;;
+      5) read -r -p 'Telegram ID: ' value; "$ROOT_DIR/manage.sh" add-execution-user "$value"; menu_pause ;;
+      6) read -r -p 'Telegram ID: ' value; "$ROOT_DIR/manage.sh" remove-execution-user "$value"; menu_pause ;;
+      7) read -r -p 'SSH profile name: ' name; "$ROOT_DIR/manage.sh" add-ssh-profile "$name"; menu_pause ;;
+      8) read -r -p 'SSH profile name: ' name; "$ROOT_DIR/manage.sh" verify-ssh-profile "$name"; menu_pause ;;
+      9) read -r -p 'SSH profile name: ' name; "$ROOT_DIR/manage.sh" set-ssh-profile-password "$name"; menu_pause ;;
+      10) read -r -p 'SSH profile name: ' name; "$ROOT_DIR/manage.sh" remove-ssh-profile "$name"; menu_pause ;;
+      11) "$ROOT_DIR/manage.sh" set-execution-approval-bot-token; menu_pause ;;
+      12) "$ROOT_DIR/manage.sh" rotate-execution-broker-secret; menu_pause ;;
+      13) "$ROOT_DIR/manage.sh" purge-execution; menu_pause ;;
+      0) return 0 ;;
+      *) printf 'Unknown execution choice.\n' >&2 ;;
+    esac
+  done
+}
+
+maintenance_menu() {
+  local choice value
+  while true; do
+    menu_title 'Maintenance, Backup & Recovery'
+    printf '%s\n' '1) Update official images and recreate services'
+    printf '%s\n' '2) Create backup'
+    printf '%s\n' '3) List backups'
+    printf '%s\n' '4) Restore backup archive'
+    printf '%s\n' '5) Roll back last update/state'
+    printf '%s\n' '6) Version information'
+    printf '%s\n' '0) Back'
+    read -r -p 'Choose [0]: ' choice
+    case "${choice:-0}" in
+      1) read -r -p 'Pull and recreate selected services? [y/N]: ' value; [[ "$value" =~ ^[Yy]$ ]] && "$ROOT_DIR/manage.sh" update; menu_pause ;;
+      2) "$ROOT_DIR/manage.sh" backup; menu_pause ;;
+      3) "$ROOT_DIR/manage.sh" backup-list; menu_pause ;;
+      4) read -r -p 'Backup archive path: ' value; [[ -n "$value" ]] && "$ROOT_DIR/manage.sh" restore "$value"; menu_pause ;;
+      5) read -r -p 'State ID (Enter = latest): ' value; if [[ -n "$value" ]]; then "$ROOT_DIR/manage.sh" rollback "$value"; else "$ROOT_DIR/manage.sh" rollback; fi; menu_pause ;;
+      6) "$ROOT_DIR/manage.sh" version; menu_pause ;;
+      0) return 0 ;;
+      *) printf 'Unknown maintenance choice.\n' >&2 ;;
+    esac
+  done
+}
+
+security_menu() {
+  local choice
+  while true; do
+    menu_title 'Security & Integrity'
+    printf '%s\n' '1) Doctor / diagnostics'
+    printf '%s\n' '2) Lock current image digests'
+    printf '%s\n' '3) Verify pinned image policy'
+    printf '%s\n' '4) Smart Router access guidance'
+    printf '%s\n' '5) Reveal Smart Router local secrets (confirmation required)'
+    printf '%s\n' '0) Back'
+    read -r -p 'Choose [0]: ' choice
+    case "${choice:-0}" in
+      1) "$ROOT_DIR/manage.sh" doctor; menu_pause ;;
+      2) "$ROOT_DIR/manage.sh" lock-images; menu_pause ;;
+      3) "$ROOT_DIR/manage.sh" verify-images; menu_pause ;;
+      4) "$ROOT_DIR/manage.sh" router-access; menu_pause ;;
+      5) "$ROOT_DIR/manage.sh" router-access --show-secrets; menu_pause ;;
+      0) return 0 ;;
+      *) printf 'Unknown security choice.\n' >&2 ;;
+    esac
+  done
+}
+
+uninstall_menu() {
+  local value
+  menu_title 'Uninstall'
+  printf '%s\n' '1) Remove containers/network only'
+  printf '%s\n' '   KEEP .env, secrets, Hermes/n8n/OpenWebUI data and source files.'
+  printf '%s\n' '2) PURGE local runtime data and secrets'
+  printf '%s\n' '   Source files and external backups are kept; PURGE confirmation is required.'
+  printf '%s\n' '0) Cancel'
+  read -r -p 'Choose [0]: ' value
+  case "${value:-0}" in
+    1) "$ROOT_DIR/manage.sh" uninstall ;;
+    2) "$ROOT_DIR/manage.sh" uninstall --purge ;;
+    0) ;;
+    *) printf 'Unknown uninstall choice.\n' >&2 ;;
+  esac
+}
+
+interactive_menu() {
+  local choice
+  while true; do
+    menu_title 'Hermes Linux Stack Manager v0.5.3'
+    printf '%s\n' 'Quick administration — choose a group; direct CLI commands still work.'
+    printf '\n%s\n' '1) Overview & health          Status, health, version, diagnostics'
+    printf '%s\n'   '2) Services & logs            Start/stop/restart and service logs'
+    printf '%s\n'   '3) Smart Router               Routing, dashboard, profiles, policy, health'
+    printf '%s\n'   '4) Hermes Agent & Telegram    Agent and messaging settings'
+    printf '%s\n'   '5) n8n & MCP                  Provisioning, Instance MCP, Trigger MCP'
+    printf '%s\n'   '6) Execution & SSH            Sandbox, Docker, SSH profiles, approvals'
+    printf '%s\n'   '7) Maintenance & recovery     Updates, backup, restore, rollback'
+    printf '%s\n'   '8) Security & integrity       Doctor, image pins, access credentials'
+    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.3 wizard again'
+    printf '%s\n'   '10) Uninstall                 Safe remove or explicit purge'
+    printf '%s\n'   '0) Exit'
+    read -r -p 'Choose [0]: ' choice
+    case "${choice:-0}" in
+      1)
+        "$ROOT_DIR/manage.sh" status
+        printf '\n'
+        "$ROOT_DIR/manage.sh" health || true
+        printf '\n'
+        "$ROOT_DIR/manage.sh" version || true
+        menu_pause
+        ;;
+      2) services_menu ;;
+      3) router_menu ;;
+      4) hermes_menu ;;
+      5) n8n_menu ;;
+      6) execution_menu ;;
+      7) maintenance_menu ;;
+      8) security_menu ;;
+      9) exec "$ROOT_DIR/install.sh" ;;
+      10) uninstall_menu ;;
       0) return 0 ;;
       *) printf 'Unknown choice.\n' >&2 ;;
     esac
@@ -1210,7 +1404,13 @@ check_hermes_file() {
 command="${1:-}"
 case "$command" in
   menu) interactive_menu ;;
-  n8n-menu) n8n_menu ;;
+  services|services-menu) services_menu ;;
+  router|router-menu) router_menu ;;
+  hermes|hermes-menu) hermes_menu ;;
+  n8n|n8n-menu) n8n_menu ;;
+  execution|execution-menu) execution_menu ;;
+  maintenance|maintenance-menu) maintenance_menu ;;
+  security|security-menu) security_menu ;;
   n8n-status) n8n_status ;;
   uninstall)
     shift
@@ -2161,7 +2361,7 @@ PY
       exit 1
     fi
     base="$(router_local_base_url)"
-    printf 'Smart Router v0.5.2 stack integration\n'
+    printf 'Smart Router v0.5.3 stack integration\n'
     printf '  image: %s:%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_REPOSITORY)" "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_TAG)"
     printf '  base URL: %s\n' "$base"
     printf '  OpenAI API: %s/v1\n' "$base"
@@ -2241,7 +2441,7 @@ PY
     ;;
   router-replay)
     dataset="${2:-}"; [[ -f "$dataset" ]] || { printf 'Requests JSONL file required\n' >&2; exit 2; }
-    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.2.jsonl}"
+    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.3.jsonl}"
     dataset="$(cd "$(dirname "$dataset")" && pwd)/$(basename "$dataset")"; mkdir -p "$(dirname "$output")"; touch "$output"; output="$(cd "$(dirname "$output")" && pwd)/$(basename "$output")"
     compose run --rm --no-deps -v "$dataset:/work/input.jsonl:ro" -v "$output:/work/output.jsonl" smart-router python -m smart_router.eval.replay /work/input.jsonl -o /work/output.jsonl
     ;;

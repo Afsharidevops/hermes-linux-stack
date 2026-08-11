@@ -455,7 +455,7 @@ profile_enabled() {
   [[ ",$configured," == *",$profile,"* ]]
 }
 
-printf '\nHermes Linux Stack v0.5.2 Easy Installer\n'
+printf '\nHermes Linux Stack v0.5.3 Easy Installer\n'
 printf '%s\n' '================================'
 lan_ip="$(detect_lan_ipv4 || true)"
 if [[ -n "$lan_ip" ]]; then
@@ -512,7 +512,7 @@ if [[ -f "$ENV_FILE" ]]; then
       configure_smart_router=true
     fi
   elif [[ "$install_omni" == true && "$install_hermes" == true ]] \
-    && confirm "Enable Hermes Smart Router v0.5.2 (recommended)?" y; then
+    && confirm "Enable Hermes Smart Router v0.5.3 (recommended)?" y; then
     install_smart_router=true
     configure_smart_router=true
   fi
@@ -552,7 +552,7 @@ else
   configure_webui="$install_webui"
   install_smart_router=false
   if [[ "$install_omni" == true && "$install_hermes" == true ]] \
-    && confirm "Enable Hermes Smart Router v0.5.2 (recommended)?" y; then
+    && confirm "Enable Hermes Smart Router v0.5.3 (recommended)?" y; then
     install_smart_router=true
     configure_smart_router=true
   fi
@@ -683,7 +683,7 @@ telegram_home="$(existing_hermes_env_value TELEGRAM_HOME_CHANNEL)"
 api_enabled="$(existing_hermes_env_value API_SERVER_ENABLED)"; api_enabled="${api_enabled:-false}"
 api_key="$(existing_hermes_env_value API_SERVER_KEY)"
 smart_router_image_repository="$(existing_env_value SMART_ROUTER_IMAGE_REPOSITORY)"; smart_router_image_repository="${smart_router_image_repository:-afsharidevops/hermes-smart-router}"
-smart_router_image_tag="$(existing_env_value SMART_ROUTER_IMAGE_TAG)"; smart_router_image_tag="${smart_router_image_tag:-latest}"
+smart_router_image_tag="$(existing_env_value SMART_ROUTER_IMAGE_TAG)"; smart_router_image_tag="${smart_router_image_tag:-0.5.3}"
 smart_router_bind="$(existing_env_value SMART_ROUTER_BIND_IP)"; smart_router_bind="${smart_router_bind:-127.0.0.1}"
 smart_router_port="$(existing_env_value SMART_ROUTER_PORT)"; smart_router_port="${smart_router_port:-8787}"
 smart_router_mode="$(existing_env_value SMART_ROUTER_MODE)"; smart_router_mode="${smart_router_mode:-observe}"
@@ -762,7 +762,7 @@ case "$n8n_mcp_mode" in
 esac
 
 if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; then
-  printf '\nHermes Smart Router v0.5.2 settings\n'
+  printf '\nHermes Smart Router v0.5.3 settings\n'
   printf '%s\n' '-----------------------------------'
   printf '%s\n' 'Smart routing applies to model=auto. Tier aliases auto-fast/auto-standard/auto-strong are exposed only when tier overrides are enabled.'
   printf '%s\n' 'Explicit upstream model names pass through without automatic tier selection.'
@@ -791,7 +791,7 @@ if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; t
     smart_router_allow_tier_overrides=false
   fi
   if confirm "Enable the Smart Router telemetry dashboard (/dashboard)?" "$([[ "$smart_router_dashboard_enabled" == true ]] && printf y || printf n)"; then smart_router_dashboard_enabled=true; else smart_router_dashboard_enabled=false; fi
-  if confirm "Enable the v0.5.2 Control Plane (/control)?" "$([[ "$smart_router_control_plane_enabled" == true ]] && printf y || printf n)"; then smart_router_control_plane_enabled=true; else smart_router_control_plane_enabled=false; fi
+  if confirm "Enable the v0.5.3 Control Plane (/control)?" "$([[ "$smart_router_control_plane_enabled" == true ]] && printf y || printf n)"; then smart_router_control_plane_enabled=true; else smart_router_control_plane_enabled=false; fi
   if [[ "$smart_router_control_plane_enabled" == true ]]; then
     if confirm "Require authentication for Smart Router API/control-plane requests?" "$([[ "$smart_router_require_auth" == true ]] && printf y || printf n)"; then smart_router_require_auth=true; else smart_router_require_auth=false; fi
     [[ "$smart_router_require_auth" == true ]] || warn "Authentication is disabled. Keep the Smart Router bound to loopback unless you fully understand the exposure risk."
@@ -925,7 +925,7 @@ if [[ "$configure_hermes" == true ]]; then
   hermes_bind="$(prompt_bind_ip "Hermes API/dashboard host bind address" "$(suggested_bind_ip "$hermes_bind")")"
   if [[ "$install_smart_router" == true ]]; then
     provider_url="http://smart-router:8080/v1"
-    info "Hermes will reach OmniRoute through the Smart Router in observation mode."
+    info "Hermes will reach OmniRoute through the Smart Router in ${smart_router_mode} mode."
   elif [[ "$install_omni" == true ]]; then
     provider_url="http://omniroute:20129/v1"
     info "Hermes will reach OmniRoute through the private Docker network."
@@ -1108,7 +1108,7 @@ else
   cp "$ROOT_DIR/.env.example" "$tmp_env"
 fi
 chmod 600 "$tmp_env"
-# Preserve every v0.5.2-only setting and update only values owned by this wizard.
+# Preserve every v0.5.x setting and update only values owned by this wizard.
 replace_env_value "$tmp_env" COMPOSE_PROFILES "$profiles"
 replace_env_value "$tmp_env" OMNIROUTE_BIND_IP "$omni_bind"
 replace_env_value "$tmp_env" OMNIROUTE_PORT "$omni_port"
@@ -1172,7 +1172,7 @@ replace_env_value "$tmp_env" N8N_ENCRYPTION_KEY "$n8n_encryption_key"
 replace_env_value "$tmp_env" CADDY_BIND_IP "$caddy_bind"
 mv "$tmp_env" "$ENV_FILE"
 
-# Generate any v0.5.2 placeholder secrets without rotating existing values.
+# Generate any v0.5.x placeholder secrets without rotating existing values.
 python3 - "$ENV_FILE" <<'PYV052'
 import secrets, sys
 p=sys.argv[1]
@@ -1421,7 +1421,7 @@ opencode_combo_status="not-applicable"
 ai_combo_status="not-applicable"
 opencode_free_model_count="0"
 smart_router_combo_status="operator-managed"
-# OmniRoute does not expose the 9router SQLite provisioning surface. v0.5.2 keeps
+# OmniRoute does not expose the 9router SQLite provisioning surface. v0.5.3 keeps
 # client auth at Smart Router. OmniRoute upstream auth remains optional and can
 # be set later with ./manage.sh set-backend-api-key if REQUIRE_API_KEY is enabled.
 if [[ "$install_smart_router" == true ]]; then

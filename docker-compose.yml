@@ -60,7 +60,7 @@ services:
 
   smart-router:
     profiles: ["smart-router"]
-    image: ${SMART_ROUTER_IMAGE_REPOSITORY:-afsharidevops/hermes-smart-router}:${SMART_ROUTER_IMAGE_TAG:-latest}
+    image: ${SMART_ROUTER_IMAGE_REPOSITORY:-afsharidevops/hermes-smart-router}:${SMART_ROUTER_IMAGE_TAG:-0.5.3}
     container_name: hermes-smart-router
     restart: unless-stopped
     ports:
