@@ -139,14 +139,6 @@ def create_app(
     async def metrics(_: Request) -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-    async def router_info(_: Request) -> JSONResponse:
-        # Intentionally contains no credentials or mutable control-plane state.
-        return JSONResponse({
-            "version": __version__,
-            "mode": settings.mode,
-            "policy": settings.policy,
-            "control_plane": bool(control_plane.enabled),
-        })
     async def dashboard(request: Request) -> Response:
         # Static shell contains no telemetry; the JSON API remains authenticated.
         if not dashboard_enabled():

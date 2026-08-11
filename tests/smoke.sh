@@ -26,15 +26,21 @@ repo_root = Path(p).resolve().parent
 with (repo_root / "smart-router" / "pyproject.toml").open("rb") as fh:
     expected_version = tomllib.load(fh)["project"]["version"]
 
+fixed_release_image = (
+    'afsharidevops/hermes-smart-router' in image
+    and f':{expected_version}' in image
+)
+
+configurable_release_image = (
+    'afsharidevops/hermes-smart-router' in image
+    and 'SMART_ROUTER_IMAGE_REPOSITORY' in image
+    and 'SMART_ROUTER_IMAGE_TAG' in image
+)
+
 assert (
     build_context == './smart-router'
-    or (
-        'afsharidevops/hermes-smart-router' in image
-        and (
-            'SMART_ROUTER_IMAGE_TAG' in image
-            or f':{expected_version}' in image
-        )
-    )
+    or fixed_release_image
+    or configurable_release_image
 ), f"unexpected Smart Router source: build={build!r}, image={image!r}, expected_version={expected_version!r}"
 
 assert './smart-router/policy:/policy:ro' in s['volumes'], (

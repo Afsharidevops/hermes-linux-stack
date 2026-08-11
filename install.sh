@@ -73,7 +73,7 @@ if not found: out.append('EXECUTION_DOCKER_GID='+gid)
 open(p,'w',encoding='utf-8').write('\n'.join(out)+'\n')
 PYGID
 else
-  echo "NOTICE: /var/run/docker.sock is absent. Docker execution remains disabled; EXECUTION_DOCKER_GID stays 0." >&2
+  echo "NOTICE: /var/run/docker.sock is absent. Docker execution remains disabled; EXECUTION_DOCKER_GID stays at fail-closed sentinel 65534." >&2
 fi
 
 [[ -f data/hermes/config.yaml ]] || cp templates/hermes-config.yaml.template data/hermes/config.yaml
