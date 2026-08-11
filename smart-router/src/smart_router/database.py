@@ -217,3 +217,147 @@ class RouteStore:
                 now + self.settings.session_ttl_seconds,
             ),
         )
+
+
+class RedisRouteStore:
+    """Distributed sticky-session store for multi-replica Smart Router deployments.
+
+    Redis is selected automatically when SMART_ROUTER_REDIS_URL is configured, or
+    explicitly with SMART_ROUTER_STICKY_BACKEND=redis. A short per-session Redis
+    lock keeps promotion/demotion counters atomic across replicas. Raw prompts are
+    never stored; the key contains only the already-derived session hash.
+    """
+
+    def __init__(self, settings: Settings, url: str | None = None, client=None):
+        self.settings = settings
+        self.url = (url or os.getenv("SMART_ROUTER_REDIS_URL", "")).strip()
+        if client is None:
+            if not self.url:
+                raise ValueError("SMART_ROUTER_REDIS_URL is required for Redis sticky state")
+            try:
+                import redis  # type: ignore
+            except Exception as exc:  # pragma: no cover - dependency exists in package image
+                raise RuntimeError("redis dependency is required for Redis sticky state") from exc
+            client = redis.Redis.from_url(
+                self.url,
+                decode_responses=True,
+                socket_connect_timeout=float(os.getenv("SMART_ROUTER_REDIS_CONNECT_TIMEOUT", "2")),
+                socket_timeout=float(os.getenv("SMART_ROUTER_REDIS_SOCKET_TIMEOUT", "2")),
+                health_check_interval=30,
+            )
+        self.client = client
+        self.prefix = os.getenv("SMART_ROUTER_REDIS_PREFIX", "hermes:v052").strip() or "hermes:v052"
+
+    def _key(self, session_hash: str, alias: str) -> str:
+        return f"{self.prefix}:sticky:{self.settings.policy_version}:{alias}:{session_hash}"
+
+    def ready(self) -> bool:
+        try:
+            return bool(self.client.ping())
+        except Exception:
+            return False
+
+    def purge_expired(self, now: int | None = None, limit: int = 500) -> int:
+        # Redis TTLs perform expiry; retained for RouteStore API parity.
+        return 0
+
+    def reset(self, session_hash: str, alias: str) -> None:
+        self.client.delete(self._key(session_hash, alias))
+
+    def resolve(
+        self,
+        session_hash: str,
+        alias: str,
+        proposed_tier: str,
+        promotion_reason: str,
+        now: int | None = None,
+    ) -> StickyResult:
+        import json
+
+        now = now or int(time.time())
+        key = self._key(session_hash, alias)
+        lock = self.client.lock(
+            key + ":lock",
+            timeout=max(3, int(os.getenv("SMART_ROUTER_REDIS_LOCK_TIMEOUT", "5"))),
+            blocking_timeout=max(1, int(os.getenv("SMART_ROUTER_REDIS_LOCK_WAIT", "2"))),
+        )
+        with lock:
+            raw = self.client.get(key)
+            row = None
+            if raw:
+                try:
+                    row = json.loads(raw)
+                except Exception:
+                    row = None
+            if row and (
+                int(row.get("expires_at", 0)) <= now
+                or int(row.get("created_at", 0)) + self.settings.max_session_age_seconds <= now
+            ):
+                self.client.delete(key)
+                row = None
+
+            if row is None:
+                row = {
+                    "tier": proposed_tier,
+                    "previous_tier": None,
+                    "promotion_reason": None,
+                    "simple_turn_count": 0,
+                    "failure_count": 0,
+                    "created_at": now,
+                    "last_seen_at": now,
+                    "expires_at": now + self.settings.session_ttl_seconds,
+                }
+                self._write(key, row, now)
+                return StickyResult(proposed_tier, False, "created")
+
+            current = str(row["tier"])
+            selected = current
+            action = "sticky"
+            simple_count = int(row.get("simple_turn_count", 0))
+            previous = row.get("previous_tier")
+            reason = row.get("promotion_reason")
+            if TIER_RANK[proposed_tier] > TIER_RANK[current]:
+                selected = proposed_tier
+                previous = current
+                reason = promotion_reason
+                simple_count = 0
+                action = "promoted"
+            elif TIER_RANK[proposed_tier] < TIER_RANK[current]:
+                simple_count += 1
+                if simple_count >= self.settings.demotion_turns:
+                    selected = proposed_tier
+                    previous = current
+                    reason = "consecutive_simple_turns"
+                    simple_count = 0
+                    action = "demoted"
+            else:
+                simple_count = 0
+
+            row.update(
+                tier=selected,
+                previous_tier=previous,
+                promotion_reason=reason,
+                simple_turn_count=simple_count,
+                last_seen_at=now,
+                expires_at=now + self.settings.session_ttl_seconds,
+            )
+            self._write(key, row, now)
+            return StickyResult(selected, True, action)
+
+    def _write(self, key: str, row: dict, now: int) -> None:
+        import json
+
+        absolute_remaining = int(row["created_at"]) + self.settings.max_session_age_seconds - now
+        ttl = max(1, min(self.settings.session_ttl_seconds, absolute_remaining))
+        row["expires_at"] = now + ttl
+        self.client.set(key, json.dumps(row, separators=(",", ":")), ex=ttl)
+
+
+def create_route_store(settings: Settings):
+    backend = os.getenv("SMART_ROUTER_STICKY_BACKEND", "auto").strip().lower()
+    if backend not in {"auto", "sqlite", "redis"}:
+        raise ValueError("SMART_ROUTER_STICKY_BACKEND must be auto, sqlite, or redis")
+    redis_url = os.getenv("SMART_ROUTER_REDIS_URL", "").strip()
+    if backend == "redis" or (backend == "auto" and redis_url):
+        return RedisRouteStore(settings, redis_url)
+    return RouteStore(settings)

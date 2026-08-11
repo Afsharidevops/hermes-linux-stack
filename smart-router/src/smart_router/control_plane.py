@@ -12,10 +12,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from .control_db import (
@@ -34,8 +34,15 @@ from .control_db import (
     RouteProfile,
     Team,
     User,
+    ACLRule,
 )
 from .knowledge_v51 import KnowledgeManager
+from .acl_v52 import ACLManager
+from .oidc_v52 import OIDCManager
+from .provider_health import ProviderHealthRegistry
+from .shared_state import RedisCoordinator
+from .secrets_v52 import env_or_file, redacted_url
+from .metrics import ACL_DENIES, REDIS_READINESS, SSO_LOGINS
 from .panel_v51 import PANEL_HTML
 from .policy_v51 import PolicyEngine, TIER_ORDER
 from .security_v51 import Identity, ROLE_PERMISSIONS, SecurityManager, bearer
@@ -51,11 +58,11 @@ class FinalRoute:
 
 
 class ControlPlane:
-    """Hermes Smart Router v0.5.1 control plane.
+    """Hermes Smart Router v0.5.2 control plane.
 
-    This module is intentionally additive: the existing v0.5.0 routing policy remains the
-    source of truth for capability safety. v0.5.1 adds governance, dynamic route profiles,
-    RAG/memory, identities/quotas, agent orchestration, audit and a richer admin panel.
+    v0.5.2 preserves the deterministic capability-safety path while adding shared
+    health/circuit state, Redis-backed HA counters, OIDC, ACL-aware retrieval and
+    file/Docker-secret loading.
     """
 
     def __init__(self, settings: Any):
@@ -68,18 +75,22 @@ class ControlPlane:
             self.db_url = configured_db_url
         else:
             router_db_path = getattr(settings, "database_path", "/data/router.sqlite3")
-            control_path = os.path.join(os.path.dirname(router_db_path) or ".", "control-v0.5.1.sqlite3")
+            control_path = os.path.join(os.path.dirname(router_db_path) or ".", "control-v0.5.2.sqlite3")
             self.db_url = f"sqlite:///{control_path}"
         self.db = ControlDB(self.db_url)
         self.security = SecurityManager(
             self.db,
             settings.hmac_secret,
-            os.getenv("SMART_ROUTER_ADMIN_API_KEY") or None,
+            env_or_file("SMART_ROUTER_ADMIN_API_KEY"),
             int(os.getenv("SMART_ROUTER_SESSION_TTL_SECONDS_V51", "28800")),
         )
         self.knowledge = KnowledgeManager(self.db)
+        self.acl = ACLManager(self.db)
         self.policy = PolicyEngine(self.db)
-        self.internal_token = hmac.new(settings.hmac_secret.encode(), b"hermes-v0.5.1-internal", hashlib.sha256).hexdigest()
+        self.redis = RedisCoordinator()
+        self.provider_health = ProviderHealthRegistry(self.db)
+        self.oidc = OIDCManager(settings.hmac_secret)
+        self.internal_token = hmac.new(settings.hmac_secret.encode(), b"hermes-v0.5.2-internal", hashlib.sha256).hexdigest()
         self.pricing = self._load_pricing(os.getenv("SMART_ROUTER_PRICING_FILE", "/policy/pricing-v0.5.json"))
         self.default_profiles = {
             "fast": settings.fast.model,
@@ -91,7 +102,7 @@ class ControlPlane:
         self.db.bootstrap_profiles(self.default_profiles)
         self.security.bootstrap_admin(
             os.getenv("SMART_ROUTER_BOOTSTRAP_ADMIN_USER", "admin"),
-            os.getenv("SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD") or None,
+            env_or_file("SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD"),
         )
         self.app = Starlette(routes=self._routes())
         self.app.state.control = self
@@ -161,6 +172,25 @@ class ControlPlane:
         max_output = policy.max_output_tokens
         if max_output:
             _cap_output(body, max_output)
+        if self.settings.mode != "observe" and not self.provider_health.available(model):
+            original_model = model
+            fallback_profiles = []
+            if profile in {"coding", "vision", "strong"} or selected_tier == "strong":
+                fallback_profiles = ["strong"]
+            elif selected_tier == "standard":
+                fallback_profiles = ["strong"]
+            else:
+                fallback_profiles = ["standard", "strong"]
+            for fallback_profile in fallback_profiles:
+                candidate = self.profile_model(fallback_profile) or getattr(self.settings, fallback_profile).model
+                if candidate != original_model and self.provider_health.available(candidate):
+                    model = candidate
+                    profile = fallback_profile
+                    self.provider_health.fallback(original_model)
+                    self.db.audit(identity.actor, identity.role, "provider.circuit_fallback", original_model, detail={"fallback": candidate})
+                    break
+            else:
+                return FinalRoute(selected_tier, profile, model, error=_error("all safe routes are circuit-open", "provider_circuit_open", 503))
         request.state.v51_route = {"tier": selected_tier, "profile": profile, "model": model, "policy_matches": policy.matched or []}
         return FinalRoute(selected_tier, profile, model, max_output_tokens=max_output)
 
@@ -174,6 +204,7 @@ class ControlPlane:
         started = getattr(request.state, "v51_started", time.monotonic())
         usage = _usage_from_response(response)
         cost = self._cost(route["model"], route["tier"], usage[0], usage[1])
+        latency_ms = (time.monotonic() - started) * 1000
         row = RouteEvent(
             actor=identity.actor,
             team=identity.team,
@@ -182,7 +213,7 @@ class ControlPlane:
             model=route["model"],
             policy=policy_name,
             status_code=response.status_code,
-            latency_ms=(time.monotonic() - started) * 1000,
+            latency_ms=latency_ms,
             input_tokens=usage[0],
             output_tokens=usage[1],
             cost_usd=cost,
@@ -193,6 +224,7 @@ class ControlPlane:
             with self.db.session() as session:
                 session.add(row)
                 session.commit()
+            self.provider_health.record(route["model"], response.status_code, latency_ms)
         except Exception:
             # Observability must never break inference.
             pass
@@ -208,6 +240,9 @@ class ControlPlane:
         return [
             Route("/", self.panel, methods=["GET"]),
             Route("/api/login", self.login, methods=["POST"]),
+            Route("/api/logout", self.logout_api, methods=["POST"]),
+            Route("/api/auth/oidc/start", self.oidc_start, methods=["GET"]),
+            Route("/api/auth/oidc/callback", self.oidc_callback, methods=["GET"]),
             Route("/api/me", self.me, methods=["GET"]),
             Route("/api/summary", self.summary, methods=["GET"]),
             Route("/api/routes", self.routes_api, methods=["GET", "PUT"]),
@@ -235,15 +270,23 @@ class ControlPlane:
             Route("/api/plugins", self.plugins_api, methods=["GET", "POST"]),
             Route("/api/plugins/{plugin_id:int}", self.plugin_api, methods=["PUT", "DELETE"]),
             Route("/api/audit", self.audit_api, methods=["GET"]),
+            Route("/api/acls", self.acls_api, methods=["GET", "POST"]),
+            Route("/api/acls/{rule_id:int}", self.acl_api, methods=["DELETE"]),
+            Route("/api/provider-health", self.provider_health_api, methods=["GET"]),
+            Route("/api/provider-quality", self.provider_quality_api, methods=["GET"]),
+            Route("/api/outcomes", self.outcomes_api, methods=["GET", "POST"]),
             Route("/api/system", self.system_api, methods=["GET"]),
         ]
 
     async def panel(self, _: Request) -> Response:
         if not self.enabled:
             return Response(status_code=404)
-        return HTMLResponse(PANEL_HTML.replace("__VERSION__", "0.5.1"))
+        return HTMLResponse(PANEL_HTML.replace("__VERSION__", "0.5.2"))
 
     async def login(self, request: Request) -> Response:
+        if self.oidc.enabled and not self.oidc.local_login_enabled:
+            self.db.audit("unknown", "anonymous", "auth.local.login", status="denied", detail={"reason": "local_login_disabled"})
+            return _error("local login is disabled", "local_login_disabled", 403)
         data = await _json(request)
         username = str(data.get("username", ""))
         password = str(data.get("password", ""))
@@ -251,6 +294,51 @@ class ControlPlane:
         if not token:
             return _error("invalid credentials", "invalid_credentials", 401)
         return JSONResponse({"token": token})
+
+    async def logout_api(self, request: Request) -> Response:
+        token = bearer(request.headers)
+        identity = self.security.session_identity(token) or self.security.api_key_identity(token)
+        if identity and token.startswith(("v51.", "v52.")):
+            self.security.revoke_session(token)
+            self.db.audit(identity.actor, identity.role, "auth.logout")
+        return JSONResponse({"ok": True})
+
+    async def oidc_start(self, request: Request) -> Response:
+        if not self.oidc.enabled:
+            return _error("OIDC is not enabled", "oidc_disabled", 404)
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                url = await self.oidc.authorization_url(client)
+            return RedirectResponse(url, status_code=302)
+        except Exception as exc:
+            SSO_LOGINS.labels(provider="oidc", status="error").inc()
+            self.db.audit("unknown", "anonymous", "auth.oidc.start", status="denied", detail={"error": type(exc).__name__})
+            return _error("OIDC provider is unavailable", "oidc_unavailable", 503)
+
+    async def oidc_callback(self, request: Request) -> Response:
+        if not self.oidc.enabled:
+            return _error("OIDC is not enabled", "oidc_disabled", 404)
+        code = request.query_params.get("code", "")
+        state = request.query_params.get("state", "")
+        if not code or not state:
+            SSO_LOGINS.labels(provider="oidc", status="denied").inc()
+            return _error("OIDC callback is incomplete", "oidc_callback_invalid", 400)
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                claims = await self.oidc.exchange(client, code, state)
+            subject, username, groups, role = self.oidc.identity(claims)
+            _, token = self.security.provision_external("oidc", subject, username, groups, role, self.oidc.auto_provision)
+            SSO_LOGINS.labels(provider="oidc", status="success").inc()
+            safe_token = json.dumps(token)
+            return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><title>OIDC login</title><script>localStorage.setItem('hermes_v52_token',{safe_token});localStorage.setItem('hermes_v51_token',{safe_token});location.href='/control/';</script>Signed in. <a href='/control/'>Continue</a>""")
+        except PermissionError:
+            SSO_LOGINS.labels(provider="oidc", status="denied").inc()
+            self.db.audit(username if 'username' in locals() else "unknown", "anonymous", "auth.oidc.login", status="denied")
+            return _error("external identity is disabled", "oidc_identity_disabled", 403)
+        except Exception as exc:
+            SSO_LOGINS.labels(provider="oidc", status="error").inc()
+            self.db.audit("unknown", "anonymous", "auth.oidc.login", status="denied", detail={"error": type(exc).__name__})
+            return _error("OIDC login failed", "oidc_login_failed", 401)
 
     async def me(self, request: Request) -> Response:
         identity = self._admin_identity(request, "panel.read")
@@ -674,13 +762,92 @@ class ControlPlane:
         with self.db.session() as s: rows = list(s.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)))
         return JSONResponse([_row_dict(r, exclude={"detail_json"}) | {"detail": _loads(r.detail_json, {})} for r in rows])
 
+    async def provider_health_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "panel.read")
+        if isinstance(identity, Response): return identity
+        return JSONResponse(self.provider_health.snapshot())
+
+    async def provider_quality_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "panel.read")
+        if isinstance(identity, Response): return identity
+        with self.db.session() as session:
+            rows = session.execute(
+                select(
+                    RouteEvent.model,
+                    func.count(RouteEvent.id),
+                    func.avg(RouteEvent.latency_ms),
+                    func.avg(RouteEvent.cost_usd),
+                    func.sum(case((RouteEvent.status_code < 400, 1), else_=0)),
+                ).group_by(RouteEvent.model)
+            ).all()
+        result=[]
+        for model,count,latency,cost,successes in rows:
+            count=int(count or 0); successes=int(successes or 0)
+            result.append({"model":model,"requests":count,"success_rate":round(successes/count,6) if count else 1.0,"avg_latency_ms":round(float(latency or 0),3),"avg_cost_usd":round(float(cost or 0),8)})
+        return JSONResponse(result)
+
+    async def outcomes_api(self, request: Request) -> Response:
+        permission = "routing.use" if request.method == "POST" else "audit.read"
+        identity = self._admin_identity(request, permission)
+        if isinstance(identity, Response): return identity
+        if request.method == "POST":
+            d = await _json(request)
+            request_id = str(d.get("request_id", ""))[:80]
+            rating = d.get("rating")
+            if rating is not None:
+                try: rating=int(rating)
+                except (TypeError,ValueError): return _error("rating must be an integer", "invalid_outcome", 422)
+                if rating < 1 or rating > 5: return _error("rating must be 1..5", "invalid_outcome", 422)
+            allowed_meta={k:v for k,v in (d.get("metadata") or {}).items() if k in {"task_category","route_override","quality_label"}} if isinstance(d.get("metadata") or {}, dict) else {}
+            row=OutcomeEvent(request_id=request_id,actor=identity.actor,rating=rating,task_success=_optional_bool(d.get("task_success")),tool_success=_optional_bool(d.get("tool_success")),execution_success=_optional_bool(d.get("execution_success")),fallback_required=_optional_bool(d.get("fallback_required")),manually_changed_tier=_optional_bool(d.get("manually_changed_tier")),metadata_json=json.dumps(allowed_meta,separators=(",",":")))
+            with self.db.session() as session: session.add(row); session.commit(); session.refresh(row)
+            self.db.audit(identity.actor, identity.role, "outcome.capture", request_id, detail={"outcome_id":row.id})
+            return JSONResponse({"id":row.id,"request_id":request_id},status_code=201)
+        limit=max(1,min(1000,int(request.query_params.get("limit","200"))))
+        with self.db.session() as session: rows=list(session.scalars(select(OutcomeEvent).order_by(OutcomeEvent.id.desc()).limit(limit)))
+        return JSONResponse([_row_dict(r,exclude={"metadata_json"})|{"metadata":_loads(r.metadata_json,{})} for r in rows])
+
+    async def acls_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "users.manage" if request.method == "POST" else "panel.read")
+        if isinstance(identity, Response): return identity
+        if request.method == "POST":
+            data = await _json(request)
+            try:
+                row = self.acl.create(
+                    subject_type=str(data.get("subject_type", "")),
+                    subject_value=str(data.get("subject_value", "")),
+                    resource_type=str(data.get("resource_type", "")),
+                    resource_id=str(data.get("resource_id", "*")),
+                    permission=str(data.get("permission", "")),
+                    effect=str(data.get("effect", "allow")),
+                )
+            except ValueError as exc:
+                return _error(str(exc), "invalid_acl", 422)
+            self.db.audit(identity.actor, identity.role, "acl.create", str(row.id), detail={"resource": row.resource_type, "permission": row.permission, "effect": row.effect})
+        with self.db.session() as session:
+            rows = list(session.scalars(select(ACLRule).order_by(ACLRule.id)))
+        return JSONResponse([_row_dict(r) for r in rows])
+
+    async def acl_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "users.manage")
+        if isinstance(identity, Response): return identity
+        rid = int(request.path_params["rule_id"])
+        if not self.acl.delete(rid):
+            return Response(status_code=404)
+        self.db.audit(identity.actor, identity.role, "acl.delete", str(rid))
+        return JSONResponse({"ok": True})
+
     async def system_api(self, request: Request) -> Response:
         identity = self._admin_identity(request, "panel.read")
         if isinstance(identity, Response): return identity
+        redis_ok = self.redis.ping()
+        REDIS_READINESS.set(1 if redis_ok else 0)
         return JSONResponse({
-            "version": "0.5.1", "control_db": self.db_url.split("@")[-1], "database_ok": self.db.ping(), "ha_mode": self.ha_mode,
+            "version": "0.5.2", "control_db": redacted_url(self.db_url), "database_ok": self.db.ping(), "ha_mode": self.ha_mode,
             "require_auth": self.require_auth, "upstream": self.settings.upstream_base_url, "upstream_health": self.settings.upstream_health_url,
             "router_mode": self.settings.mode, "router_policy": self.settings.policy,
+            "redis_enabled": self.redis.enabled, "redis_ok": redis_ok, "oidc_enabled": self.oidc.enabled,
+            "acl_default_deny": self.acl.default_deny,
         })
 
     # -------------------- internals --------------------
@@ -716,6 +883,13 @@ class ControlPlane:
         query = _last_user_text(body)
         contexts: list[str] = []
         kb_ids = [int(x) for x in hermes.get("knowledge_bases", []) if str(x).isdigit()]
+        if kb_ids:
+            allowed_kb_ids = self.acl.filter_ids(identity, "knowledge", kb_ids, "knowledge.read")
+            denied = set(kb_ids) - set(allowed_kb_ids)
+            if denied:
+                ACL_DENIES.labels(resource_type="knowledge", permission="knowledge.read").inc(len(denied))
+                self.db.audit(identity.actor, identity.role, "acl.deny", "knowledge", "denied", {"ids": sorted(denied)})
+            kb_ids = allowed_kb_ids
         if kb_ids and query:
             ctx = self.knowledge.context(kb_ids, query, int(hermes.get("rag_limit", 4)))
             if ctx: contexts.append(ctx)
@@ -729,8 +903,23 @@ class ControlPlane:
             body.setdefault("messages", []).insert(0, {"role": "system", "content": "\n\n".join(contexts)})
 
     def _rate_limit(self, identity: Identity, estimated_tokens: int) -> dict[str, Any] | None:
-        now = int(time.time()); minute = now // 60; day = now // 86400
         key_base = f"key:{identity.api_key_id}" if identity.api_key_id else f"actor:{identity.actor}"
+        if self.redis.enabled:
+            try:
+                counters = self.redis.rate_limit(key_base, estimated_tokens)
+                REDIS_READINESS.set(1)
+                if counters.requests_minute > identity.rpm:
+                    return {"message": "requests/minute quota exceeded", "scope": "rpm"}
+                if counters.tokens_minute > identity.tpm:
+                    return {"message": "tokens/minute quota exceeded", "scope": "tpm"}
+                if counters.requests_day > identity.daily_requests:
+                    return {"message": "daily request quota exceeded", "scope": "daily_requests"}
+                return None
+            except RuntimeError:
+                REDIS_READINESS.set(0)
+                if self.ha_mode or _env_bool("SMART_ROUTER_REDIS_REQUIRED", False) or _env_bool("SMART_ROUTER_REDIS_FAIL_CLOSED", False):
+                    return {"message": "shared rate-limit state unavailable", "scope": "redis"}
+        now = int(time.time()); minute = now // 60; day = now // 86400
         with self.db.session() as s:
             minute_key = key_base + f":m:{minute}"
             row = s.get(RateCounter, minute_key)
@@ -807,6 +996,12 @@ class ControlPlane:
         out = float(price.get("output_per_1m", price.get("output", 0)) or 0)
         return round((input_tokens * inp + output_tokens * out) / 1_000_000, 8)
 
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None: return None
+    if isinstance(value, bool): return value
+    raise ValueError("boolean outcome fields must be booleans")
 
 def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)

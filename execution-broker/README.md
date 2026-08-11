@@ -30,6 +30,7 @@ Use this image through the repository's `docker-compose.yml` and `manage.sh`; do
 Configure the approval bot without placing its token in argv:
 
 ```text
+# from the repository root
 ./manage.sh set-execution-approval-bot-token
 ```
 

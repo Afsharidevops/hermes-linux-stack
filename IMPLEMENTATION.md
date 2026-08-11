@@ -1,15 +1,21 @@
-# Smart Router v0.2 implementation notes
+# Smart Router v0.5.2 implementation notes
 
-This package extends `hermes-omniroute-linux-stack` without adding RouteLLM as a runtime dependency.
+This branch uses the shared Smart Router v0.5.2 implementation in front of **OmniRoute**.
 
 ## Data plane
 
-`Hermes / Open WebUI / n8n -> Smart Router -> OmniRoute -> provider/model`
+`Hermes / Open WebUI / n8n -> Smart Router v0.5.2 -> OmniRoute -> provider/model`
 
-The Smart Router decides task tier/capability. OmniRoute remains responsible for provider/model selection, quota, cost and fallback.
+Smart Router owns deterministic capability floors, tier/profile selection, authentication/authorization, shared routing state, provider-health/circuit logic, budgets, outcome metadata, and control-plane policy. **OmniRoute** remains the delivery gateway and performs its provider/model delivery behavior.
 
-Fresh OmniRoute installs keep all three Smart Router tier model names at `auto`. That is deliberately safe but means tier selection initially changes only the router's output budget/capability decision. For real fast/standard/strong differentiation, create suitable OmniRoute endpoint/combo/model names and set `SMART_ROUTER_FAST_MODEL`, `SMART_ROUTER_STANDARD_MODEL`, and `SMART_ROUTER_STRONG_MODEL` in `.env`.
+## v0.5.2 rollout
 
-## Calibration rollout
+1. Run `./install.sh --no-start` and review `.env`.
+2. Keep `SMART_ROUTER_MODE=observe` while validating your gateway/model mappings.
+3. Run `./manage.sh doctor`.
+4. Start with `docker compose --env-file .env up -d` (or your normal profiles).
+5. Validate `/health`, `/ready`, `/router/info`, Open WebUI/Hermes access, and provider health.
+6. For HA, configure PostgreSQL + Redis and use the v0.5.2 HA reference Compose file; Redis sticky state is selected automatically when configured.
+7. Move to route/enforcement modes only after your own smoke, security, and benchmark gates pass.
 
-Use observe+heuristic first, label your workload, run `./manage.sh router-calibrate PATH` and `router-report`, then enable `SMART_ROUTER_POLICY=calibrated` while still observing. Switch to `route` only after the report and live observations look acceptable. Capability gates remain authoritative.
+Capability gates remain authoritative regardless of calibrated or learned scores. See `docs/HERMES-SMART-ROUTER-v0.5.2-IMPLEMENTATION-STATUS.md` for the exact implemented/open boundary.

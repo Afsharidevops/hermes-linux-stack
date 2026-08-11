@@ -2,7 +2,7 @@ name: hermes-omniroute-stack
 services:
   omniroute:
     profiles: ["omniroute"]
-    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
+    image: ${OMNIROUTE_IMAGE_REPOSITORY:-diegosouzapw/omniroute}:${OMNIROUTE_IMAGE_TAG:-latest}
     container_name: omniroute
     restart: unless-stopped
     stop_grace_period: 40s
@@ -60,7 +60,7 @@ services:
 
   smart-router:
     profiles: ["smart-router"]
-    image: ${SMART_ROUTER_IMAGE:-afsharidevops/hermes-smart-router:0.5.1}
+    image: ${SMART_ROUTER_IMAGE_REPOSITORY:-afsharidevops/hermes-smart-router}:${SMART_ROUTER_IMAGE_TAG:-latest}
     container_name: hermes-smart-router
     restart: unless-stopped
     ports:
@@ -82,11 +82,32 @@ services:
       SMART_ROUTER_PRICING_FILE: ${SMART_ROUTER_PRICING_FILE:-/policy/pricing-v0.5.json}
       SMART_ROUTER_DASHBOARD_ENABLED: ${SMART_ROUTER_DASHBOARD_ENABLED:-true}
       SMART_ROUTER_CONTROL_PLANE_ENABLED: ${SMART_ROUTER_CONTROL_PLANE_ENABLED:-true}
-      SMART_ROUTER_CONTROL_DATABASE_URL: ${SMART_ROUTER_CONTROL_DATABASE_URL:-sqlite:////data/control-v0.5.1.sqlite3}
+      SMART_ROUTER_CONTROL_DATABASE_URL: ${SMART_ROUTER_CONTROL_DATABASE_URL:-sqlite:////data/control-v0.5.2.sqlite3}
       SMART_ROUTER_ADMIN_API_KEY: ${SMART_ROUTER_ADMIN_API_KEY:-}
+      SMART_ROUTER_ADMIN_API_KEY_FILE: ${SMART_ROUTER_ADMIN_API_KEY_FILE:-}
+      SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD_FILE: ${SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD_FILE:-}
+      SMART_ROUTER_PG_PASSWORD_FILE: ${SMART_ROUTER_PG_PASSWORD_FILE:-}
+      SMART_ROUTER_REDIS_URL: ${SMART_ROUTER_REDIS_URL:-}
+      SMART_ROUTER_REDIS_REQUIRED: ${SMART_ROUTER_REDIS_REQUIRED:-false}
+      SMART_ROUTER_STICKY_BACKEND: ${SMART_ROUTER_STICKY_BACKEND:-auto}
+      SMART_ROUTER_PROVIDER_HEALTH_ENABLED: ${SMART_ROUTER_PROVIDER_HEALTH_ENABLED:-true}
+      SMART_ROUTER_CIRCUIT_FAILURE_THRESHOLD: ${SMART_ROUTER_CIRCUIT_FAILURE_THRESHOLD:-5}
+      SMART_ROUTER_CIRCUIT_FAILURE_WINDOW_SECONDS: ${SMART_ROUTER_CIRCUIT_FAILURE_WINDOW_SECONDS:-60}
+      SMART_ROUTER_CIRCUIT_COOLDOWN_SECONDS: ${SMART_ROUTER_CIRCUIT_COOLDOWN_SECONDS:-30}
+      SMART_ROUTER_OIDC_ENABLED: ${SMART_ROUTER_OIDC_ENABLED:-false}
+      SMART_ROUTER_OIDC_ISSUER_URL: ${SMART_ROUTER_OIDC_ISSUER_URL:-}
+      SMART_ROUTER_OIDC_CLIENT_ID: ${SMART_ROUTER_OIDC_CLIENT_ID:-}
+      SMART_ROUTER_OIDC_CLIENT_SECRET: ${SMART_ROUTER_OIDC_CLIENT_SECRET:-}
+      SMART_ROUTER_OIDC_CLIENT_SECRET_FILE: ${SMART_ROUTER_OIDC_CLIENT_SECRET_FILE:-}
+      SMART_ROUTER_OIDC_REDIRECT_URI: ${SMART_ROUTER_OIDC_REDIRECT_URI:-}
+      SMART_ROUTER_OIDC_GROUP_ROLE_MAP: ${SMART_ROUTER_OIDC_GROUP_ROLE_MAP:-}
+      SMART_ROUTER_OIDC_DEFAULT_ROLE: ${SMART_ROUTER_OIDC_DEFAULT_ROLE:-user}
+      SMART_ROUTER_OIDC_AUTO_PROVISION: ${SMART_ROUTER_OIDC_AUTO_PROVISION:-true}
+      SMART_ROUTER_OIDC_LOCAL_LOGIN_ENABLED: ${SMART_ROUTER_OIDC_LOCAL_LOGIN_ENABLED:-true}
+      SMART_ROUTER_KNOWLEDGE_ACL_DEFAULT_DENY: ${SMART_ROUTER_KNOWLEDGE_ACL_DEFAULT_DENY:-false}
       SMART_ROUTER_BOOTSTRAP_ADMIN_USER: ${SMART_ROUTER_BOOTSTRAP_ADMIN_USER:-admin}
       SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD: ${SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD:-}
-      SMART_ROUTER_REQUIRE_AUTH: ${SMART_ROUTER_REQUIRE_AUTH:-false}
+      SMART_ROUTER_REQUIRE_AUTH: ${SMART_ROUTER_REQUIRE_AUTH:-true}
       SMART_ROUTER_HA_MODE: ${SMART_ROUTER_HA_MODE:-false}
       SMART_ROUTER_CODING_MODEL: ${SMART_ROUTER_CODING_MODEL:-auto}
       SMART_ROUTER_VISION_MODEL: ${SMART_ROUTER_VISION_MODEL:-auto}
@@ -101,6 +122,9 @@ services:
       SMART_ROUTER_UPSTREAM_BASE_URL: ${SMART_ROUTER_UPSTREAM_BASE_URL:-http://omniroute:20129/v1}
       SMART_ROUTER_DATABASE_PATH: ${SMART_ROUTER_DATABASE_PATH:-/data/router.sqlite3}
       SMART_ROUTER_HMAC_SECRET: ${SMART_ROUTER_HMAC_SECRET}
+      SMART_ROUTER_HMAC_SECRET_FILE: ${SMART_ROUTER_HMAC_SECRET_FILE:-}
+      SMART_ROUTER_UPSTREAM_API_KEY_FILE: ${SMART_ROUTER_UPSTREAM_API_KEY_FILE:-}
+      SMART_ROUTER_CLIENT_API_KEY_FILE: ${SMART_ROUTER_CLIENT_API_KEY_FILE:-}
       SMART_ROUTER_POLICY_VERSION: ${SMART_ROUTER_POLICY_VERSION:-4}
       SMART_ROUTER_OBSERVE_MODEL: ${SMART_ROUTER_OBSERVE_MODEL:-auto}
       SMART_ROUTER_FAST_MODEL: ${SMART_ROUTER_FAST_MODEL:-auto}
@@ -150,7 +174,7 @@ services:
 
   hermes:
     profiles: ["hermes"]
-    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}
+    image: ${HERMES_IMAGE_REPOSITORY:-nousresearch/hermes-agent}:${HERMES_IMAGE_TAG:-latest}
     container_name: hermes-agent
     restart: unless-stopped
     command: gateway run
@@ -195,7 +219,7 @@ services:
     # Runs as the local operator so mode-0600 broker state stays unreadable to
     # every other uid, and joins the docker group only to reach the socket.
     user: "${EXECUTION_RUN_AS:-10003:10003}"
-    group_add: ["${EXECUTION_DOCKER_GID:-999}"]
+    group_add: ["${EXECUTION_DOCKER_GID:-0}"]
     environment:
       BROKER_MODE: docker
       BROKER_STATE: /state/capabilities.sqlite3
@@ -318,7 +342,7 @@ services:
 
   open-webui:
     profiles: ["open-webui"]
-    image: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    image: ${OPENWEBUI_IMAGE_REPOSITORY:-ghcr.io/open-webui/open-webui}:${OPENWEBUI_IMAGE_TAG:-main}
     container_name: open-webui
     restart: unless-stopped
     ports:
@@ -328,7 +352,7 @@ services:
     environment:
       WEBUI_URL: ${OPENWEBUI_URL:-http://localhost:3000}
       WEBUI_SECRET_KEY: ${OPENWEBUI_SECRET_KEY}
-      ENABLE_SIGNUP: ${OPENWEBUI_ENABLE_SIGNUP:-true}
+      ENABLE_SIGNUP: ${OPENWEBUI_ENABLE_SIGNUP:-false}
       ENABLE_OPENAI_API: "true"
       OPENAI_API_BASE_URL: ${OPENWEBUI_OPENAI_BASE_URL}
       OPENAI_API_KEY: ${OPENWEBUI_OPENAI_API_KEY}
@@ -339,7 +363,7 @@ services:
 
   n8n-init:
     profiles: ["n8n"]
-    image: ${N8N_IMAGE:-n8nio/n8n:latest}
+    image: ${N8N_IMAGE_REPOSITORY:-n8nio/n8n}:${N8N_IMAGE_TAG:-latest}
     container_name: hermes-n8n-init
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
@@ -354,7 +378,7 @@ services:
 
   n8n:
     profiles: ["n8n"]
-    image: ${N8N_IMAGE:-n8nio/n8n:latest}
+    image: ${N8N_IMAGE_REPOSITORY:-n8nio/n8n}:${N8N_IMAGE_TAG:-latest}
     container_name: hermes-n8n
     restart: unless-stopped
     ports:

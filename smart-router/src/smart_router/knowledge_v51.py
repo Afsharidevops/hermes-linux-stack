@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -58,15 +59,34 @@ class KnowledgeManager:
             session.refresh(row)
             return row
 
-    def add_document(self, kb_id: int, source: str, title: str, content: str, metadata: dict[str, Any] | None = None) -> int:
+    def add_document(self, kb_id: int, source: str, title: str, content: str, metadata: dict[str, Any] | None = None, replace_source: bool = True) -> int:
         pieces = chunk_text(content)
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        meta = dict(metadata or {})
+        meta["sha256"] = digest
         with self.db.session() as session:
             if session.get(KnowledgeBase, kb_id) is None:
                 raise ValueError("knowledge base not found")
+            existing = list(session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id, KnowledgeChunk.source == source[:500])))
+            if existing:
+                try:
+                    first_meta = json.loads(existing[0].metadata_json or "{}")
+                except Exception:
+                    first_meta = {}
+                if first_meta.get("sha256") == digest:
+                    return 0
+                if replace_source:
+                    session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id, KnowledgeChunk.source == source[:500]))
             for piece in pieces:
-                session.add(KnowledgeChunk(kb_id=kb_id, source=source[:500], title=title[:300], content=piece, metadata_json=json.dumps(metadata or {}, separators=(",", ":"))))
+                session.add(KnowledgeChunk(kb_id=kb_id, source=source[:500], title=title[:300], content=piece, metadata_json=json.dumps(meta, separators=(",", ":"))))
             session.commit()
         return len(pieces)
+
+    def delete_source(self, kb_id: int, source: str) -> int:
+        with self.db.session() as session:
+            result = session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id, KnowledgeChunk.source == source[:500]))
+            session.commit()
+            return int(result.rowcount or 0)
 
     def delete_base(self, kb_id: int) -> None:
         with self.db.session() as session:
