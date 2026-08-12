@@ -1,8 +1,8 @@
-# Hermes Linux Stack — 9router + Smart Router v0.5.6
+# Hermes Linux Stack — 9router + Smart Router v0.5.7
 
-> **v0.5.6 UX release:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.6 Smart Router and 9router architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
+> **v0.5.7 UX release:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.7 Smart Router and 9router architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.6** and **9router**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.7** and **9router**.
 
 > This is the **9router branch**.
 >
@@ -20,7 +20,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.6
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.7
                             │              │
 n8n / other clients ────────┘              │
                                            ├─ fast     → combo-fast
@@ -46,7 +46,7 @@ The repository intentionally keeps its routing backends separate.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.6
+          Smart Router v0.5.7
                   │
                   ▼
                9router
@@ -61,7 +61,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.6
+          Smart Router v0.5.7
                   │
                   ▼
               OmniRoute
@@ -76,7 +76,7 @@ Do not add OmniRoute to `main`, and do not add 9router to the OmniRoute branch.
 
 ## Features
 
-### v0.5.6 platform highlights
+### v0.5.7 platform highlights
 
 - Light/dark Operations Center and Flight Deck themes.
 - Consistent reversible Enable/Disable vs permanent Delete/Uninstall lifecycle controls for Agents, Teams, Groups, Plugins, Skills, and Routes.
@@ -90,7 +90,7 @@ Do not add OmniRoute to `main`, and do not add 9router to the OmniRoute branch.
 - Telegram bot/agent integration through Hermes
 - Numeric Telegram user allowlist
 - Optional Telegram home chat for cron results and notifications
-- Hermes Smart Router v0.5.6
+- Hermes Smart Router v0.5.7
 - OpenAI-compatible `auto` routing aliases
 - 9router provider/model gateway
 - Open WebUI integration
@@ -259,7 +259,7 @@ Verify:
 
 ---
 
-# Smart Router v0.5.6
+# Smart Router v0.5.7
 
 Published image:
 
@@ -635,6 +635,31 @@ This keeps routine Telegram chat separate from privileged execution approval.
 
 ---
 
+
+## v0.5.7 Execution & Approvals UI
+
+Hermes Operations Center now includes **System → Execution & Approvals**. It connects directly from the operator browser to the optional `execution-admin` service with a separate admin key. The Smart Router backend does not receive that key or the dedicated Telegram approval bot token.
+
+Bootstrap the separate admin boundary:
+
+```bash
+./manage.sh enable-execution-admin
+./manage.sh execution-admin-status
+./manage.sh show-execution-admin-key
+```
+
+The UI can then manage:
+
+- live Sandbox/Docker/SSH feature policy for already-deployed brokers;
+- numeric Telegram execution approvers, restricted to `TELEGRAM_ALLOWED_USERS`;
+- write-only replacement of the dedicated approval-bot token;
+- broker control-secret rotation;
+- broker/approver health and execution-admin audit events;
+- redacted SSH profile metadata.
+
+The `execution-admin` service does **not** mount the Ed25519 approval signing key, Docker socket, or SSH private credentials. First-time Docker/SSH broker deployment and SSH credential creation/removal remain host `manage.sh` operations. Port `8752` binds to loopback by default. For remote administration, use a trusted private bind address, TLS/reverse proxy where appropriate, and exact `EXECUTION_ADMIN_ALLOWED_ORIGINS`; never use wildcard CORS or expose the admin port publicly.
+
+
 # Service Ports
 
 Typical defaults:
@@ -731,7 +756,7 @@ python -m pip install -e "./smart-router[dev]"
 pytest -q smart-router/tests
 ```
 
-Smart Router v0.5.6 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
+Smart Router v0.5.7 currently passes the repository test suite covering API routing, model aliases, passthrough behavior, SSE preservation, and policy behavior.
 
 ---
 
@@ -749,7 +774,7 @@ Expected version:
 ```json
 {
   "status": "ok",
-  "version": "0.5.6"
+  "version": "0.5.7"
 }
 ```
 
@@ -916,11 +941,11 @@ The v0.5 target scorecard is a roadmap figure, not measured performance:
 
 ---
 
-## Smart Router v0.5.6 Flight Deck and Operations Center
+## Smart Router v0.5.7 Flight Deck and Operations Center
 
-Smart Router v0.5.6 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Operations Center at `/control/`, while preserving 9router as this branch's provider gateway. The Operations Center covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
+Smart Router v0.5.7 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Operations Center at `/control/`, while preserving 9router as this branch's provider gateway. The Operations Center covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
 
-The easy installer now configures the v0.5.6 core switches instead of silently relying on Compose defaults, and `./manage.sh menu` exposes a Smart Router submenu. Useful commands include `router-status`, `router-access`, `router-summary`, `router-routes`, `router-provider-health`, `router-system`, `router-info`, `router-policy`, `router-calibrate`, `router-report`, and `router-replay`.
+The easy installer now configures the v0.5.7 core switches instead of silently relying on Compose defaults, and `./manage.sh menu` exposes a Smart Router submenu. Useful commands include `router-status`, `router-access`, `router-summary`, `router-routes`, `router-provider-health`, `router-system`, `router-info`, `router-policy`, `router-calibrate`, `router-report`, and `router-replay`.
 
 Routing semantics are important: Smart Router policy applies to `model=auto`; `auto-fast`/`auto-standard`/`auto-strong` are available only when tier overrides are enabled. Explicit upstream model names pass through without automatic tier selection. `observe` evaluates/logs automatic requests but dispatches them through `SMART_ROUTER_OBSERVE_MODEL`; `route` applies the selected route profile.
 
@@ -929,7 +954,7 @@ Default local URLs are `http://127.0.0.1:8787/v1`, `http://127.0.0.1:8787/dashbo
 Default Smart Router image: `afsharidevops/hermes-smart-router:latest`; pin `SMART_ROUTER_IMAGE_TAG` in `.env` when you want a stable release.
 
 
-## Image tag policy (v0.5.6)
+## Image tag policy (v0.5.7)
 
 Application images intentionally default to mutable tags so normal `docker compose pull` tracks upstream releases. You can pin any service later by changing only `.env`; Compose does not need to be edited.
 
@@ -958,7 +983,7 @@ For n8n + Hermes MCP installations, `./install.sh` starts n8n first and then off
 
 Instance-level MCP capabilities are n8n-version-dependent; the stack validates the stable workflow core and does not require newer optional tools such as `search_executions` just to accept a valid access token.
 
-## RAG database storage (v0.5.6)
+## RAG database storage (v0.5.7)
 
 The visible admin UI is **Hermes Operations Center** at `/control/` (the URL and `SMART_ROUTER_CONTROL_*` names stay compatible). Knowledge storage is configured server-side so database passwords are not saved in browser state.
 
@@ -975,4 +1000,4 @@ Or put knowledge bases/chunks in a separate PostgreSQL database:
 SMART_ROUTER_KNOWLEDGE_DATABASE_URL=postgresql+psycopg://hermes_rag:SECRET@rag-postgres:5432/hermes_knowledge
 ```
 
-After changing the DSN, recreate only Smart Router and inspect **Operations Center → Knowledge** or `./manage.sh router-system`. The UI reports storage mode, connectivity and a redacted DSN. v0.5.6 retrieval is lexical; PostgreSQL storage is not presented as pgvector/embedding retrieval.
+After changing the DSN, recreate only Smart Router and inspect **Operations Center → Knowledge** or `./manage.sh router-system`. The UI reports storage mode, connectivity and a redacted DSN. v0.5.7 retains hybrid lexical/vector retrieval, reranking, and PostgreSQL pgvector support from v0.5.6. Configure a real embeddings endpoint for production semantic retrieval.

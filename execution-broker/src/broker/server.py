@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from . import approval, schema, ssh as ssh_module
+from . import admin as admin_module
 from .approver import ApprovalRequestStore, ApproverError, TelegramApprover, validate_submission
 from .engine import DockerEngine, EngineError
 from .sandbox import run_sandbox
@@ -23,26 +24,41 @@ SSH_INTEGRITY_SECRET_PATH=Path(os.environ.get("BROKER_SSH_PROFILE_INTEGRITY_SECR
 APPROVER_URL=os.environ.get("BROKER_APPROVER_URL","http://execution-approver:8751")
 CALLBACK_URLS={"docker":os.environ.get("APPROVER_DOCKER_CALLBACK_URL","http://execution-docker-broker:8750/approval-grant"),"ssh":os.environ.get("APPROVER_SSH_CALLBACK_URL","http://execution-ssh-broker:8750/approval-grant")}
 SANDBOX_IMAGE=os.environ.get("SANDBOX_IMAGE",""); WORKSPACE_SOURCE=os.environ.get("EXECUTION_WORKSPACE",""); WORKSPACE_GENERATION=os.environ.get("EXECUTION_WORKSPACE_GENERATION","")
-EGRESS_NETWORK=os.environ.get("EXECUTION_EGRESS_NETWORK","hermes-execution-egress"); POLICY_GENERATION=os.environ.get("EXECUTION_POLICY_GENERATION","0")
-ENABLED_FEATURES=tuple(x for x in os.environ.get("EXECUTION_FEATURES","").split(",") if x)
+EGRESS_NETWORK=os.environ.get("EXECUTION_EGRESS_NETWORK","hermes-execution-egress")
+FEATURES_PATH=Path(os.environ.get("EXECUTION_FEATURES_FILE","")) if os.environ.get("EXECUTION_FEATURES_FILE") else None
+POLICY_GENERATION_PATH=Path(os.environ.get("EXECUTION_POLICY_GENERATION_FILE","")) if os.environ.get("EXECUTION_POLICY_GENERATION_FILE") else None
+
+def _features():
+    try: raw=FEATURES_PATH.read_text(encoding="utf-8").strip() if FEATURES_PATH else os.environ.get("EXECUTION_FEATURES","")
+    except OSError: raw=os.environ.get("EXECUTION_FEATURES","")
+    allowed=("local","ssh","docker")
+    selected={x.strip() for x in raw.split(",") if x.strip()}
+    return tuple(x for x in allowed if x in selected)
+
+def _policy_generation():
+    try: raw=POLICY_GENERATION_PATH.read_text(encoding="utf-8").strip() if POLICY_GENERATION_PATH else os.environ.get("EXECUTION_POLICY_GENERATION","0")
+    except OSError: raw=os.environ.get("EXECUTION_POLICY_GENERATION","0")
+    return raw if str(raw).isdigit() else "0"
+
 _store=CapabilityStore(STATE_PATH) if MODE in ("docker","ssh") else None
-if _store: _store.cancel_generation(POLICY_GENERATION)
+if _store: _store.cancel_generation(_policy_generation())
 _approval_store=ApprovalRequestStore(STATE_PATH) if MODE=="approver" else None
 _engine=DockerEngine() if MODE=="docker" else None; _slots=threading.BoundedSemaphore(MAX_CONCURRENT); _context=threading.local()
 
 def _read(path):
     try:return path.read_text(encoding="utf-8").strip()
     except OSError:return ""
-def _enabled(f): return f in ENABLED_FEATURES and ((MODE=="docker" and f in ("local","docker")) or (MODE=="ssh" and f=="ssh"))
+def _enabled(f): return f in _features() and ((MODE=="docker" and f in ("local","docker")) or (MODE=="ssh" and f=="ssh"))
 def _runtime():
-    if MODE not in ("docker","ssh","approver"): return "Invalid broker mode."
+    if MODE not in ("docker","ssh","approver","admin"): return "Invalid broker mode."
+    if MODE=="admin": return None if admin_module.configured() else "The execution admin key is unavailable."
     if not _read(APPROVAL_REQUEST_SECRET_PATH): return "The independent approval request secret is unavailable."
     if MODE=="approver":
         if not APPROVAL_PRIVATE_KEY_PATH.is_file(): return "The independent approval signing key is unavailable."
         return None if _telegram and _telegram.configured() else "The dedicated execution approval bot token and numeric users are required."
     if not APPROVAL_PUBLIC_KEY_PATH.is_file(): return "The independent approval verification key is unavailable."
     if not _read(CONTROL_SECRET_PATH): return "The broker control secret is unavailable."
-    if MODE=="docker" and "local" in ENABLED_FEATURES and (not SANDBOX_IMAGE or not WORKSPACE_SOURCE or not WORKSPACE_GENERATION or not Path(WORKSPACE_SOURCE).is_absolute()): return "Local execution requires a pinned image and an absolute, generation-sealed workspace."
+    if MODE=="docker" and "local" in _features() and (not SANDBOX_IMAGE or not WORKSPACE_SOURCE or not WORKSPACE_GENERATION or not Path(WORKSPACE_SOURCE).is_absolute()): return "Local execution requires a pinned image and an absolute, generation-sealed workspace."
     return None
 
 def _refresh_protected_ids():
@@ -99,8 +115,8 @@ def _prepare(p):
         if f=="docker":_refresh_protected_ids()
         approval.check_floor(f,r); summary=approval.render_summary(f,r); digest=approval.canonical_digest(f,r)
     except (schema.RequestError,ssh_module.ProfileError,approval.DeniedError,EngineError) as e:return {"error":str(e)}
-    nonce=_store.issue(feature=f,digest=digest,request=json.dumps(r),user_id=u,session=s,generation=POLICY_GENERATION)
-    data={"target":"docker" if MODE=="docker" else "ssh","feature":f,"capability":nonce,"digest":digest,"request":r,"summary":summary,"user_id":u,"session":s,"generation":POLICY_GENERATION}
+    nonce=_store.issue(feature=f,digest=digest,request=json.dumps(r),user_id=u,session=s,generation=_policy_generation())
+    data={"target":"docker" if MODE=="docker" else "ssh","feature":f,"capability":nonce,"digest":digest,"request":r,"summary":summary,"user_id":u,"session":s,"generation":_policy_generation()}
     if problem:=_submit(data):_store.cancel(nonce);return {"error":problem}
     return {"status":"prepared","capability":nonce,"digest":digest,"summary":summary}
 
@@ -113,7 +129,7 @@ def _send_decision(g):
 
 def _request(p):
     if problem:=_runtime():return {"error":problem}
-    try:_telegram.submit(validate_submission(p,generation=POLICY_GENERATION),ttl_seconds=300)
+    try:_telegram.submit(validate_submission(p,generation=_policy_generation()),ttl_seconds=300)
     except (ApproverError,approval.DeniedError,sqlite3.IntegrityError) as e:return {"error":str(e)}
     return {"status":"pending"}
 
@@ -123,9 +139,9 @@ def _accept(p):
     data={k:str(p[k]) for k in fields};body=json.dumps(data,sort_keys=True,separators=(",",":")).encode()
     if not _verify(body,getattr(_context,"signature","")):return {"error":"The independent approval decision is invalid."}
     target="docker" if MODE=="docker" else "ssh";f=p["feature"]
-    if p["target"]!=target or p["generation"]!=POLICY_GENERATION or not _enabled(f):return {"error":"The decision targets another broker, generation, or disabled feature."}
+    if p["target"]!=target or p["generation"]!=_policy_generation() or not _enabled(f):return {"error":"The decision targets another broker, generation, or disabled feature."}
     try:
-        args=dict(nonce=p["capability"],feature=f,digest=p["digest"],user_id=p["user_id"],session=p["session"],generation=POLICY_GENERATION)
+        args=dict(nonce=p["capability"],feature=f,digest=p["digest"],user_id=p["user_id"],session=p["session"],generation=_policy_generation())
         if p["decision"]=="approved":_store.approve(**args);return {"status":"approved"}
         if p["decision"]=="denied":_store.cancel_bound(**args);return {"status":"denied"}
     except CapabilityError as e:return {"error":str(e)}
@@ -137,7 +153,7 @@ def _execute(p):
     if not _enabled(f):return {"error":f"Execution feature '{f}' is not enabled on this stack."}
     if not _slots.acquire(False):return {"error":"Too many execution operations are already running; retry this approval."}
     try:
-        c=_store.consume(nonce=str(p.get("capability","")),feature=f,digest=str(p.get("digest","")),user_id=str(p.get("user_id","")),session=str(p.get("session","")),generation=POLICY_GENERATION,wait_seconds=300);r=json.loads(c["request"]);approval.check_floor(f,r)
+        c=_store.consume(nonce=str(p.get("capability","")),feature=f,digest=str(p.get("digest","")),user_id=str(p.get("user_id","")),session=str(p.get("session","")),generation=_policy_generation(),wait_seconds=300);r=json.loads(c["request"]);approval.check_floor(f,r)
         if approval.canonical_digest(f,r)!=c["digest"]:return {"error":"The stored operation no longer matches its approved digest."}
         if f=="local":
             if r.get("resolved_image_id")!=_engine.resolve_image(SANDBOX_IMAGE) or r.get("workspace_generation")!=WORKSPACE_GENERATION:return {"error":"The sandbox image or workspace changed after approval."}
@@ -203,10 +219,11 @@ def _discover(p):
     if p.get("kind")=="docker_containers" and _enabled("docker"):return {"status":"ok","containers":_engine.list_containers(all_containers=True,timeout=30)}
     return {"error":"That discovery kind is not available."}
 def _health(_):
-    problem=_runtime();checks={"mode":MODE,"features":list(ENABLED_FEATURES)}
+    problem=_runtime();checks={"mode":MODE,"features":list(_features())}
     if MODE=="docker":checks["engine"]="ok" if _engine.ping() else "unreachable"
     elif MODE=="ssh":checks["profiles"]=len(ssh_module.list_profiles(integrity_key=ssh_module.read_integrity_secret(SSH_INTEGRITY_SECRET_PATH)))
-    else:checks["bot"]="configured" if _telegram and _telegram.configured() else "missing"
+    elif MODE=="approver":checks["bot"]="configured" if _telegram and _telegram.configured() else "missing"
+    else:checks["admin_key"]="configured" if admin_module.configured() else "missing"
     return {"status":"error","error":problem,"checks":checks} if problem else {"status":"ok","checks":checks}
 ROUTES={"/prepare":_prepare,"/execute":_execute,"/cancel":_cancel,"/discover":_discover,"/approval-grant":_accept,"/request":_request}
 _telegram=TelegramApprover(token_file=APPROVAL_BOT_TOKEN_PATH,users_file=APPROVAL_USERS_PATH,store=_approval_store,decision_sender=_send_decision) if MODE=="approver" else None
@@ -235,7 +252,60 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:self.reply(500,{"error":f"Broker failure: {type(e).__name__}"})
         finally:
             if hasattr(_context,"signature"):del _context.signature
+class AdminHandler(BaseHTTPRequestHandler):
+    server_version="stack-execution-admin"
+    def log_message(self,*_):pass
+    def _origin_ok(self): return admin_module.allowed_origin(self.headers.get("Origin", ""))
+    def reply(self,n,p):
+        b=json.dumps(p).encode();self.send_response(n);self.send_header("Content-Type","application/json")
+        origin=self.headers.get("Origin","")
+        if origin and admin_module.allowed_origin(origin):
+            self.send_header("Access-Control-Allow-Origin",origin);self.send_header("Vary","Origin")
+            self.send_header("Access-Control-Allow-Headers","Content-Type, X-Execution-Admin-Key")
+            self.send_header("Access-Control-Allow-Methods","GET, PUT, POST, OPTIONS")
+        self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(b)));self.end_headers();self.wfile.write(b)
+    def do_OPTIONS(self):
+        if not self._origin_ok(): return self.reply(403,{"error":"Origin is not allowed."})
+        self.reply(204,{})
+    def _authorized(self):
+        return self._origin_ok() and admin_module.authorized(self.headers.get("X-Execution-Admin-Key",""))
+    def _json(self):
+        try:n=int(self.headers.get("Content-Length","0"))
+        except ValueError:raise ValueError("Invalid Content-Length")
+        if n<0 or n>MAX_REQUEST_BYTES:raise ValueError("Request too large")
+        try:value=json.loads(self.rfile.read(n) or b"{}")
+        except (json.JSONDecodeError,OSError) as exc:raise ValueError("Invalid JSON") from exc
+        if not isinstance(value,dict):raise ValueError("JSON object required")
+        return value
+    def do_GET(self):
+        if self.path=="/health": return self.reply(200,_health({}))
+        if not self._authorized(): return self.reply(401,{"error":"Unauthorized."})
+        if self.path=="/admin/status": return self.reply(200,admin_module.status())
+        if self.path.startswith("/admin/audit"):
+            try:
+                from urllib.parse import parse_qs,urlsplit
+                limit=int(parse_qs(urlsplit(self.path).query).get("limit",["50"])[0])
+            except (TypeError,ValueError):limit=50
+            return self.reply(200,admin_module.audit(limit))
+        self.reply(404,{"error":"Unknown endpoint."})
+    def do_PUT(self): self._mutate()
+    def do_POST(self): self._mutate()
+    def _mutate(self):
+        if not self._authorized(): return self.reply(401,{"error":"Unauthorized."})
+        try:
+            payload=self._json()
+            if self.path=="/admin/features" and self.command=="PUT":result=admin_module.set_features(payload)
+            elif self.path=="/admin/users" and self.command=="PUT":result=admin_module.set_users(payload)
+            elif self.path=="/admin/bot-token" and self.command=="PUT":result=admin_module.replace_bot_token(payload)
+            elif self.path=="/admin/rotate-control-secret" and self.command=="POST":result=admin_module.rotate_control_secret()
+            else:return self.reply(404,{"error":"Unknown endpoint."})
+            self.reply(200,result)
+        except ValueError as exc:self.reply(422,{"error":str(exc)})
+        except Exception as exc:self.reply(500,{"error":f"Execution admin failure: {type(exc).__name__}"})
+
 def main():
     if MODE=="approver":threading.Thread(target=_telegram.run,daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0",int(os.environ.get("BROKER_PORT","8751" if MODE=="approver" else "8750"))),Handler).serve_forever()
+    handler=AdminHandler if MODE=="admin" else Handler
+    default_port="8752" if MODE=="admin" else ("8751" if MODE=="approver" else "8750")
+    ThreadingHTTPServer(("0.0.0.0",int(os.environ.get("BROKER_PORT",default_port))),handler).serve_forever()
 if __name__=="__main__":main()

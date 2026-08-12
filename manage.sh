@@ -19,7 +19,7 @@ trap cleanup_temp_secrets EXIT
 
 usage() {
   cat <<'EOF'
-Hermes Linux Stack Manager v0.5.6
+Hermes Linux Stack Manager v0.5.7
 
 Usage:
   ./manage.sh                 Open the interactive manager
@@ -238,7 +238,7 @@ services_menu() {
   while true; do
     menu_title 'Services & Logs'
     printf '%s\n' '1) Status                 Show all containers and ports'
-    printf '%s\n' '2) Health                 Run v0.5.6 service health checks'
+    printf '%s\n' '2) Health                 Run v0.5.7 service health checks'
     printf '%s\n' '3) Start                  Start selected stack services'
     printf '%s\n' '4) Stop                   Stop running stack services'
     printf '%s\n' '5) Restart                Restart running stack services'
@@ -276,7 +276,7 @@ services_menu() {
 router_menu() {
   local choice value file
   while true; do
-    menu_title 'Hermes Smart Router v0.5.6'
+    menu_title 'Hermes Smart Router v0.5.7'
     printf '%s\n' 'Observe & access'
     printf '%s\n' '  1) Status & URLs            Mode, policy, features and endpoints'
     printf '%s\n' '  2) Dashboard / Control      URLs and credential guidance'
@@ -400,7 +400,12 @@ execution_menu() {
     printf '%s\n' '10) Remove SSH profile'
     printf '%s\n' '11) Configure approval bot token'
     printf '%s\n' '12) Rotate execution broker secret'
-    printf '%s\n' '13) PURGE execution state / SSH keys'
+    printf '%s\n' '13) Enable Execution Admin UI'
+    printf '%s\n' '14) Execution Admin status'
+    printf '%s\n' '15) Show Execution Admin key (trusted terminal)'
+    printf '%s\n' '16) Rotate Execution Admin key'
+    printf '%s\n' '17) Disable Execution Admin UI'
+    printf '%s\n' '18) PURGE execution state / SSH keys'
     printf '%s\n' '0) Back'
     read -r -p 'Choose [0]: ' choice
     case "${choice:-0}" in
@@ -421,7 +426,12 @@ execution_menu() {
       10) read -r -p 'SSH profile name: ' name; "$ROOT_DIR/manage.sh" remove-ssh-profile "$name"; menu_pause ;;
       11) "$ROOT_DIR/manage.sh" set-execution-approval-bot-token; menu_pause ;;
       12) "$ROOT_DIR/manage.sh" rotate-execution-broker-secret; menu_pause ;;
-      13) "$ROOT_DIR/manage.sh" purge-execution; menu_pause ;;
+      13) "$ROOT_DIR/manage.sh" enable-execution-admin; menu_pause ;;
+      14) "$ROOT_DIR/manage.sh" execution-admin-status; menu_pause ;;
+      15) "$ROOT_DIR/manage.sh" show-execution-admin-key; menu_pause ;;
+      16) "$ROOT_DIR/manage.sh" rotate-execution-admin-key; menu_pause ;;
+      17) "$ROOT_DIR/manage.sh" disable-execution-admin; menu_pause ;;
+      18) "$ROOT_DIR/manage.sh" purge-execution; menu_pause ;;
       0) return 0 ;;
       *) printf 'Unknown execution choice.\n' >&2 ;;
     esac
@@ -496,7 +506,7 @@ uninstall_menu() {
 interactive_menu() {
   local choice
   while true; do
-    menu_title 'Hermes Linux Stack Manager v0.5.6'
+    menu_title 'Hermes Linux Stack Manager v0.5.7'
     printf '%s\n' 'Quick administration — choose a group; direct CLI commands still work.'
     printf '\n%s\n' '1) Overview & health          Status, health, version, diagnostics'
     printf '%s\n'   '2) Services & logs            Start/stop/restart and service logs'
@@ -506,7 +516,7 @@ interactive_menu() {
     printf '%s\n'   '6) Execution & SSH            Sandbox, Docker, SSH profiles, approvals'
     printf '%s\n'   '7) Maintenance & recovery     Updates, backup, restore, rollback'
     printf '%s\n'   '8) Security & integrity       Doctor, image pins, access credentials'
-    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.6 wizard again'
+    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.7 wizard again'
     printf '%s\n'   '10) Uninstall                 Safe remove or explicit purge'
     printf '%s\n'   '0) Exit'
     read -r -p 'Choose [0]: ' choice
@@ -1004,23 +1014,29 @@ ensure_execution_paths() {
   root="$(execution_root)"
   [[ ! -L "$root" ]] || { printf 'Refusing unsafe execution symlink: %s\n' "$root" >&2; return 1; }
   install -d -m 0700 "$root"
-  for file in "$root/docker-state" "$root/ssh-state" "$root/approver-state" "$root/ssh"; do
+  for file in "$root/docker-state" "$root/ssh-state" "$root/approver-state" "$root/admin-state" "$root/ssh"; do
     [[ ! -L "$file" ]] || { printf 'Refusing unsafe execution symlink: %s\n' "$file" >&2; return 1; }
     install -d -o 10003 -g 10003 -m 0700 "$file"
     chown 10003:10003 "$file"
     chmod 700 "$file"
   done
-  for file in "$root/control-secret" "$root/users"; do
+  for file in "$root/control-secret" "$root/users" "$root/features" "$root/policy-generation"; do
     [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
       printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
     }
-    [[ -e "$file" ]] || install -o "$hermes_uid" -g 10003 -m 0640 /dev/null "$file"
+    if [[ ! -e "$file" ]]; then
+      install -o "$hermes_uid" -g 10003 -m 0660 /dev/null "$file"
+      case "${file##*/}" in
+        features) printf '%s\n' "$(env_value "$ENV_FILE" EXECUTION_FEATURES)" > "$file" ;;
+        policy-generation) printf '%s\n' "$(env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION | sed 's/^$/0/')" > "$file" ;;
+      esac
+    fi
     chown "$hermes_uid:10003" "$file"
-    chmod 640 "$file"
+    chmod 660 "$file"
   done
   for file in "$root/approval-request-secret" "$root/approval-signing-key.pem" \
     "$root/approval-public-key.pem" "$root/approval-bot-token" \
-    "$root/ssh-profile-integrity-secret"; do
+    "$root/ssh-profile-integrity-secret" "$root/admin-key"; do
     [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
       printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
     }
@@ -1028,10 +1044,31 @@ ensure_execution_paths() {
     chown 10003:10003 "$file"
     chmod 600 "$file"
   done
+  for file in "$root/telegram-allowed-users" "$root/hermes-bot-token.sha256"; do
+    [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
+      printf 'Refusing unsafe execution admin metadata path: %s\n' "$file" >&2; return 1;
+    }
+    [[ -e "$file" ]] || install -o "$hermes_uid" -g 10003 -m 0640 /dev/null "$file"
+    chown "$hermes_uid:10003" "$file"
+    chmod 640 "$file"
+  done
   install -d -o 10002 -g 10002 -m 0700 "$ROOT_DIR/data/execution-workspace"
 }
 
-execution_features() { env_value "$ENV_FILE" EXECUTION_FEATURES; }
+execution_features() {
+  local path="$(execution_root)/features"
+  [[ -f "$path" ]] && { tr -d '[:space:]' < "$path"; return; }
+  env_value "$ENV_FILE" EXECUTION_FEATURES
+}
+
+write_execution_features() {
+  local features="$1" root tmp hermes_uid
+  ensure_execution_paths || return 1
+  hermes_uid="$(execution_hermes_uid)"; root="$(execution_root)"
+  tmp="$(mktemp "$root/features.tmp.XXXXXX")"
+  printf '%s\n' "$features" > "$tmp"; chown "$hermes_uid:10003" "$tmp"; chmod 660 "$tmp"; mv "$tmp" "$root/features"
+  replace_env_value "$ENV_FILE" EXECUTION_FEATURES "$features"
+}
 execution_users() { [[ -f "$(execution_root)/users" ]] && tr -d '[:space:]' < "$(execution_root)/users" || true; }
 
 telegram_users() {
@@ -1039,6 +1076,18 @@ telegram_users() {
   value="$(env_value "$HERMES_ENV" TELEGRAM_ALLOWED_USERS)"
   value="${value#[}"; value="${value%]}"; value="${value//\"/}"; value="${value// /}"
   printf '%s' "$value"
+}
+
+sync_execution_admin_metadata() {
+  local root hermes_uid tmp token
+  ensure_execution_paths || return 1
+  root="$(execution_root)"; hermes_uid="$(execution_hermes_uid)"
+  tmp="$(mktemp "$root/telegram-allowed-users.tmp.XXXXXX")"
+  printf '%s\n' "$(telegram_users)" > "$tmp"; chown "$hermes_uid:10003" "$tmp"; chmod 640 "$tmp"; mv "$tmp" "$root/telegram-allowed-users"
+  token="$(env_value "$HERMES_ENV" TELEGRAM_BOT_TOKEN)"
+  tmp="$(mktemp "$root/hermes-bot-token.sha256.tmp.XXXXXX")"
+  if [[ -n "$token" ]]; then printf '%s' "$token" | sha256sum | awk '{print $1}' > "$tmp"; else : > "$tmp"; fi
+  chown "$hermes_uid:10003" "$tmp"; chmod 640 "$tmp"; mv "$tmp" "$root/hermes-bot-token.sha256"
 }
 
 execution_users_valid() {
@@ -1062,30 +1111,36 @@ write_execution_users() {
 }
 
 rotate_execution_generation() {
-  local current workspace
-  current="$(env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION)"; current="${current:-0}"
+  local current workspace root tmp hermes_uid
+  ensure_execution_paths || return 1
+  root="$(execution_root)"; hermes_uid="$(execution_hermes_uid)"
+  current="$(tr -d '[:space:]' < "$root/policy-generation" 2>/dev/null || true)"; current="${current:-$(env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION)}"; current="${current:-0}"
   workspace="$(env_value "$ENV_FILE" EXECUTION_WORKSPACE_GENERATION)"; workspace="${workspace:-0}"
   [[ "$current" =~ ^[0-9]+$ ]] || current=0
   [[ "$workspace" =~ ^[0-9]+$ ]] || workspace=0
-  replace_env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION "$((current + 1))"
+  current="$((current + 1))"
+  tmp="$(mktemp "$root/policy-generation.tmp.XXXXXX")"; printf '%s\n' "$current" > "$tmp"; chown "$hermes_uid:10003" "$tmp"; chmod 660 "$tmp"; mv "$tmp" "$root/policy-generation"
+  replace_env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION "$current"
   replace_env_value "$ENV_FILE" EXECUTION_WORKSPACE_GENERATION "$((workspace + 1))"
 }
 
 sync_execution_profiles() {
-  local features profiles base
+  local features profiles base admin_enabled
   features="$(execution_features)"
   profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
-  base="$(printf '%s' "$profiles" | tr ',' '\n' | grep -v -E '^execution-(docker|ssh|approval)$' | paste -sd, -)"
+  admin_enabled="$(env_value "$ENV_FILE" EXECUTION_ADMIN_ENABLED)"
+  base="$(printf '%s' "$profiles" | tr ',' '\n' | grep -v -E '^execution-(docker|ssh|approval|admin)$' | paste -sd, -)"
   if [[ -n "$features" ]]; then base="${base:+$base,}execution-approval"; fi
   [[ ",$features," == *,local,* || ",$features," == *,docker,* ]] \
     && base="${base:+$base,}execution-docker"
   [[ ",$features," == *,ssh,* ]] && base="${base:+$base,}execution-ssh"
+  [[ "$admin_enabled" == true ]] && base="${base:+$base,}execution-admin"
   replace_env_value "$ENV_FILE" COMPOSE_PROFILES "$base"
 }
 
 apply_execution_features() {
   local features="$1"
-  replace_env_value "$ENV_FILE" EXECUTION_FEATURES "$features"
+  write_execution_features "$features"
   rotate_execution_generation
   sync_execution_profiles
   if [[ -n "$features" ]]; then
@@ -1855,7 +1910,8 @@ for name, service in (data.get("services") or {}).items():
   execution-status)
     printf 'Execution features: %s\n' "$(execution_features | sed 's/^$/off/')"
     printf 'Execution users: %s\n' "$(execution_users | sed 's/^$/none/')"
-    printf 'Policy generation: %s\n' "$(env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION)"
+    printf 'Policy generation: %s\n' "$(tr -d '[:space:]' < "$(execution_root)/policy-generation" 2>/dev/null || env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION)"
+    printf 'Execution admin UI: %s\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_ENABLED | sed 's/^$/false/')"
     if [[ -d "$(execution_root)/ssh" ]]; then
       printf 'SSH profiles:'
       found=false
@@ -1946,6 +2002,7 @@ PY
   set-execution-approval-bot-token)
     [[ -z "${2:-}" ]] || { printf 'Do not pass Telegram tokens in argv.\n' >&2; exit 2; }
     ensure_execution_paths
+    sync_execution_admin_metadata
     read -r -s -p 'Dedicated execution approval Telegram bot token: ' token
     printf '\n' >&2
     [[ "$token" =~ ^[0-9]+:[A-Za-z0-9_-]{20,}$ ]] || {
@@ -1983,6 +2040,50 @@ PY
     fi
     rotate_execution_generation
     printf 'Dedicated execution approval bot configured without printing its token. Execution remains off until explicitly enabled.\n'
+    ;;
+  enable-execution-admin)
+    [[ -z "${2:-}" ]] || { printf 'Usage: ./manage.sh enable-execution-admin\n' >&2; exit 2; }
+    ensure_execution_paths; sync_execution_admin_metadata
+    root="$(execution_root)"
+    if [[ ! -s "$root/admin-key" ]]; then
+      tmp="$(mktemp "$root/admin-key.tmp.XXXXXX")"; random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/admin-key"
+    fi
+    replace_env_value "$ENV_FILE" EXECUTION_ADMIN_ENABLED true
+    [[ -n "$(env_value "$ENV_FILE" EXECUTION_ADMIN_PORT)" ]] || replace_env_value "$ENV_FILE" EXECUTION_ADMIN_PORT 8752
+    sync_execution_profiles
+    compose pull execution-admin
+    compose up -d --no-deps --force-recreate execution-admin
+    printf 'Execution admin UI enabled on %s:%s. The separate admin key was not printed.\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_BIND_IP | sed 's/^$/127.0.0.1/')" "$(env_value "$ENV_FILE" EXECUTION_ADMIN_PORT | sed 's/^$/8752/')"
+    printf 'Use ./manage.sh show-execution-admin-key from a trusted terminal when you need to connect the Operations Center page.\n'
+    ;;
+  disable-execution-admin)
+    [[ -z "${2:-}" ]] || { printf 'Usage: ./manage.sh disable-execution-admin\n' >&2; exit 2; }
+    replace_env_value "$ENV_FILE" EXECUTION_ADMIN_ENABLED false
+    sync_execution_profiles
+    COMPOSE_PROFILES=execution-admin compose rm -sf execution-admin >/dev/null 2>&1 || true
+    printf 'Execution admin UI disabled. Broker/approver execution policy is unchanged.\n'
+    ;;
+  execution-admin-status)
+    ensure_execution_paths
+    printf 'Enabled: %s\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_ENABLED | sed 's/^$/false/')"
+    printf 'Bind: %s:%s\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_BIND_IP | sed 's/^$/127.0.0.1/')" "$(env_value "$ENV_FILE" EXECUTION_ADMIN_PORT | sed 's/^$/8752/')"
+    printf 'Allowed origins: %s\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_ALLOWED_ORIGINS | sed 's/^$/http:\/\/127.0.0.1:8787,http:\/\/localhost:8787/')"
+    [[ -s "$(execution_root)/admin-key" ]] && printf 'Admin key: configured (hidden)\n' || printf 'Admin key: missing\n'
+    ;;
+  rotate-execution-admin-key)
+    [[ -z "${2:-}" ]] || { printf 'Do not pass execution admin keys in argv.\n' >&2; exit 2; }
+    ensure_execution_paths; root="$(execution_root)"
+    tmp="$(mktemp "$root/admin-key.tmp.XXXXXX")"; random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/admin-key"
+    COMPOSE_PROFILES=execution-admin compose up -d --no-deps --force-recreate execution-admin >/dev/null 2>&1 || true
+    printf 'Execution admin key rotated. Existing browser sessions must reconnect.\n'
+    ;;
+  show-execution-admin-key)
+    [[ -z "${2:-}" ]] || { printf 'Usage: ./manage.sh show-execution-admin-key\n' >&2; exit 2; }
+    [[ -t 1 ]] || { printf 'Refusing to print the execution admin key to a non-interactive output.\n' >&2; exit 1; }
+    ensure_execution_paths
+    [[ -s "$(execution_root)/admin-key" ]] || { printf 'Admin key is not configured; run ./manage.sh enable-execution-admin first.\n' >&2; exit 1; }
+    printf 'Sensitive: enter this only into Operations Center → Execution & Approvals. Do not save it in browser storage.\n'
+    cat "$(execution_root)/admin-key"; printf '\n'
     ;;
   rotate-execution-broker-secret)
     [[ -z "${2:-}" ]] || { printf 'Do not pass broker secrets in argv.\n' >&2; exit 2; }
@@ -2405,7 +2506,7 @@ PY
       exit 1
     fi
     base="$(router_local_base_url)"
-    printf 'Smart Router v0.5.6 stack integration\n'
+    printf 'Smart Router v0.5.7 stack integration\n'
     printf '  image: %s:%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_REPOSITORY)" "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_TAG)"
     printf '  base URL: %s\n' "$base"
     printf '  OpenAI API: %s/v1\n' "$base"
@@ -2489,7 +2590,7 @@ PY
     ;;
   router-replay)
     dataset="${2:-}"; [[ -f "$dataset" ]] || { printf 'Requests JSONL file required\n' >&2; exit 2; }
-    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.6.jsonl}"
+    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.7.jsonl}"
     dataset="$(cd "$(dirname "$dataset")" && pwd)/$(basename "$dataset")"; mkdir -p "$(dirname "$output")"; touch "$output"; output="$(cd "$(dirname "$output")" && pwd)/$(basename "$output")"
     compose run --rm --no-deps -v "$dataset:/work/input.jsonl:ro" -v "$output:/work/output.jsonl" smart-router python -m smart_router.eval.replay /work/input.jsonl -o /work/output.jsonl
     ;;

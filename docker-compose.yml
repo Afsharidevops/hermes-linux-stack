@@ -55,7 +55,7 @@ services:
 
   smart-router:
     profiles: ["smart-router"]
-    image: ${SMART_ROUTER_IMAGE_REPOSITORY:-afsharidevops/hermes-smart-router}:${SMART_ROUTER_IMAGE_TAG:-0.5.6}
+    image: ${SMART_ROUTER_IMAGE_REPOSITORY:-afsharidevops/hermes-smart-router}:${SMART_ROUTER_IMAGE_TAG:-0.5.7}
     container_name: hermes-smart-router
     restart: unless-stopped
     ports:
@@ -203,9 +203,11 @@ services:
       # control secret and user policy; never the Docker socket or an SSH key.
       - ./data/stack-secrets/execution/control-secret:/run/secrets/execution-control:ro
       - ./data/stack-secrets/execution/users:/run/secrets/execution-users:ro
+      - ./data/stack-secrets/execution/features:/run/secrets/execution-features:ro
     environment:
       HERMES_HOME: /opt/data
       EXECUTION_FEATURES: ${EXECUTION_FEATURES:-}
+      EXECUTION_FEATURES_FILE: /run/secrets/execution-features
       EXECUTION_USERS_FILE: /run/secrets/execution-users
       EXECUTION_DOCKER_BROKER_URL: http://hermes-execution-docker-broker:8750
       EXECUTION_SSH_BROKER_URL: http://hermes-execution-ssh-broker:8750
@@ -226,7 +228,7 @@ services:
   # reachable only from Hermes on the internal control network, with the secret.
   execution-docker-broker:
     profiles: ["execution-docker"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
     container_name: hermes-execution-docker-broker
     restart: unless-stopped
     # Runs as the local operator so mode-0600 broker state stays unreadable to
@@ -241,7 +243,9 @@ services:
       BROKER_APPROVAL_PUBLIC_KEY_FILE: /run/secrets/execution-approval-public-key
       BROKER_APPROVER_URL: http://execution-approver:8751
       EXECUTION_FEATURES: ${EXECUTION_FEATURES:-}
+      EXECUTION_FEATURES_FILE: /run/config/execution-features
       EXECUTION_POLICY_GENERATION: ${EXECUTION_POLICY_GENERATION:-0}
+      EXECUTION_POLICY_GENERATION_FILE: /run/config/execution-policy-generation
       EXECUTION_WORKSPACE: ${EXECUTION_WORKSPACE_HOST_PATH:-}
       EXECUTION_WORKSPACE_GENERATION: ${EXECUTION_WORKSPACE_GENERATION:-0}
       EXECUTION_EGRESS_NETWORK: hermes-execution-egress
@@ -252,6 +256,8 @@ services:
       - ./data/stack-secrets/execution/control-secret:/run/secrets/execution-control:ro
       - ./data/stack-secrets/execution/approval-request-secret:/run/secrets/execution-approval-request:ro
       - ./data/stack-secrets/execution/approval-public-key.pem:/run/secrets/execution-approval-public-key:ro
+      - ./data/stack-secrets/execution/features:/run/config/execution-features:ro
+      - ./data/stack-secrets/execution/policy-generation:/run/config/execution-policy-generation:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=0700,uid=10003,gid=10003
@@ -274,7 +280,7 @@ services:
   # No Docker socket. The only service that can read SSH private keys.
   execution-ssh-broker:
     profiles: ["execution-ssh"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
     container_name: hermes-execution-ssh-broker
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
@@ -287,7 +293,9 @@ services:
       BROKER_SSH_PROFILE_INTEGRITY_SECRET_FILE: /run/secrets/execution-ssh-profile-integrity
       BROKER_APPROVER_URL: http://execution-approver:8751
       EXECUTION_FEATURES: ${EXECUTION_FEATURES:-}
+      EXECUTION_FEATURES_FILE: /run/config/execution-features
       EXECUTION_POLICY_GENERATION: ${EXECUTION_POLICY_GENERATION:-0}
+      EXECUTION_POLICY_GENERATION_FILE: /run/config/execution-policy-generation
     volumes:
       - ./data/stack-secrets/execution/ssh:/profiles:ro
       - ./data/stack-secrets/execution/ssh-state:/state
@@ -295,6 +303,8 @@ services:
       - ./data/stack-secrets/execution/approval-request-secret:/run/secrets/execution-approval-request:ro
       - ./data/stack-secrets/execution/approval-public-key.pem:/run/secrets/execution-approval-public-key:ro
       - ./data/stack-secrets/execution/ssh-profile-integrity-secret:/run/secrets/execution-ssh-profile-integrity:ro
+      - ./data/stack-secrets/execution/features:/run/config/execution-features:ro
+      - ./data/stack-secrets/execution/policy-generation:/run/config/execution-policy-generation:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=0700,uid=10003,gid=10003
@@ -319,7 +329,7 @@ services:
   # Hermes control secret, or execution capability database.
   execution-approver:
     profiles: ["execution-approval"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.1@sha256:dc88519c8f87d0720e0666e081dc74cd867ea8d5b019d59af50ac44a72bb55ed}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
     container_name: hermes-execution-approver
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
@@ -332,12 +342,14 @@ services:
       EXECUTION_APPROVAL_BOT_TOKEN_FILE: /run/secrets/execution-approval-bot-token
       EXECUTION_APPROVAL_USERS_FILE: /run/secrets/execution-approval-users
       EXECUTION_POLICY_GENERATION: ${EXECUTION_POLICY_GENERATION:-0}
+      EXECUTION_POLICY_GENERATION_FILE: /run/config/execution-policy-generation
     volumes:
       - ./data/stack-secrets/execution/approver-state:/state
       - ./data/stack-secrets/execution/approval-request-secret:/run/secrets/execution-approval-request:ro
       - ./data/stack-secrets/execution/approval-signing-key.pem:/run/secrets/execution-approval-signing-key:ro
       - ./data/stack-secrets/execution/approval-bot-token:/run/secrets/execution-approval-bot-token:ro
       - ./data/stack-secrets/execution/users:/run/secrets/execution-approval-users:ro
+      - ./data/stack-secrets/execution/policy-generation:/run/config/execution-policy-generation:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=0700,uid=10003,gid=10003
@@ -348,6 +360,62 @@ services:
     networks: [execution-control-net, execution-approval-egress-net]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8751/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
+  # Optional browser-facing execution administration boundary. Operations Center
+  # calls this service directly with a separate admin key; Smart Router never
+  # receives that key, the approval signing key, Docker socket, or SSH secrets.
+  execution-admin:
+    profiles: ["execution-admin"]
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
+    container_name: hermes-execution-admin
+    restart: unless-stopped
+    user: "${EXECUTION_RUN_AS:-10003:10003}"
+    ports:
+      - "${EXECUTION_ADMIN_BIND_IP:-127.0.0.1}:${EXECUTION_ADMIN_PORT:-8752}:8752"
+    environment:
+      BROKER_MODE: admin
+      BROKER_PORT: "8752"
+      BROKER_STATE: /state/admin.sqlite3
+      EXECUTION_ADMIN_KEY_FILE: /run/secrets/execution-admin-key
+      EXECUTION_FEATURES_FILE: /run/config/execution-features
+      EXECUTION_POLICY_GENERATION_FILE: /run/config/execution-policy-generation
+      EXECUTION_APPROVAL_USERS_FILE: /run/config/execution-users
+      EXECUTION_ALLOWED_USERS_FILE: /run/config/telegram-allowed-users
+      EXECUTION_HERMES_BOT_TOKEN_HASH_FILE: /run/config/hermes-bot-token.sha256
+      EXECUTION_APPROVAL_BOT_TOKEN_FILE: /run/secrets/execution-approval-bot-token
+      BROKER_CONTROL_SECRET_FILE: /run/config/execution-control
+      EXECUTION_SSH_PROFILES_DIR: /profiles
+      EXECUTION_ADMIN_AUDIT_FILE: /state/admin-audit.jsonl
+      EXECUTION_ADMIN_ALLOWED_ORIGINS: ${EXECUTION_ADMIN_ALLOWED_ORIGINS:-http://127.0.0.1:8787,http://localhost:8787}
+      EXECUTION_APPROVER_URL: http://execution-approver:8751
+      EXECUTION_DOCKER_BROKER_URL: http://execution-docker-broker:8750
+      EXECUTION_SSH_BROKER_URL: http://execution-ssh-broker:8750
+    volumes:
+      - ./data/stack-secrets/execution/admin-state:/state
+      - ./data/stack-secrets/execution/admin-key:/run/secrets/execution-admin-key:ro
+      - ./data/stack-secrets/execution/features:/run/config/execution-features
+      - ./data/stack-secrets/execution/policy-generation:/run/config/execution-policy-generation
+      - ./data/stack-secrets/execution/users:/run/config/execution-users
+      - ./data/stack-secrets/execution/telegram-allowed-users:/run/config/telegram-allowed-users:ro
+      - ./data/stack-secrets/execution/hermes-bot-token.sha256:/run/config/hermes-bot-token.sha256:ro
+      - ./data/stack-secrets/execution/approval-bot-token:/run/secrets/execution-approval-bot-token
+      - ./data/stack-secrets/execution/control-secret:/run/config/execution-control
+      - ./data/stack-secrets/execution/ssh:/profiles:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=0700,uid=10003,gid=10003
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    networks: [execution-control-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8752/health', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 5

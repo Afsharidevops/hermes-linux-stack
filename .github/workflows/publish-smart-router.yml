@@ -6,7 +6,7 @@ on:
       version:
         description: Image version without a leading v
         required: true
-        default: 0.5.6
+        default: 0.5.7
   push:
     tags:
       - smart-router-v*.*.*
