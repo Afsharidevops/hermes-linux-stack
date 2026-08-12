@@ -5,7 +5,7 @@ f316e0e72d84729067ae82ca30c6706ad8140537c65f1d76599478326ebddbe9  ./CHANGELOG-v0
 387649a5c7696862ce7dddfb67a2b6cce408e4840e791ddc81e2cdf0b635bf5f  ./CHANGELOG-v0.5.5.md
 ab4df82cb784c65d531f1ad3ed01972e61dbaea9ade6df05ccd70786b189d4bd  ./CHANGELOG-v0.5.6.md
 26709b9b8cb2c020f61cc5c93119844caec0908aa70a66f8b6002026475ad961  ./CHANGELOG-v0.5.7.md
-8488df079719e4887b561ad61e37ac9b771878ab58d4be5c46ae5a22c236806a  ./CHANGELOG-v0.5.8.md
+f8ed9961500f60544d7185580a7336c5b5c76c403637ed0d3cab1dbad41ab2b0  ./CHANGELOG-v0.5.8.md
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./data/caddy/.gitkeep
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./data/hermes/.gitkeep
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./data/n8n/.gitkeep
@@ -25,11 +25,11 @@ fe5ebbc8aed343cfb068cb026856456fdd542b6d2fdc40346907c70bed1dfaa4  ./deploy/helm/
 a265c720a6eb212b44185755a1c90a97d80d5dde7451ad463820bc5da18acf5c  ./deploy/helm/hermes-linux-stack/templates/router.yaml
 f123278b4c0cb59bcf3bd2294bac94b497a98ee9fde6dbf703137e3cc89be5e7  ./deploy/helm/hermes-linux-stack/templates/serviceaccount.yaml
 af1558accdc3bbd30a7849b1ec0d1532a67b37e65c7c3095b0b3b0a24c432468  ./deploy/helm/hermes-linux-stack/values.yaml
-90a1e31db35799e2c1cc5e39e8bfe9ceba068d1a2bdf6b8cb5e12a0f581d68d1  ./docker-compose.yml
+e044748787b99a5683352b003aaca324b35fae6a09afd0fe563fd3ec9234e615  ./docker-compose.yml
 d6a5110d40acd3ae09e44bb0732d31599d3078939835cd73edf7168f58701a81  ./docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.5.md
 c91c3f75d305f6eefea9ca45838a7b1c3f53de6eae07f35438513398e52e8d7d  ./docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.6.md
 58e552c120387bcd5ae85446467131372e436c76cdd802603393d7b8658eb004  ./docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.7.md
-f2fe6f4b3c0231a70ac75a85c89e743cede1dedc236c6ee915f557c444ba462e  ./docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.8.md
+854c5889780a3d6203c01a92499c73099f8c41b5f2d5360083e932bf9138e83c  ./docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.8.md
 d3e391ef5035a6ce016c59d08db557edd65ec07c0cb953eb2dccfac75463c27e  ./docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md
 8cb81857220584f459f80b87c1d8a97beec97b3ee43a47b18cefc97ff0a47f5a  ./docs/HERMES-SMART-ROUTER-v0.5.2-IMPLEMENTATION-STATUS.md
 8aa74c3c89ca3b9090a29b885340c42804b9a291dd4445a4493087326198000a  ./docs/HERMES-SMART-ROUTER-v0.5.2-PLAN.md
@@ -82,7 +82,7 @@ bfe57cb1e315652dd2455d41483fb14c5158db4daf30a1b62ec5148e10c52385  ./execution-br
 a5fa233f70defa3ce07a1ec3308d700cb104a57e3b9b233ed43076b69435bab1  ./.github/workflows/platform-v0.5.6.yml
 5dcfba8f9b6c735c817c6601dd276541a097a040d84dfd469e349d9ffbf89aa9  ./.github/workflows/platform-v0.5.7.yml
 e69b2bfda385e61e76892c92f2174bfc0be241250d5d03a1baa1057814d5a7c1  ./.github/workflows/platform-v0.5.8.yml
-bda5c32a3a5eb5e2f414d1dd332f435603c353a52d34215838146485324157b6  ./.github/workflows/publish-smart-router.yml
+d0abc2af998a20085014c79f045c791b3cd03a918504eb689cc1e5b108a15819  ./.github/workflows/publish-smart-router.yml
 79509340b066493b76253bf4745b0a197e6d4a15b7fd6bb413707f5a39e3a32c  ./.github/workflows/security-v0.5.5.yml
 62d9ddde897e2b2992f7fbe50f59700f1d2285078969873771461a36b307bc19  ./.github/workflows/security-v0.5.6.yml
 e65837813a329a2ea8fb85b9706151e6648ca087ccdb95cd4d6495466d05ff87  ./.github/workflows/security-v0.5.7.yml
@@ -96,6 +96,7 @@ daaeb8dc31f4df82bdfb8bd8563a5d036bc5b48d07c1cf7de2796eb290e12d7c  ./HERMES-EXECU
 dc861e40ecd4787ad75d11a6cd7bb67f2d4631982dcc805e0b7cdaf2cd4818e6  ./HERMES-SMART-ROUTER-DOCKERHUB-v0.5.6.md
 03e65a5b2255fc329829add15ee8cc619e6ab5d737e939d778b76a1fa5289604  ./HERMES-SMART-ROUTER-DOCKERHUB-v0.5.7.md
 c7a5caeff8c6efdfd131373aa107e26e89fda85d0fca1cda74073651dc434ba5  ./HERMES-SMART-ROUTER-DOCKERHUB-v0.5.8.md
+e4588c4de01326680af7d689db69bd6e4f0cd3e719da77a62ac71f14d5e5c3d0  ./HOTFIX-v0.5.8-EXECUTION-ADMIN-INGRESS.md
 2e094bf6e54811aaf8167b73f0a200b1d0978e4475793084395a974776270e3b  ./IMPLEMENTATION.md
 0d48349cff209f1e78d4b7616c383fe107bd651fe6d99bf87450c36c98de3b30  ./install.sh
 ecafcebc0f616dba3be7e6262e8764f76b7e5b5d10f9b89f9034198c2f882645  ./LICENSE
@@ -114,7 +115,7 @@ be946129fa3c3dc3d3356de6e03b951a71c7cd6956f84090fe59aab51cc4f514  ./RELEASE-COMM
 c05b40e9f75c33fa524558b1e629bf8c2f106d71ccd179b3f7025c642a9ad28f  ./RELEASE-COMMANDS-v0.5.5.md
 7c46ed1c3ccda673301ab6fef94ac165f0f87aa2fa93af0c2418c96759e72669  ./RELEASE-COMMANDS-v0.5.6.md
 35aa200b4d5e2bafb405c2d3ee3bd870ca4fad1d2c8fce3136280b7ae8c82cae  ./RELEASE-COMMANDS-v0.5.7.md
-e2c405fd015ec53fec7b5ef339d9483390d8bfcdf3aa835b79ce143de8c20ae6  ./RELEASE-COMMANDS-v0.5.8.md
+d5d24ec7a3d45688510d8ee46bee3f8027a6bfe98fa18abd83bf994e8a2c9422  ./RELEASE-COMMANDS-v0.5.8.md
 6b516b549481e1191985e918d9af3ab69a8ca5ad38c6065d1adc10599300e93c  ./ROADMAP.md
 bcabdd8dde470144dbdc5636ebc4fd98a2a94d6532d4b39b35620df5a9a7f62f  ./scripts/bootstrap-n8n.mjs
 415ac68d1e4495d7e1b58451e462cb001b76d73423e012959e2ca916f1dd4668  ./scripts/ha-smoke-v0.5.6.sh
@@ -128,7 +129,7 @@ a780762777077323caff0cb33e038df96ace1cd987a1ca68b3ef9f727569c0eb  ./scripts/ha-s
 ca8e3040a18d215ca5d9163a3828468f1e270bdc872d8307b3f095743b004798  ./scripts/sync-openwebui-config.py
 f1c4c511178c0a370e5999a995253d2a08bbec8fc035626fbd1af0bb0b928612  ./scripts/verify-n8n.mjs
 b4218e8f7e07272a01921d46113fb037b968ac0b41c661d438e3a3e9c2d0f9ff  ./scripts/verify-openwebui-backend.py
-4ceec80d7d5f58088965733a9ba1d60071456047705e1d1d7af741185f497e5c  ./SECURITY.md
+0af7a032696bf1090143a7595547163bda9327e605fa273c86e22049d4cc53b7  ./SECURITY.md
 7cd91e86e04975031fe50f1e30e4a0334d7621a28db2f55006c344790372557f  ./smart-router/compose-ha-v0.5.1.example.yml
 147980c55d11f21d07d50135789fb140cb15649e4feb1fd9e2fdc89590c75efc  ./smart-router/compose-ha-v0.5.2.example.yml
 147980c55d11f21d07d50135789fb140cb15649e4feb1fd9e2fdc89590c75efc  ./smart-router/compose-ha-v0.5.3.example.yml
@@ -156,10 +157,6 @@ c587483d4f6c036d5342f5379d656e49f04ff9f539cd485255e1b601134570fc  ./smart-router
 fa3094194eeddbbc312879197cd6ae26c30174b57852490595f2b903940eb6a8  ./smart-router/policy/pricing-v0.5.1.example.json
 159937da52376e6328ddcb03d910603faf32b0f00f3ff166cf1d67524d1a6062  ./smart-router/policy/pricing-v0.5.example.json
 0a68e03234f6f145ee906b048212de0e7953dc684524116c6b2c8eedfc80b9ca  ./smart-router/pyproject.toml
-37dc88ef9a0abeddbe81053a6dd8fdfb13afb613045ea1eb4a5c815a74a3bde4  ./smart-router/.pytest_cache/CACHEDIR.TAG
-3ed731b65d06150c138e2dadb0be0697550888a6b47eb8c45ecc9adba8b8e9bd  ./smart-router/.pytest_cache/.gitignore
-73fd6fccdd802c419a6b2d983d6c3173b7da97558ac4b589edec2dfe443db9ad  ./smart-router/.pytest_cache/README.md
-e1c503f408f8d0398e18b4301fcb16109dadbb3474e83673cc698a8a85492814  ./smart-router/.pytest_cache/v/cache/nodeids
 89d0ccd4c2aa33b07786b0da3985c294ccd32a469efeac5259fdf58945b49fcf  ./smart-router/README.md
 b2e7050cafbc65486180b8a9f2dae802b0bd65c615aa72effbb0d4371015e3bb  ./smart-router/requirements-dev.txt
 f2e82f30a9a0eb5406426afa15e3cc292575f99802691754cc21f6e7f71f3e3d  ./smart-router/requirements.txt
@@ -242,7 +239,7 @@ e28d5ffa225e1ca92656dec2205ec80030b1a34cf54e6928f809ef821bb5c315  ./smart-router
 511d32f355305f89c786b797663d1dd511db97145acf1310b37a3cc4e95492ff  ./templates/hermes-config.yaml.template
 8540f0355cd0bc9e110e707ba1ef2f4a3102bf46e92ea9b75461ec7267f14dd5  ./tests/smoke.sh
 00814596bb6ac1f2d4d6e166ac6855b13a6cdd49c6f56d027fba8b2fccabd82f  ./tests/test-bootstrap-n8n.mjs
-e67f791bafa923ecd925aaa18df8a2796397cc8d60db0a52a0c42470d93fa4bf  ./tests/test_execution_admin_v058.py
+99c77fde39f0ee3077168f38282b39188a712dff67f25519b6c866025641ffe3  ./tests/test_execution_admin_v058.py
 925b3fd627b2b6fca2328f95cc6eebdb96267733a5beaee7d927341a50a791d7  ./tests/test_execution_broker.py
 1cc74ae8f887b090c030a2e8f4ddb6761ca875cf055ca798371264ca14daeb34  ./tests/test-manage-n8n.sh
 0232a8dad594442416421429d47a484275a3770edac96794825605b8167913ab  ./tests/test-manage-ux.sh

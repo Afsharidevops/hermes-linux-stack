@@ -94,6 +94,24 @@ class ExecutionAdminV058Test(unittest.TestCase):
                 self.assertFalse(status["security"]["ssh_private_credentials_mounted"])
                 self.assertFalse(status["security"]["bot_token_readback"])
 
+    def test_execution_admin_compose_has_private_ingress_without_weakening_control_network(self):
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        admin = compose.split("  execution-admin:\n", 1)[1].split("\n  open-webui:\n", 1)[0]
+        docker_broker = compose.split("  execution-docker-broker:\n", 1)[1].split("\n  execution-ssh-broker:\n", 1)[0]
+        ssh_broker = compose.split("  execution-ssh-broker:\n", 1)[1].split("\n  execution-approver:\n", 1)[0]
+        approver = compose.split("  execution-approver:\n", 1)[1].split("\n  execution-admin:\n", 1)[0]
+        networks = compose.split("\nnetworks:\n", 1)[1]
+
+        self.assertIn("- execution-control-net", admin)
+        self.assertIn("- execution-admin-ingress-net", admin)
+        self.assertIn("${EXECUTION_ADMIN_BIND_IP:-127.0.0.1}:${EXECUTION_ADMIN_PORT:-8752}:8752", admin)
+        self.assertNotIn("execution-admin-ingress-net", docker_broker)
+        self.assertNotIn("execution-admin-ingress-net", ssh_broker)
+        self.assertNotIn("execution-admin-ingress-net", approver)
+        self.assertIn("execution-admin-ingress-net:", networks)
+        control = networks.split("execution-control-net:", 1)[1].split("execution-admin-ingress-net:", 1)[0]
+        self.assertIn("internal: true", control)
+
 
 if __name__ == "__main__":
     unittest.main()

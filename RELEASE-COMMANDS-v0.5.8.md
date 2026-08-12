@@ -27,7 +27,6 @@ docker buildx build \
   --builder hermes-multiarch \
   --platform linux/amd64,linux/arm64 \
   -t afsharidevops/hermes-smart-router:0.5.8 \
-  -t afsharidevops/hermes-smart-router:v0.5.8 \
   -t afsharidevops/hermes-smart-router:latest \
   --push \
   ./smart-router
@@ -42,7 +41,6 @@ docker buildx build \
   --builder hermes-multiarch \
   --platform linux/amd64,linux/arm64 \
   -t afsharidevops/hermes-execution-broker:0.1.3 \
-  -t afsharidevops/hermes-execution-broker:v0.1.3 \
   --push \
   ./execution-broker
 
@@ -74,3 +72,23 @@ If Execution Admin is used from a remote private browser, run the browser helper
 ## Branch publication
 
 This package is the `OmniRoute` variant. Keep branch contents separate from the other gateway branch and publish only after reviewing `git diff`, staged files, and secret scans.
+
+## v0.5.8 Execution Admin private-ingress hotfix
+
+Execution Admin must stay on the internal execution-control network for broker communication while also joining a dedicated non-internal bridge used only for the private host-port publication. Do not make `execution-control-net` non-internal.
+
+Expected service networking:
+
+```text
+execution-admin -> execution-control-net + execution-admin-ingress-net
+other execution brokers -> execution-control-net only
+```
+
+After configuring remote browser access, verify:
+
+```bash
+docker port hermes-execution-admin
+curl -fsS http://YOUR_PRIVATE_SERVER_IP:8752/health
+```
+
+The expected published port is `YOUR_PRIVATE_SERVER_IP:8752->8752/tcp`.

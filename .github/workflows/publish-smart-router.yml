@@ -7,9 +7,6 @@ on:
         description: Image version without a leading v
         required: true
         default: 0.5.8
-  push:
-    tags:
-      - smart-router-v*.*.*
 
 permissions:
   contents: read
@@ -39,11 +36,6 @@ jobs:
             exit 2
           fi
 
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]] && ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
-            echo "Release tag ${GITHUB_REF_NAME} does not point to a commit contained in origin/main." >&2
-            exit 2
-          fi
-
           git diff --exit-code origin/main..origin/hermes-omniroute-linux-stack -- smart-router/ || {
             echo "smart-router/ differs between main and hermes-omniroute-linux-stack. Sync both branches before publishing a shared image." >&2
             exit 2
@@ -57,11 +49,7 @@ jobs:
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#smart-router-v}"
-          else
-            version="${INPUT_VERSION}"
-          fi
+          version="${INPUT_VERSION}"
 
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
             printf 'Invalid semantic version: %s\n' "$version" >&2
@@ -90,8 +78,6 @@ jobs:
             echo "image=$image"
             echo 'tags<<EOF'
             echo "$image:$version"
-            echo "$image:v$version"
-            echo "$image:sha-${GITHUB_SHA}"
             if [[ "$version" != *-* ]]; then
               echo "$image:latest"
             fi
