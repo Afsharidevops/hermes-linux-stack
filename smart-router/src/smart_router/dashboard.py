@@ -34,7 +34,7 @@ _TEMPLATE = r'''<!doctype html>
 <div class="shell">
   <aside class="side">
     <div class="brand"><div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h5l3-7 3 14 2-7h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div>Hermes Router<small>Flight Deck · v<span class="ver"></span></small></div></div>
-    <div class="nav"><div class="navlabel">Observe</div><a class="active" href="/dashboard">◈ Flight Deck</a><div class="navlabel">Operate</div><a href="/control/">⌘ Control Plane</a><div class="navlabel">API</div><a href="/v1/models">↗ Models endpoint</a></div>
+    <div class="nav"><div class="navlabel">Observe</div><a class="active" href="/dashboard">◈ Flight Deck</a><div class="navlabel">Operate</div><a href="/control/">⌘ Operations Center</a><div class="navlabel">API</div><a href="/v1/models">↗ Models endpoint</a></div>
     <div class="sidefoot"><span class="dot"></span>Smart Router online<br>Telemetry stays on this deployment.</div>
   </aside>
   <main class="main">
@@ -62,7 +62,7 @@ _TEMPLATE = r'''<!doctype html>
       <div class="card metric"><div class="label">Strong-only baseline</div><div class="value" id="baseline">—</div><div class="sub">same-token strong-only baseline: measured token counts at strong-tier pricing.</div></div>
       <div class="card metric"><div class="label">Budget-cap reduction</div><div class="value" id="budget">—</div><div class="sub">Enforced output-cap delta; not claimed as generated-token savings.</div></div>
       <div class="card metric"><div class="label">Streaming requests</div><div class="value" id="streaming">—</div><div class="sub">Upstream streaming usage can be incomplete.</div></div>
-      <div class="card metric"><div class="label">Runtime</div><div class="value">v<span id="version" class="ver"></span></div><div class="sub">Hermes Smart Router v0.5.3 Flight Deck.</div></div>
+      <div class="card metric"><div class="label">Runtime</div><div class="value">v<span id="version" class="ver"></span></div><div class="sub">Hermes Smart Router Flight Deck.</div></div>
     </section>
 
     <section class="lower">

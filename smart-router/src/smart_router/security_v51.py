@@ -36,7 +36,7 @@ class Identity:
     user_id: int | None = None
     api_key_id: int | None = None
     rpm: int = 60
-    tpm: int = 200000
+    tpm: int = 2000000
     daily_requests: int = 5000
     monthly_budget_usd: float = 0.0
     allowed_tiers: tuple[str, ...] = ("fast", "standard", "strong")
