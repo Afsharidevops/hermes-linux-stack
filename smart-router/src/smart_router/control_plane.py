@@ -18,6 +18,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from . import __version__
 from .control_db import (
     Agent,
     ApiKey,
@@ -58,9 +59,9 @@ class FinalRoute:
 
 
 class ControlPlane:
-    """Hermes Smart Router v0.5.3 control plane (v0.5.2 persisted schema).
+    """Hermes Smart Router v0.5.4 Operations Center (v0.5.2 persisted schema).
 
-    v0.5.3 preserves the v0.5.2 deterministic capability-safety path while adding shared
+    v0.5.4 preserves the v0.5.2 deterministic capability-safety path while adding shared
     health/circuit state, Redis-backed HA counters, OIDC, ACL-aware retrieval and
     file/Docker-secret loading.
     """
@@ -84,7 +85,16 @@ class ControlPlane:
             env_or_file("SMART_ROUTER_ADMIN_API_KEY"),
             int(os.getenv("SMART_ROUTER_SESSION_TTL_SECONDS_V51", "28800")),
         )
-        self.knowledge = KnowledgeManager(self.db)
+        self.client_rpm = _env_int("SMART_ROUTER_CLIENT_RPM", 120)
+        self.client_tpm = _env_int("SMART_ROUTER_CLIENT_TPM", 2000000)
+        self.client_daily_requests = _env_int("SMART_ROUTER_CLIENT_DAILY_REQUESTS", 10000)
+        self.virtual_key_default_rpm = _env_int("SMART_ROUTER_VIRTUAL_KEY_DEFAULT_RPM", 60)
+        self.virtual_key_default_tpm = _env_int("SMART_ROUTER_VIRTUAL_KEY_DEFAULT_TPM", 1000000)
+        self.virtual_key_default_daily = _env_int("SMART_ROUTER_VIRTUAL_KEY_DEFAULT_DAILY_REQUESTS", 5000)
+        self.anon_rpm = _env_int("SMART_ROUTER_ANON_RPM", 30)
+        self.anon_tpm = _env_int("SMART_ROUTER_ANON_TPM", 200000)
+        self.anon_daily_requests = _env_int("SMART_ROUTER_ANON_DAILY_REQUESTS", 1000)
+        self.knowledge = KnowledgeManager(self.db, os.getenv("SMART_ROUTER_KNOWLEDGE_DATABASE_URL", ""))
         self.acl = ACLManager(self.db)
         self.policy = PolicyEngine(self.db)
         self.redis = RedisCoordinator()
@@ -118,7 +128,10 @@ class ControlPlane:
             return identity
         legacy = getattr(self.settings, "client_api_key", "")
         if token and legacy and hmac.compare_digest(token, legacy):
-            identity = Identity(actor="legacy-client", role="operator", team="default")
+            identity = Identity(
+                actor="legacy-client", role="operator", team="default",
+                rpm=self.client_rpm, tpm=self.client_tpm, daily_requests=self.client_daily_requests,
+            )
             request.state.v51_identity = identity
             return identity
         identity = self.security.api_key_identity(token)
@@ -133,7 +146,10 @@ class ControlPlane:
         if identity is None:
             if self.require_auth:
                 return _error("authentication required", "auth_required", 401)
-            identity = Identity(actor="anonymous", role="user", team="default", rpm=int(os.getenv("SMART_ROUTER_ANON_RPM", "30")))
+            identity = Identity(
+                actor="anonymous", role="user", team="default",
+                rpm=self.anon_rpm, tpm=self.anon_tpm, daily_requests=self.anon_daily_requests,
+            )
             request.state.v51_identity = identity
         if not identity.can("routing.use"):
             self.db.audit(identity.actor, identity.role, "routing.request", status="denied", detail={"reason": "permission"})
@@ -142,7 +158,8 @@ class ControlPlane:
         limited = self._rate_limit(identity, estimated)
         if limited:
             self.db.audit(identity.actor, identity.role, "routing.rate_limit", status="denied", detail=limited)
-            return _error(limited["message"], "rate_limit_exceeded", 429)
+            retry_after = str(int(limited.get("retry_after_seconds", 1)))
+            return _error(limited["message"], "rate_limit_exceeded", 429, details=limited, headers={"Retry-After": retry_after})
         self._inject_context(body, identity)
         request.state.v51_started = time.monotonic()
         request.state.v51_request_id = self.db.new_request_id()
@@ -250,7 +267,8 @@ class ControlPlane:
             Route("/api/users", self.users_api, methods=["GET", "POST"]),
             Route("/api/users/{user_id:int}", self.user_api, methods=["PUT", "DELETE"]),
             Route("/api/keys", self.keys_api, methods=["GET", "POST"]),
-            Route("/api/keys/{key_id:int}", self.key_api, methods=["DELETE"]),
+            Route("/api/keys/{key_id:int}", self.key_api, methods=["PUT", "DELETE"]),
+            Route("/api/rate-limits", self.rate_limits_api, methods=["GET"]),
             Route("/api/budgets", self.budgets_api, methods=["GET", "POST"]),
             Route("/api/budgets/{budget_id:int}", self.budget_api, methods=["DELETE"]),
             Route("/api/policies", self.policies_api, methods=["GET", "POST"]),
@@ -281,7 +299,7 @@ class ControlPlane:
     async def panel(self, _: Request) -> Response:
         if not self.enabled:
             return Response(status_code=404)
-        return HTMLResponse(PANEL_HTML.replace("__VERSION__", "0.5.3"))
+        return HTMLResponse(PANEL_HTML.replace("__VERSION__", __version__))
 
     async def login(self, request: Request) -> Response:
         if self.oidc.enabled and not self.oidc.local_login_enabled:
@@ -489,8 +507,8 @@ class ControlPlane:
             try:
                 row, revealed = self.security.create_api_key(
                     name=str(d.get("name", "key")), role=str(d.get("role", "user")), team=str(d.get("team", "default")),
-                    user_id=int(d["user_id"]) if d.get("user_id") else None, rpm=int(d.get("rpm", 60)), tpm=int(d.get("tpm", 200000)),
-                    daily_requests=int(d.get("daily_requests", 5000)), monthly_budget_usd=float(d.get("monthly_budget_usd", 0)),
+                    user_id=int(d["user_id"]) if d.get("user_id") else None, rpm=int(d.get("rpm", self.virtual_key_default_rpm)), tpm=int(d.get("tpm", self.virtual_key_default_tpm)),
+                    daily_requests=int(d.get("daily_requests", self.virtual_key_default_daily)), monthly_budget_usd=float(d.get("monthly_budget_usd", 0)),
                     allowed_tiers=d.get("allowed_tiers") or ["fast", "standard", "strong"], expires_at=d.get("expires_at") or None,
                 )
             except (ValueError, TypeError) as exc:
@@ -507,13 +525,48 @@ class ControlPlane:
         identity = self._admin_identity(request, "keys.manage")
         if isinstance(identity, Response): return identity
         kid = int(request.path_params["key_id"])
-        with self.db.session() as s:
-            row = s.get(ApiKey, kid)
+        with self.db.session() as session:
+            row = session.get(ApiKey, kid)
             if not row: return Response(status_code=404)
-            row.active = False
-            s.commit()
-        self.db.audit(identity.actor, identity.role, "key.revoke", str(kid))
-        return JSONResponse({"ok": True})
+            if request.method == "DELETE":
+                row.active = False
+                action = "key.revoke"
+            else:
+                d = await _json(request)
+                try:
+                    if "name" in d: row.name = str(d["name"]).strip()[:120] or row.name
+                    if "role" in d:
+                        role = str(d["role"])
+                        if role not in ROLE_PERMISSIONS: raise ValueError("unknown role")
+                        row.role = role
+                    if "team" in d: row.team = str(d["team"])[:120]
+                    if "rpm" in d: row.rpm = max(1, int(d["rpm"]))
+                    if "tpm" in d: row.tpm = max(1000, int(d["tpm"]))
+                    if "daily_requests" in d: row.daily_requests = max(1, int(d["daily_requests"]))
+                    if "monthly_budget_usd" in d: row.monthly_budget_usd = max(0.0, float(d["monthly_budget_usd"]))
+                    if "allowed_tiers" in d:
+                        allowed = sorted({str(x) for x in d["allowed_tiers"] if str(x) in {"fast", "standard", "strong"}})
+                        if not allowed: raise ValueError("at least one allowed tier is required")
+                        row.allowed_tiers_json = json.dumps(allowed)
+                    if "active" in d: row.active = bool(d["active"])
+                except (TypeError, ValueError) as exc:
+                    return _error(str(exc), "invalid_key", 422)
+                action = "key.update"
+            session.commit()
+            payload = _row_dict(row, exclude={"key_hash"}) | {"allowed_tiers": _loads(row.allowed_tiers_json, [])}
+        self.db.audit(identity.actor, identity.role, action, str(kid), detail={"rpm": payload["rpm"], "tpm": payload["tpm"], "daily_requests": payload["daily_requests"]})
+        return JSONResponse(payload | {"ok": True})
+
+    async def rate_limits_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "panel.read")
+        if isinstance(identity, Response): return identity
+        return JSONResponse({
+            "stack_client": {"rpm": self.client_rpm, "tpm": self.client_tpm, "daily_requests": self.client_daily_requests, "source": "environment"},
+            "virtual_key_defaults": {"rpm": self.virtual_key_default_rpm, "tpm": self.virtual_key_default_tpm, "daily_requests": self.virtual_key_default_daily},
+            "anonymous": {"rpm": self.anon_rpm, "tpm": self.anon_tpm, "daily_requests": self.anon_daily_requests},
+            "backend": "redis" if self.redis.enabled else "operations_database",
+            "note": "SMART_ROUTER_CLIENT_* limits apply to the stack SMART_ROUTER_CLIENT_API_KEY; virtual-key limits are editable without rotating the key.",
+        })
 
     async def budgets_api(self, request: Request) -> Response:
         identity = self._admin_identity(request, "budgets.manage" if request.method == "POST" else "panel.read")
@@ -578,10 +631,7 @@ class ControlPlane:
             try: row = self.knowledge.create_base(str(d.get("name", "")).strip(), str(d.get("description", "")), identity.actor)
             except Exception: return _error("knowledge base name is required and must be unique", "invalid_knowledge_base", 422)
             self.db.audit(identity.actor, identity.role, "knowledge.create", row.name)
-        with self.db.session() as s:
-            rows = list(s.scalars(select(KnowledgeBase).order_by(KnowledgeBase.id)))
-            counts = dict(s.execute(select(KnowledgeChunk.kb_id, func.count(KnowledgeChunk.id)).group_by(KnowledgeChunk.kb_id)).all())
-        return JSONResponse([_row_dict(r) | {"chunks": counts.get(r.id, 0)} for r in rows])
+        return JSONResponse(self.knowledge.list_bases())
 
     async def knowledge_item_api(self, request: Request) -> Response:
         identity = self._admin_identity(request, "knowledge.manage")
@@ -843,11 +893,18 @@ class ControlPlane:
         redis_ok = self.redis.ping()
         REDIS_READINESS.set(1 if redis_ok else 0)
         return JSONResponse({
-            "version": "0.5.3", "control_db": redacted_url(self.db_url), "database_ok": self.db.ping(), "ha_mode": self.ha_mode,
+            "version": __version__, "operations_center": "Hermes Operations Center",
+            "control_db": redacted_url(self.db_url), "database_ok": self.db.ping(), "ha_mode": self.ha_mode,
+            "knowledge_storage": self.knowledge.storage_mode, "knowledge_db": redacted_url(self.knowledge.database_url),
+            "knowledge_database_ok": self.knowledge.ping(), "knowledge_retrieval": "lexical",
             "require_auth": self.require_auth, "upstream": self.settings.upstream_base_url, "upstream_health": self.settings.upstream_health_url,
             "router_mode": self.settings.mode, "router_policy": self.settings.policy,
             "redis_enabled": self.redis.enabled, "redis_ok": redis_ok, "oidc_enabled": self.oidc.enabled,
             "acl_default_deny": self.acl.default_deny,
+            "rate_limits": {
+                "stack_client": {"rpm": self.client_rpm, "tpm": self.client_tpm, "daily_requests": self.client_daily_requests},
+                "virtual_key_defaults": {"rpm": self.virtual_key_default_rpm, "tpm": self.virtual_key_default_tpm, "daily_requests": self.virtual_key_default_daily},
+            },
         })
 
     # -------------------- internals --------------------
@@ -904,35 +961,46 @@ class ControlPlane:
 
     def _rate_limit(self, identity: Identity, estimated_tokens: int) -> dict[str, Any] | None:
         key_base = f"key:{identity.api_key_id}" if identity.api_key_id else f"actor:{identity.actor}"
+        now = int(time.time())
+        retry_after = max(1, 60 - (now % 60))
+
+        def denied(scope: str, current: int, limit: int, estimated: int = 1) -> dict[str, Any]:
+            label = {"rpm": "RPM", "tpm": "TPM", "daily_requests": "daily request"}.get(scope, scope)
+            return {
+                "message": f"{label} quota exceeded ({limit}); retry after {retry_after}s",
+                "scope": scope, "current": current, "limit": limit, "estimated": estimated,
+                "retry_after_seconds": retry_after, "source": "smart_router",
+            }
+
         if self.redis.enabled:
             try:
-                counters = self.redis.rate_limit(key_base, estimated_tokens)
+                self.redis.rate_limit(key_base, estimated_tokens, identity.rpm, identity.tpm, identity.daily_requests)
                 REDIS_READINESS.set(1)
-                if counters.requests_minute > identity.rpm:
-                    return {"message": "requests/minute quota exceeded", "scope": "rpm"}
-                if counters.tokens_minute > identity.tpm:
-                    return {"message": "tokens/minute quota exceeded", "scope": "tpm"}
-                if counters.requests_day > identity.daily_requests:
-                    return {"message": "daily request quota exceeded", "scope": "daily_requests"}
                 return None
-            except RuntimeError:
+            except RuntimeError as exc:
+                scope = getattr(exc, "rate_scope", "")
+                counters = getattr(exc, "rate_result", None)
+                if scope and counters is not None:
+                    if scope == "rpm": return denied(scope, counters.requests_minute, identity.rpm)
+                    if scope == "tpm": return denied(scope, counters.tokens_minute, identity.tpm, estimated_tokens)
+                    if scope == "daily_requests": return denied(scope, counters.requests_day, identity.daily_requests)
                 REDIS_READINESS.set(0)
                 if self.ha_mode or _env_bool("SMART_ROUTER_REDIS_REQUIRED", False) or _env_bool("SMART_ROUTER_REDIS_FAIL_CLOSED", False):
-                    return {"message": "shared rate-limit state unavailable", "scope": "redis"}
-        now = int(time.time()); minute = now // 60; day = now // 86400
-        with self.db.session() as s:
+                    return {"message": "shared rate-limit state unavailable", "scope": "redis", "retry_after_seconds": 5, "source": "smart_router"}
+        minute = now // 60; day = now // 86400
+        with self.db.session() as session:
             minute_key = key_base + f":m:{minute}"
-            row = s.get(RateCounter, minute_key)
+            row = session.get(RateCounter, minute_key)
             if row is None:
-                row = RateCounter(key=minute_key, window_start=minute, requests=0, tokens=0); s.add(row)
-            if row.requests + 1 > identity.rpm: return {"message": f"RPM quota exceeded ({identity.rpm})", "scope": "rpm"}
-            if row.tokens + estimated_tokens > identity.tpm: return {"message": f"TPM quota exceeded ({identity.tpm})", "scope": "tpm"}
+                row = RateCounter(key=minute_key, window_start=minute, requests=0, tokens=0); session.add(row)
+            if row.requests + 1 > identity.rpm: return denied("rpm", row.requests, identity.rpm)
+            if row.tokens + estimated_tokens > identity.tpm: return denied("tpm", row.tokens, identity.tpm, estimated_tokens)
             day_key = key_base + f":d:{day}"
-            drow = s.get(RateCounter, day_key)
+            drow = session.get(RateCounter, day_key)
             if drow is None:
-                drow = RateCounter(key=day_key, window_start=day, requests=0, tokens=0); s.add(drow)
-            if drow.requests + 1 > identity.daily_requests: return {"message": f"daily request quota exceeded ({identity.daily_requests})", "scope": "daily"}
-            row.requests += 1; row.tokens += estimated_tokens; drow.requests += 1; drow.tokens += estimated_tokens; s.commit()
+                drow = RateCounter(key=day_key, window_start=day, requests=0, tokens=0); session.add(drow)
+            if drow.requests + 1 > identity.daily_requests: return denied("daily_requests", drow.requests, identity.daily_requests)
+            row.requests += 1; row.tokens += estimated_tokens; drow.requests += 1; drow.tokens += estimated_tokens; session.commit()
         return None
 
     def _budget_guard(self, identity: Identity) -> JSONResponse | None:
@@ -1003,6 +1071,13 @@ def _optional_bool(value: Any) -> bool | None:
     if isinstance(value, bool): return value
     raise ValueError("boolean outcome fields must be booleans")
 
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return max(minimum, default)
+
+
 def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None: return default
@@ -1017,8 +1092,11 @@ async def _json(request: Request) -> dict[str, Any]:
         return {}
 
 
-def _error(message: str, code: str, status: int) -> JSONResponse:
-    return JSONResponse({"error": {"message": message, "type": "hermes_v051", "code": code}}, status_code=status)
+def _error(message: str, code: str, status: int, details: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> JSONResponse:
+    error: dict[str, Any] = {"message": message, "type": "hermes_router", "code": code}
+    if details:
+        error["details"] = details
+    return JSONResponse({"error": error}, status_code=status, headers=headers)
 
 
 def _row_dict(row: Any, exclude: set[str] | None = None) -> dict[str, Any]:

@@ -57,6 +57,7 @@ def test_control_plane_accepts_legacy_client_key(tmp_path, monkeypatch):
     ident = cp.authenticate_api_request(req)
     assert ident is not None
     assert ident.actor == "legacy-client"
+    assert ident.tpm == 2_000_000
     assert ident.can("routing.use")
 
 

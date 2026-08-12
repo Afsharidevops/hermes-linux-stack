@@ -3,8 +3,8 @@ from smart_router.dashboard import dashboard_response
 from smart_router.panel_v53 import PANEL_HTML
 
 
-def test_v053_runtime_and_flight_deck_surface():
-    assert __version__ == "0.5.3"
+def test_v054_runtime_and_flight_deck_surface():
+    assert __version__ == "0.5.4"
     body = dashboard_response(version=__version__).body.decode("utf-8")
     assert "Hermes Flight Deck" in body
     assert "Auto refresh" in body
@@ -13,7 +13,7 @@ def test_v053_runtime_and_flight_deck_surface():
     assert "/control/" in body
 
 
-def test_control_plane_has_grouped_navigation_and_choices():
+def test_operations_center_has_grouped_navigation_and_choices():
     assert "navGroups" in PANEL_HTML
     for group in ("Observe", "Routing", "Access", "Intelligence", "System"):
         assert group in PANEL_HTML

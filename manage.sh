@@ -19,7 +19,7 @@ trap cleanup_temp_secrets EXIT
 
 usage() {
   cat <<'EOF'
-Hermes Linux Stack Manager v0.5.3
+Hermes Linux Stack Manager v0.5.4
 
 Usage:
   ./manage.sh                 Open the interactive manager
@@ -51,7 +51,7 @@ Smart Router automation:
   router-summary [HOURS]      Authenticated telemetry summary
   router-routes               Route profiles
   router-provider-health      Provider/model health and circuit state
-  router-system               Control Plane system/feature state
+  router-system               Operations Center system/feature state
   router-info                 Runtime router information
   router-calibrate FILE       Build calibrated policy from labeled JSONL
   router-report FILE          Evaluate policy against labeled JSONL
@@ -200,7 +200,7 @@ services_menu() {
   while true; do
     menu_title 'Services & Logs'
     printf '%s\n' '1) Status                 Show all containers and ports'
-    printf '%s\n' '2) Health                 Run v0.5.3 service health checks'
+    printf '%s\n' '2) Health                 Run v0.5.4 service health checks'
     printf '%s\n' '3) Start                  Start selected stack services'
     printf '%s\n' '4) Stop                   Stop running stack services'
     printf '%s\n' '5) Restart                Restart running stack services'
@@ -238,7 +238,7 @@ services_menu() {
 router_menu() {
   local choice value file
   while true; do
-    menu_title 'Hermes Smart Router v0.5.3'
+    menu_title 'Hermes Smart Router v0.5.4'
     printf '%s\n' 'Observe & access'
     printf '%s\n' '  1) Status & URLs            Mode, policy, features and endpoints'
     printf '%s\n' '  2) Dashboard / Control      URLs and credential guidance'
@@ -248,7 +248,7 @@ router_menu() {
     printf '%s\n' '  5) Route profiles            fast / standard / strong / coding / vision'
     printf '%s\n' '  6) Change mode               observe | route'
     printf '%s\n' '  7) Change policy             heuristic | calibrated | learned'
-    printf '%s\n' '  8) Control Plane system      DB, HA, auth, OIDC and upstream state'
+    printf '%s\n' '  8) Operations Center system  DB, HA, auth, OIDC and upstream state'
     printf '%s\n' 'Evaluate / tune'
     printf '%s\n' '  9) Router runtime info'
     printf '%s\n' ' 10) Calibrate from JSONL'
@@ -458,7 +458,7 @@ uninstall_menu() {
 interactive_menu() {
   local choice
   while true; do
-    menu_title 'Hermes Linux Stack Manager v0.5.3'
+    menu_title 'Hermes Linux Stack Manager v0.5.4'
     printf '%s\n' 'Quick administration — choose a group; direct CLI commands still work.'
     printf '\n%s\n' '1) Overview & health          Status, health, version, diagnostics'
     printf '%s\n'   '2) Services & logs            Start/stop/restart and service logs'
@@ -468,7 +468,7 @@ interactive_menu() {
     printf '%s\n'   '6) Execution & SSH            Sandbox, Docker, SSH profiles, approvals'
     printf '%s\n'   '7) Maintenance & recovery     Updates, backup, restore, rollback'
     printf '%s\n'   '8) Security & integrity       Doctor, image pins, access credentials'
-    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.3 wizard again'
+    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.4 wizard again'
     printf '%s\n'   '10) Uninstall                 Safe remove or explicit purge'
     printf '%s\n'   '0) Exit'
     read -r -p 'Choose [0]: ' choice
@@ -2361,7 +2361,7 @@ PY
       exit 1
     fi
     base="$(router_local_base_url)"
-    printf 'Smart Router v0.5.3 stack integration\n'
+    printf 'Smart Router v0.5.4 stack integration\n'
     printf '  image: %s:%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_REPOSITORY)" "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_TAG)"
     printf '  base URL: %s\n' "$base"
     printf '  OpenAI API: %s/v1\n' "$base"
@@ -2369,7 +2369,7 @@ PY
     printf '  policy: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_POLICY)"
     printf '  tier override aliases: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_ALLOW_TIER_OVERRIDES)"
     printf '  dashboard: %s (%s/dashboard)\n' "$(env_value "$ENV_FILE" SMART_ROUTER_DASHBOARD_ENABLED)" "$base"
-    printf '  control plane: %s (%s/control/)\n' "$(env_value "$ENV_FILE" SMART_ROUTER_CONTROL_PLANE_ENABLED)" "$base"
+    printf '  operations center: %s (%s/control/)\n' "$(env_value "$ENV_FILE" SMART_ROUTER_CONTROL_PLANE_ENABLED)" "$base"
     printf '  require auth: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_REQUIRE_AUTH)"
     printf '  provider health/circuit breakers: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_PROVIDER_HEALTH_ENABLED)"
     printf '  OIDC: %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_OIDC_ENABLED)"
@@ -2384,10 +2384,10 @@ PY
   router-access)
     base="$(router_local_base_url)"
     printf 'Dashboard:     %s/dashboard\n' "$base"
-    printf 'Control Plane: %s/control/\n' "$base"
+    printf 'Operations Center: %s/control/\n' "$base"
     printf 'OpenAI API:    %s/v1\n' "$base"
     printf 'Admin user:    %s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_BOOTSTRAP_ADMIN_USER)"
-    printf 'Dashboard telemetry uses SMART_ROUTER_CLIENT_API_KEY. Control Plane accepts the bootstrap admin user/password or SMART_ROUTER_ADMIN_API_KEY.\n'
+    printf 'Dashboard telemetry uses SMART_ROUTER_CLIENT_API_KEY. Operations Center accepts the bootstrap admin user/password or SMART_ROUTER_ADMIN_API_KEY.\n'
     if [[ "${2:-}" == --show-secrets ]]; then
       [[ -r /dev/tty && -w /dev/tty ]] || { printf 'A controlling terminal is required to reveal secrets.\n' >&2; exit 1; }
       read -r -p 'Reveal Smart Router access secrets on this terminal? [y/N]: ' answer </dev/tty
@@ -2441,7 +2441,7 @@ PY
     ;;
   router-replay)
     dataset="${2:-}"; [[ -f "$dataset" ]] || { printf 'Requests JSONL file required\n' >&2; exit 2; }
-    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.3.jsonl}"
+    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.4.jsonl}"
     dataset="$(cd "$(dirname "$dataset")" && pwd)/$(basename "$dataset")"; mkdir -p "$(dirname "$output")"; touch "$output"; output="$(cd "$(dirname "$output")" && pwd)/$(basename "$output")"
     compose run --rm --no-deps -v "$dataset:/work/input.jsonl:ro" -v "$output:/work/output.jsonl" smart-router python -m smart_router.eval.replay /work/input.jsonl -o /work/output.jsonl
     ;;

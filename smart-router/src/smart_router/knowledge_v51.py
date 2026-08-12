@@ -5,10 +5,12 @@ import json
 import math
 import re
 from collections import Counter
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterator
 
-from sqlalchemy import delete, select
+from sqlalchemy import create_engine, delete, func, select, text
+from sqlalchemy.orm import Session
 
 from .control_db import ControlDB, KnowledgeBase, KnowledgeChunk, Memory
 
@@ -47,16 +49,82 @@ def _score(query: Counter[str], doc: Counter[str]) -> float:
     return float(dot / (qn * dn)) if qn and dn else 0.0
 
 
+class KnowledgeStore:
+    """SQL storage for RAG knowledge bases/chunks.
+
+    By default the knowledge tables share the Operations database. Set
+    SMART_ROUTER_KNOWLEDGE_DATABASE_URL to a second SQLite/PostgreSQL database
+    to keep RAG data separate. The built-in retriever remains lexical; this
+    storage switch does not falsely claim pgvector/embedding search.
+    """
+
+    def __init__(self, control_db: ControlDB, database_url: str = ""):
+        requested = (database_url or "").strip()
+        self.mode = "control" if not requested or requested.lower() in {"control", "same"} else "external"
+        if self.mode == "control":
+            self.url = control_db.url
+            self.engine = control_db.engine
+            self._owns_engine = False
+        else:
+            self.url = requested
+            connect_args = {"check_same_thread": False} if requested.startswith("sqlite") else {}
+            self.engine = create_engine(requested, future=True, pool_pre_ping=True, connect_args=connect_args)
+            self._owns_engine = True
+            KnowledgeBase.__table__.create(self.engine, checkfirst=True)
+            KnowledgeChunk.__table__.create(self.engine, checkfirst=True)
+            if requested.startswith("sqlite"):
+                with self.engine.begin() as conn:
+                    conn.execute(text("PRAGMA journal_mode=WAL"))
+                    conn.execute(text("PRAGMA busy_timeout=5000"))
+
+    @contextmanager
+    def session(self) -> Iterator[Session]:
+        with Session(self.engine) as session:
+            yield session
+
+    def ping(self) -> bool:
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True
+        except Exception:
+            return False
+
+
 class KnowledgeManager:
-    def __init__(self, db: ControlDB):
+    def __init__(self, db: ControlDB, database_url: str = ""):
         self.db = db
+        self.store = KnowledgeStore(db, database_url)
+
+    @property
+    def database_url(self) -> str:
+        return self.store.url
+
+    @property
+    def storage_mode(self) -> str:
+        return self.store.mode
+
+    def ping(self) -> bool:
+        return self.store.ping()
+
+    def list_bases(self) -> list[dict[str, Any]]:
+        with self.store.session() as session:
+            rows = list(session.scalars(select(KnowledgeBase).order_by(KnowledgeBase.id)))
+            counts = dict(session.execute(select(KnowledgeChunk.kb_id, func.count(KnowledgeChunk.id)).group_by(KnowledgeChunk.kb_id)).all())
+        return [
+            {column.name: getattr(row, column.name) for column in row.__table__.columns} | {"chunks": counts.get(row.id, 0)}
+            for row in rows
+        ]
 
     def create_base(self, name: str, description: str, owner: str) -> KnowledgeBase:
-        with self.db.session() as session:
-            row = KnowledgeBase(name=name, description=description, owner=owner)
+        if not name.strip():
+            raise ValueError("knowledge base name is required")
+        with self.store.session() as session:
+            row = KnowledgeBase(name=name.strip(), description=description, owner=owner)
             session.add(row)
             session.commit()
             session.refresh(row)
+            session.expunge(row)
             return row
 
     def add_document(self, kb_id: int, source: str, title: str, content: str, metadata: dict[str, Any] | None = None, replace_source: bool = True) -> int:
@@ -64,7 +132,7 @@ class KnowledgeManager:
         digest = hashlib.sha256(content.encode()).hexdigest()
         meta = dict(metadata or {})
         meta["sha256"] = digest
-        with self.db.session() as session:
+        with self.store.session() as session:
             if session.get(KnowledgeBase, kb_id) is None:
                 raise ValueError("knowledge base not found")
             existing = list(session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id, KnowledgeChunk.source == source[:500])))
@@ -83,13 +151,13 @@ class KnowledgeManager:
         return len(pieces)
 
     def delete_source(self, kb_id: int, source: str) -> int:
-        with self.db.session() as session:
+        with self.store.session() as session:
             result = session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id, KnowledgeChunk.source == source[:500]))
             session.commit()
             return int(result.rowcount or 0)
 
     def delete_base(self, kb_id: int) -> None:
-        with self.db.session() as session:
+        with self.store.session() as session:
             session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id))
             row = session.get(KnowledgeBase, kb_id)
             if row:
@@ -100,9 +168,9 @@ class KnowledgeManager:
         if not kb_ids or not query.strip():
             return []
         q = _tokens(query)
-        with self.db.session() as session:
+        with self.store.session() as session:
             rows = list(session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.kb_id.in_(kb_ids)).limit(3000)))
-        ranked = sorted((( _score(q, _tokens(row.content)), row) for row in rows), key=lambda x: x[0], reverse=True)
+        ranked = sorted(((_score(q, _tokens(row.content)), row) for row in rows), key=lambda x: x[0], reverse=True)
         return [{"id": row.id, "kb_id": row.kb_id, "source": row.source, "title": row.title, "content": row.content, "score": round(score, 5)} for score, row in ranked[: max(1, min(limit, 12))] if score > 0]
 
     def context(self, kb_ids: list[int], query: str, limit: int = 4) -> str:

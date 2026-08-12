@@ -42,7 +42,7 @@ class ApiKey(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
     rpm: Mapped[int] = mapped_column(Integer, default=60)
-    tpm: Mapped[int] = mapped_column(Integer, default=200000)
+    tpm: Mapped[int] = mapped_column(Integer, default=2000000)
     daily_requests: Mapped[int] = mapped_column(Integer, default=5000)
     monthly_budget_usd: Mapped[float] = mapped_column(Float, default=0.0)
     allowed_tiers_json: Mapped[str] = mapped_column(Text, default='["fast","standard","strong"]')
@@ -261,6 +261,7 @@ class OutcomeEvent(Base):
 
 class ControlDB:
     def __init__(self, url: str):
+        self.url = url
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
         self.engine = create_engine(url, future=True, pool_pre_ping=True, connect_args=connect_args)
         Base.metadata.create_all(self.engine)
@@ -307,6 +308,7 @@ class ControlDB:
 
     def new_request_id(self) -> str:
         return "rq_" + secrets.token_hex(10)
+
 
 
 def _profile_min_tier(name: str) -> str:
