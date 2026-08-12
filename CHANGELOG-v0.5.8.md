@@ -54,3 +54,12 @@ The broader root Python test discovery also contains environment-dependent tests
 ## Security invariant
 
 UI convenience must not collapse execution authority into Smart Router. Execution Admin continues to exclude the Ed25519 approval-signing private key, Docker socket, and SSH private credentials, while Smart Router continues to exclude the Execution Admin key and execution approval secrets.
+
+## Post-release private-ingress hotfix
+
+- Execution Admin now joins a dedicated `execution-admin-ingress-net` in addition to the internal `execution-control-net`.
+- The control network remains `internal: true`; only Execution Admin receives the host-ingress bridge.
+- This allows `${EXECUTION_ADMIN_BIND_IP}:${EXECUTION_ADMIN_PORT}:8752` to be actually published on Docker while preserving broker isolation.
+- Smart Router and Execution Broker application images are unchanged by this Compose-only networking fix.
+- Smart Router publishing documentation/workflow now uses only the plain version tag and `latest`; no `v<version>` or SHA alias is emitted.
+- `MANIFEST.sha256` is regenerated from repository-tracked release files, removing stale ignored cache entries that are not present in a fresh clone.

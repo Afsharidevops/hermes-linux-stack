@@ -42,3 +42,14 @@ Light mode now uses dedicated semantic surfaces, text, borders, inputs, tables, 
 ## Upgrade note
 
 The control schema advances in place to `0.5.8`; the compatibility SQLite filename may remain `control-v0.5.2.sqlite3`. Back up and preserve `data/smart-router/` and `data/stack-secrets/` during normal upgrades.
+
+## Execution Admin network layout
+
+For remote private-browser administration, Execution Admin uses two Docker networks:
+
+```text
+execution-control-net          internal=true; broker/admin control traffic
+execution-admin-ingress-net   normal bridge; Execution Admin only
+```
+
+Do not attach the Docker broker, SSH broker, approver, or Smart Router to `execution-admin-ingress-net`, and do not disable `internal: true` on the control network. After configuration, `docker port hermes-execution-admin` should show the exact private bind, for example `192.168.85.243:8752`.

@@ -413,7 +413,9 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 64
-    networks: [execution-control-net]
+    networks:
+      - execution-control-net
+      - execution-admin-ingress-net
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8752/health', timeout=3)"]
       interval: 30s
@@ -529,6 +531,12 @@ networks:
   # Outbound only, for SSH to reach configured hosts. Sandboxes join
   # hermes-execution-egress, which the Docker broker creates on demand; neither
   # network is attached to agent-net.
+  # Dedicated host-ingress bridge for Execution Admin only. The execution-control
+  # network remains internal; bind this service only to a trusted private address.
+  execution-admin-ingress-net:
+    name: hermes-execution-admin-ingress
+    driver: bridge
+
   execution-egress-net:
     name: hermes-execution-egress
     driver: bridge
