@@ -1,4 +1,4 @@
-"""Execution administration surface for Hermes Linux Stack v0.5.7.
+"""Execution administration surface for Hermes Linux Stack v0.5.8.
 
 This service is intentionally separate from the Smart Router process.  It can
 change execution policy files and the dedicated Telegram approval-bot token,
@@ -48,7 +48,7 @@ def _atomic_write(path: Path, value: str, mode: int = 0o660) -> None:
     """Safely rewrite an existing mounted regular file without replacing its inode.
 
     Compose mounts execution policy files individually.  Replacing a bind-mount
-    target is unreliable and would also change ownership, so v0.5.7 writes the
+    target is unreliable and would also change ownership, so v0.5.8 writes the
     existing inode with O_NOFOLLOW and fsync.  manage.sh creates the files first.
     """
     flags = os.O_WRONLY | os.O_TRUNC | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -168,7 +168,7 @@ def status() -> dict[str, Any]:
     except OSError:
         pass
     return {
-        "version": "0.1.2",
+        "version": "0.1.3",
         "features": _features(),
         "users": _users(USERS_PATH),
         "allowed_users": _users(ALLOWED_USERS_PATH),

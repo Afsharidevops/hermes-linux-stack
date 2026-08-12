@@ -1,7 +1,7 @@
 FROM python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419
 
 LABEL org.opencontainers.image.title="Hermes Execution Broker" \
-      org.opencontainers.image.version="0.1.2" \
+      org.opencontainers.image.version="0.1.3" \
       org.opencontainers.image.description="Hermes execution brokers, independent Telegram approver, and separate execution-admin boundary"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "execution-broker" / "src"))
 from broker import admin
 
 
-class ExecutionAdminV057Test(unittest.TestCase):
+class ExecutionAdminV058Test(unittest.TestCase):
     def paths(self, root: Path):
         for name in ("features","generation","users","allowed","bot-token","hermes-token.sha256","control-secret","admin-key"):
             (root / name).touch()
@@ -69,6 +69,13 @@ class ExecutionAdminV057Test(unittest.TestCase):
                 self.assertEqual((root / "bot-token").read_text().strip(), other)
                 self.assertNotIn(other, json.dumps(result))
 
+    def test_browser_origins_are_exact_and_do_not_accept_wildcards(self):
+        with mock.patch.dict("os.environ", {"EXECUTION_ADMIN_ALLOWED_ORIGINS": "http://192.168.1.20:8787,http://localhost:8787"}, clear=False):
+            self.assertTrue(admin.allowed_origin("http://192.168.1.20:8787"))
+            self.assertFalse(admin.allowed_origin("http://192.168.1.20:9999"))
+            self.assertFalse(admin.allowed_origin("http://evil.example"))
+            self.assertTrue(admin.allowed_origin(""))  # CLI/curl clients have no Origin.
+
     def test_status_never_claims_privileged_mounts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -80,7 +87,7 @@ class ExecutionAdminV057Test(unittest.TestCase):
                 (root / "bot-token").write_text("123456:" + "A" * 24)
                 (root / "admin-key").write_text("secret")
                 status = admin.status()
-                self.assertEqual(status["version"], "0.1.2")
+                self.assertEqual(status["version"], "0.1.3")
                 self.assertEqual(status["features"], ["ssh"])
                 self.assertFalse(status["security"]["signing_key_mounted"])
                 self.assertFalse(status["security"]["docker_socket_mounted"])

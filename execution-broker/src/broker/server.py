@@ -263,6 +263,8 @@ class AdminHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin",origin);self.send_header("Vary","Origin")
             self.send_header("Access-Control-Allow-Headers","Content-Type, X-Execution-Admin-Key")
             self.send_header("Access-Control-Allow-Methods","GET, PUT, POST, OPTIONS")
+            if self.headers.get("Access-Control-Request-Private-Network", "").lower() == "true":
+                self.send_header("Access-Control-Allow-Private-Network", "true")
         self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(b)));self.end_headers();self.wfile.write(b)
     def do_OPTIONS(self):
         if not self._origin_ok(): return self.reply(403,{"error":"Origin is not allowed."})

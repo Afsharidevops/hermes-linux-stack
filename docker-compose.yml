@@ -55,7 +55,7 @@ services:
 
   smart-router:
     profiles: ["smart-router"]
-    image: ${SMART_ROUTER_IMAGE_REPOSITORY:-afsharidevops/hermes-smart-router}:${SMART_ROUTER_IMAGE_TAG:-0.5.7}
+    image: ${SMART_ROUTER_IMAGE_REPOSITORY:-afsharidevops/hermes-smart-router}:${SMART_ROUTER_IMAGE_TAG:-0.5.8}
     container_name: hermes-smart-router
     restart: unless-stopped
     ports:
@@ -228,7 +228,7 @@ services:
   # reachable only from Hermes on the internal control network, with the secret.
   execution-docker-broker:
     profiles: ["execution-docker"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.3}
     container_name: hermes-execution-docker-broker
     restart: unless-stopped
     # Runs as the local operator so mode-0600 broker state stays unreadable to
@@ -280,7 +280,7 @@ services:
   # No Docker socket. The only service that can read SSH private keys.
   execution-ssh-broker:
     profiles: ["execution-ssh"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.3}
     container_name: hermes-execution-ssh-broker
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
@@ -329,7 +329,7 @@ services:
   # Hermes control secret, or execution capability database.
   execution-approver:
     profiles: ["execution-approval"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.3}
     container_name: hermes-execution-approver
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
@@ -371,7 +371,7 @@ services:
   # receives that key, the approval signing key, Docker socket, or SSH secrets.
   execution-admin:
     profiles: ["execution-admin"]
-    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.2}
+    image: ${EXECUTION_BROKER_IMAGE:-afsharidevops/hermes-execution-broker:0.1.3}
     container_name: hermes-execution-admin
     restart: unless-stopped
     user: "${EXECUTION_RUN_AS:-10003:10003}"
