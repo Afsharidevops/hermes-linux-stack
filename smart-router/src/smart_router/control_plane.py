@@ -57,7 +57,7 @@ from .provider_health import ProviderHealthRegistry
 from .shared_state import RedisCoordinator
 from .secrets_v52 import env_or_file, redacted_url
 from .metrics import ACL_DENIES, REDIS_READINESS, SSO_LOGINS
-from .panel_v56 import PANEL_HTML
+from .panel_v57 import PANEL_HTML
 from .policy_v51 import PolicyEngine, TIER_ORDER
 from .security_v51 import Identity, ROLE_PERMISSIONS, SecurityManager, bearer
 from .guardrails_v56 import GuardrailEngine
@@ -89,9 +89,9 @@ SKILL_CATALOG: list[dict[str, Any]] = [
 ]
 
 class ControlPlane:
-    """Hermes Smart Router v0.5.6 Operations Center (v0.5.2 persisted schema).
+    """Hermes Smart Router v0.5.7 Operations Center (v0.5.2 persisted schema).
 
-    v0.5.6 preserves the v0.5.2-compatible capability-safety path while adding shared
+    v0.5.7 preserves the v0.5.2-compatible capability-safety path while adding shared
     health/circuit state, Redis-backed HA counters, OIDC, ACL-aware retrieval and
     file/Docker-secret loading.
     """
@@ -1463,7 +1463,7 @@ class ControlPlane:
             "ldap": {"configured": configured("LDAP"), "status": "connector_foundation" if configured("LDAP") else "not_configured"},
             "saml": {"configured": configured("SAML"), "status": "connector_foundation" if configured("SAML") else "not_configured"},
             "scim": {"configured": configured("SCIM"), "status": "provisioning_foundation" if configured("SCIM") else "not_configured"},
-            "note": "v0.5.6 exposes enterprise identity readiness without storing IdP secrets in the browser. OIDC is the completed interactive login path; LDAP/SAML/SCIM require deployment-specific connector integration before production use.",
+            "note": "v0.5.7 exposes enterprise identity readiness without storing IdP secrets in the browser. OIDC is the completed interactive login path; LDAP/SAML/SCIM require deployment-specific connector integration before production use.",
         })
 
     async def audit_api(self, request: Request) -> Response:

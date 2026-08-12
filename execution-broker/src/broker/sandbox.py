@@ -32,7 +32,7 @@ def build_sandbox_body(request: dict[str, Any], *, image: str, workspace_source:
         "RestartPolicy": {"Name": "no"},
         "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},
         # A sandbox never joins agent-net and never sees the host gateway, so an
-        # approved command cannot reach n8n, OmniRoute, or Hermes itself.
+        # approved command cannot reach n8n, 9router, or Hermes itself.
         "NetworkMode": egress_network if request["network"] == "egress" else "none",
     }
     if request["net_raw"]:

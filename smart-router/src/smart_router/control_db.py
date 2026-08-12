@@ -428,9 +428,9 @@ class ControlDB:
         with Session(self.engine) as session:
             row = session.get(SchemaVersion, "smart-router-control")
             if row is None:
-                session.add(SchemaVersion(component="smart-router-control", version="0.5.6"))
+                session.add(SchemaVersion(component="smart-router-control", version="0.5.7"))
             else:
-                row.version = "0.5.6"
+                row.version = "0.5.7"
                 row.updated_at = utcnow()
             session.commit()
 

@@ -1,8 +1,8 @@
-# Hermes Linux Stack — OmniRoute + Smart Router v0.5.6
+# Hermes Linux Stack — OmniRoute + Smart Router v0.5.7
 
-> **v0.5.6 UX release:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.6 Smart Router and OmniRoute architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
+> **v0.5.7 UX release:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.7 Smart Router and OmniRoute architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.5.6** and **OmniRoute**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and supporting services behind **Hermes Smart Router v0.5.7** and **OmniRoute**.
 
 > This branch is intentionally **OmniRoute-only**.
 >
@@ -20,7 +20,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.6
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.7
                             │              │
 n8n / other clients ────────┘              │
                                            ▼
@@ -46,7 +46,7 @@ The two router backends in this repository are intentionally isolated.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.6
+          Smart Router v0.5.7
                   │
                   ▼
                9router
@@ -61,7 +61,7 @@ Hermes / Telegram / Open WebUI / n8n
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.6
+          Smart Router v0.5.7
                   │
                   ▼
               OmniRoute
@@ -79,7 +79,7 @@ Do not combine 9router and OmniRoute in one Compose stack.
 - Hermes Agent
 - Telegram bot/agent through Hermes
 - Numeric Telegram allowlist
-- Hermes Smart Router v0.5.6
+- Hermes Smart Router v0.5.7
 - OmniRoute dashboard and OpenAI-compatible API
 - Open WebUI
 - Optional n8n
@@ -182,7 +182,7 @@ Telegram Bot API
 Hermes Agent
      │
      ▼
-Smart Router v0.5.6
+Smart Router v0.5.7
      │
      ▼
 OmniRoute
@@ -333,7 +333,7 @@ curl -s http://127.0.0.1:20129/v1/models
 
 ---
 
-# Smart Router v0.5.6
+# Smart Router v0.5.7
 
 Published image:
 
@@ -558,7 +558,7 @@ Expected version:
 ```json
 {
   "status": "ok",
-  "version": "0.5.6"
+  "version": "0.5.7"
 }
 ```
 
@@ -785,6 +785,31 @@ If API-key enforcement is enabled, ensure every client path is configured consis
 The current `manage.sh` does not provide an `enable-omniroute-api-auth` helper, so authentication changes should be treated as an explicit configuration operation and tested before public exposure.
 
 ---
+
+
+## v0.5.7 Execution & Approvals UI
+
+Hermes Operations Center now includes **System → Execution & Approvals**. It connects directly from the operator browser to the optional `execution-admin` service with a separate admin key. The Smart Router backend does not receive that key or the dedicated Telegram approval bot token.
+
+Bootstrap the separate admin boundary:
+
+```bash
+./manage.sh enable-execution-admin
+./manage.sh execution-admin-status
+./manage.sh show-execution-admin-key
+```
+
+The UI can then manage:
+
+- live Sandbox/Docker/SSH feature policy for already-deployed brokers;
+- numeric Telegram execution approvers, restricted to `TELEGRAM_ALLOWED_USERS`;
+- write-only replacement of the dedicated approval-bot token;
+- broker control-secret rotation;
+- broker/approver health and execution-admin audit events;
+- redacted SSH profile metadata.
+
+The `execution-admin` service does **not** mount the Ed25519 approval signing key, Docker socket, or SSH private credentials. First-time Docker/SSH broker deployment and SSH credential creation/removal remain host `manage.sh` operations. Port `8752` binds to loopback by default. For remote administration, use a trusted private bind address, TLS/reverse proxy where appropriate, and exact `EXECUTION_ADMIN_ALLOWED_ORIGINS`; never use wildcard CORS or expose the admin port publicly.
+
 
 # Service Ports
 
@@ -1159,11 +1184,11 @@ The v0.5 target scorecard is a roadmap figure, not measured performance:
 
 ---
 
-## Smart Router v0.5.6 Flight Deck and Operations Center
+## Smart Router v0.5.7 Flight Deck and Operations Center
 
-Smart Router v0.5.6 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Operations Center at `/control/`, while preserving OmniRoute as this branch's upstream gateway. The Operations Center covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
+Smart Router v0.5.7 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Operations Center at `/control/`, while preserving OmniRoute as this branch's upstream gateway. The Operations Center covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
 
-The easy installer now configures the v0.5.6 core switches instead of silently relying on Compose defaults, and `./manage.sh menu` exposes a Smart Router submenu. Useful commands include `router-status`, `router-access`, `router-summary`, `router-routes`, `router-provider-health`, `router-system`, `router-info`, `router-policy`, `router-calibrate`, `router-report`, and `router-replay`.
+The easy installer now configures the v0.5.7 core switches instead of silently relying on Compose defaults, and `./manage.sh menu` exposes a Smart Router submenu. Useful commands include `router-status`, `router-access`, `router-summary`, `router-routes`, `router-provider-health`, `router-system`, `router-info`, `router-policy`, `router-calibrate`, `router-report`, and `router-replay`.
 
 Routing semantics are important: Smart Router policy applies to `model=auto`; `auto-fast`/`auto-standard`/`auto-strong` are available only when tier overrides are enabled. Explicit upstream model names pass through without automatic tier selection. `observe` evaluates/logs automatic requests but dispatches them through `SMART_ROUTER_OBSERVE_MODEL`; `route` applies the selected route profile.
 
@@ -1172,7 +1197,7 @@ Default local URLs are `http://127.0.0.1:8787/v1`, `http://127.0.0.1:8787/dashbo
 Default Smart Router image: `afsharidevops/hermes-smart-router:latest`; pin `SMART_ROUTER_IMAGE_TAG` in `.env` when you want a stable release.
 
 
-## Image tag policy (v0.5.6)
+## Image tag policy (v0.5.7)
 
 Application images intentionally default to mutable tags so normal `docker compose pull` tracks upstream releases. You can pin any service later by changing only `.env`; Compose does not need to be edited.
 
@@ -1201,7 +1226,7 @@ For n8n + Hermes MCP installations, `./install.sh` starts n8n first and then off
 
 Instance-level MCP capabilities are n8n-version-dependent; the stack validates the stable workflow core and does not require newer optional tools such as `search_executions` just to accept a valid access token.
 
-## RAG database storage (v0.5.6)
+## RAG database storage (v0.5.7)
 
 The visible admin UI is **Hermes Operations Center** at `/control/` (the URL and `SMART_ROUTER_CONTROL_*` names stay compatible). Knowledge storage is configured server-side so database passwords are not saved in browser state.
 
@@ -1218,4 +1243,4 @@ Or put knowledge bases/chunks in a separate PostgreSQL database:
 SMART_ROUTER_KNOWLEDGE_DATABASE_URL=postgresql+psycopg://hermes_rag:SECRET@rag-postgres:5432/hermes_knowledge
 ```
 
-After changing the DSN, recreate only Smart Router and inspect **Operations Center → Knowledge** or `./manage.sh router-system`. The UI reports storage mode, connectivity and a redacted DSN. v0.5.6 retrieval is lexical; PostgreSQL storage is not presented as pgvector/embedding retrieval.
+After changing the DSN, recreate only Smart Router and inspect **Operations Center → Knowledge** or `./manage.sh router-system`. The UI reports storage mode, connectivity and a redacted DSN. v0.5.7 retains hybrid lexical/vector retrieval, reranking, and PostgreSQL pgvector support from v0.5.6. Configure a real embeddings endpoint for production semantic retrieval.

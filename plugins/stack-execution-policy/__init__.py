@@ -14,7 +14,16 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-_FEATURES = frozenset(x.strip() for x in os.getenv("EXECUTION_FEATURES", "").split(",") if x.strip())
+_FEATURES_FILE = Path(os.getenv("EXECUTION_FEATURES_FILE", "/run/secrets/execution-features"))
+_FEATURES_FALLBACK = os.getenv("EXECUTION_FEATURES", "")
+
+def _features() -> frozenset[str]:
+    try:
+        raw = _FEATURES_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        raw = _FEATURES_FALLBACK
+    return frozenset(x.strip() for x in raw.split(",") if x.strip())
+
 _CONTROL_SECRET_FILE = Path(os.getenv("EXECUTION_CONTROL_SECRET_FILE", "/run/secrets/execution-control"))
 _DOCKER_BROKER = os.getenv("EXECUTION_DOCKER_BROKER_URL", "http://hermes-execution-docker-broker:8750")
 _SSH_BROKER = os.getenv("EXECUTION_SSH_BROKER_URL", "http://hermes-execution-ssh-broker:8750")
@@ -122,7 +131,7 @@ def _broker_call(feature: str, endpoint: str, payload: dict[str, Any], timeout: 
 
 
 def _context_problem(feature: str) -> str | None:
-    if feature not in _FEATURES:
+    if feature not in _features():
         return f"Execution feature '{feature}' is disabled."
     if _session_platform() != "telegram":
         return "Execution is allowed only from an interactive Telegram session."
