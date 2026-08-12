@@ -19,7 +19,7 @@ trap cleanup_temp_secrets EXIT
 
 usage() {
   cat <<'EOF'
-Hermes Linux Stack Manager v0.5.5
+Hermes Linux Stack Manager v0.5.6
 
 Usage:
   ./manage.sh                 Open the interactive manager
@@ -238,7 +238,7 @@ services_menu() {
   while true; do
     menu_title 'Services & Logs'
     printf '%s\n' '1) Status                 Show all containers and ports'
-    printf '%s\n' '2) Health                 Run v0.5.5 service health checks'
+    printf '%s\n' '2) Health                 Run v0.5.6 service health checks'
     printf '%s\n' '3) Start                  Start selected stack services'
     printf '%s\n' '4) Stop                   Stop running stack services'
     printf '%s\n' '5) Restart                Restart running stack services'
@@ -276,7 +276,7 @@ services_menu() {
 router_menu() {
   local choice value file
   while true; do
-    menu_title 'Hermes Smart Router v0.5.5'
+    menu_title 'Hermes Smart Router v0.5.6'
     printf '%s\n' 'Observe & access'
     printf '%s\n' '  1) Status & URLs            Mode, policy, features and endpoints'
     printf '%s\n' '  2) Dashboard / Control      URLs and credential guidance'
@@ -496,7 +496,7 @@ uninstall_menu() {
 interactive_menu() {
   local choice
   while true; do
-    menu_title 'Hermes Linux Stack Manager v0.5.5'
+    menu_title 'Hermes Linux Stack Manager v0.5.6'
     printf '%s\n' 'Quick administration — choose a group; direct CLI commands still work.'
     printf '\n%s\n' '1) Overview & health          Status, health, version, diagnostics'
     printf '%s\n'   '2) Services & logs            Start/stop/restart and service logs'
@@ -506,7 +506,7 @@ interactive_menu() {
     printf '%s\n'   '6) Execution & SSH            Sandbox, Docker, SSH profiles, approvals'
     printf '%s\n'   '7) Maintenance & recovery     Updates, backup, restore, rollback'
     printf '%s\n'   '8) Security & integrity       Doctor, image pins, access credentials'
-    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.5 wizard again'
+    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.6 wizard again'
     printf '%s\n'   '10) Uninstall                 Safe remove or explicit purge'
     printf '%s\n'   '0) Exit'
     read -r -p 'Choose [0]: ' choice
@@ -2403,7 +2403,7 @@ PY
       exit 1
     fi
     base="$(router_local_base_url)"
-    printf 'Smart Router v0.5.5 stack integration\n'
+    printf 'Smart Router v0.5.6 stack integration\n'
     printf '  image: %s:%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_REPOSITORY)" "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_TAG)"
     printf '  base URL: %s\n' "$base"
     printf '  OpenAI API: %s/v1\n' "$base"
@@ -2487,7 +2487,7 @@ PY
     ;;
   router-replay)
     dataset="${2:-}"; [[ -f "$dataset" ]] || { printf 'Requests JSONL file required\n' >&2; exit 2; }
-    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.5.jsonl}"
+    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.6.jsonl}"
     dataset="$(cd "$(dirname "$dataset")" && pwd)/$(basename "$dataset")"; mkdir -p "$(dirname "$output")"; touch "$output"; output="$(cd "$(dirname "$output")" && pwd)/$(basename "$output")"
     compose run --rm --no-deps -v "$dataset:/work/input.jsonl:ro" -v "$output:/work/output.jsonl" smart-router python -m smart_router.eval.replay /work/input.jsonl -o /work/output.jsonl
     ;;

@@ -145,6 +145,121 @@ class KnowledgeChunk(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
 
 
+class KnowledgeEmbedding(Base):
+    __tablename__ = "v56_knowledge_embeddings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    kb_id: Mapped[int] = mapped_column(Integer, index=True)
+    embedding_json: Mapped[str] = mapped_column(Text, default="[]")
+    dimensions: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class RequestTrace(Base):
+    __tablename__ = "v56_request_traces"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String(80), index=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    ts: Mapped[str] = mapped_column(String(40), default=utcnow, index=True)
+    stage: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="ok")
+    duration_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class GuardrailRule(Base):
+    __tablename__ = "v56_guardrail_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    category: Mapped[str] = mapped_column(String(50), default="content")
+    action: Mapped[str] = mapped_column(String(30), default="audit")
+    pattern: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class RouterPipeline(Base):
+    __tablename__ = "v56_router_pipelines"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100, index=True)
+    definition_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class Workflow(Base):
+    __tablename__ = "v56_workflows"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    workflow_type: Mapped[str] = mapped_column(String(40), default="agent_team")
+    graph_json: Mapped[str] = mapped_column(Text, default='{"nodes":[],"edges":[]}')
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class PromptVersion(Base):
+    __tablename__ = "v56_prompt_versions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    content: Mapped[str] = mapped_column(Text, default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class EvalDataset(Base):
+    __tablename__ = "v56_eval_datasets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class EvalDatasetItem(Base):
+    __tablename__ = "v56_eval_dataset_items"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[int] = mapped_column(Integer, index=True)
+    input_json: Mapped[str] = mapped_column(Text, default="{}")
+    expected_json: Mapped[str] = mapped_column(Text, default="{}")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class EvalRun(Base):
+    __tablename__ = "v56_eval_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(160), default="evaluation")
+    variant_a: Mapped[str] = mapped_column(String(160), default="")
+    variant_b: Mapped[str] = mapped_column(String(160), default="")
+    status: Mapped[str] = mapped_column(String(30), default="draft")
+    metrics_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class ModelCatalogEntry(Base):
+    __tablename__ = "v56_model_catalog"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(120), default="upstream", index=True)
+    model: Mapped[str] = mapped_column(String(240), unique=True, index=True)
+    context_limit: Mapped[int] = mapped_column(Integer, default=0)
+    output_limit: Mapped[int] = mapped_column(Integer, default=0)
+    input_price_per_1m: Mapped[float] = mapped_column(Float, default=0.0)
+    output_price_per_1m: Mapped[float] = mapped_column(Float, default=0.0)
+    supports_tools: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_vision: Mapped[bool] = mapped_column(Boolean, default=False)
+    health: Mapped[str] = mapped_column(String(30), default="unknown")
+    latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
 class Memory(Base):
     __tablename__ = "v51_memories"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -313,9 +428,9 @@ class ControlDB:
         with Session(self.engine) as session:
             row = session.get(SchemaVersion, "smart-router-control")
             if row is None:
-                session.add(SchemaVersion(component="smart-router-control", version="0.5.5"))
+                session.add(SchemaVersion(component="smart-router-control", version="0.5.6"))
             else:
-                row.version = "0.5.5"
+                row.version = "0.5.6"
                 row.updated_at = utcnow()
             session.commit()
 

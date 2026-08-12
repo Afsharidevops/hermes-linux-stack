@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from collections import Counter
 from contextlib import contextmanager
@@ -12,7 +13,8 @@ from typing import Any, Iterator
 from sqlalchemy import create_engine, delete, func, select, text
 from sqlalchemy.orm import Session
 
-from .control_db import ControlDB, KnowledgeBase, KnowledgeChunk, Memory
+from .control_db import ControlDB, KnowledgeBase, KnowledgeChunk, KnowledgeEmbedding, Memory
+from .vector_rag_v56 import VectorIndex
 
 _WORD = re.compile(r"[A-Za-z0-9_./:-]{2,}")
 
@@ -54,8 +56,8 @@ class KnowledgeStore:
 
     By default the knowledge tables share the Operations database. Set
     SMART_ROUTER_KNOWLEDGE_DATABASE_URL to a second SQLite/PostgreSQL database
-    to keep RAG data separate. The built-in retriever remains lexical; this
-    storage switch does not falsely claim pgvector/embedding search.
+    to keep RAG data separate. v0.5.6 adds hybrid lexical/vector retrieval and
+    uses pgvector automatically when PostgreSQL has the vector extension.
     """
 
     def __init__(self, control_db: ControlDB, database_url: str = ""):
@@ -72,6 +74,7 @@ class KnowledgeStore:
             self._owns_engine = True
             KnowledgeBase.__table__.create(self.engine, checkfirst=True)
             KnowledgeChunk.__table__.create(self.engine, checkfirst=True)
+            KnowledgeEmbedding.__table__.create(self.engine, checkfirst=True)
             if requested.startswith("sqlite"):
                 with self.engine.begin() as conn:
                     conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -95,6 +98,10 @@ class KnowledgeManager:
     def __init__(self, db: ControlDB, database_url: str = ""):
         self.db = db
         self.store = KnowledgeStore(db, database_url)
+        self.vector = VectorIndex(self.store)
+        self.retrieval_mode = os.getenv("SMART_ROUTER_RAG_MODE", "hybrid").strip().lower()
+        if self.retrieval_mode not in {"lexical", "vector", "hybrid"}:
+            self.retrieval_mode = "hybrid"
 
     @property
     def database_url(self) -> str:
@@ -145,9 +152,20 @@ class KnowledgeManager:
                     return 0
                 if replace_source:
                     session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id, KnowledgeChunk.source == source[:500]))
+            created: list[KnowledgeChunk] = []
             for piece in pieces:
-                session.add(KnowledgeChunk(kb_id=kb_id, source=source[:500], title=title[:300], content=piece, metadata_json=json.dumps(meta, separators=(",", ":"))))
+                row = KnowledgeChunk(kb_id=kb_id, source=source[:500], title=title[:300], content=piece, metadata_json=json.dumps(meta, separators=(",", ":")))
+                session.add(row)
+                created.append(row)
+            session.flush()
+            created_payload = [(row.id, row.kb_id, row.content) for row in created]
             session.commit()
+        for chunk_id, chunk_kb, chunk_content in created_payload:
+            try:
+                self.vector.index_chunk(chunk_id, chunk_kb, chunk_content)
+            except Exception:
+                # Vector indexing is additive; lexical retrieval remains available.
+                pass
         return len(pieces)
 
     def delete_source(self, kb_id: int, source: str) -> int:
@@ -157,6 +175,10 @@ class KnowledgeManager:
             return int(result.rowcount or 0)
 
     def delete_base(self, kb_id: int) -> None:
+        try:
+            self.vector.delete_kb(kb_id)
+        except Exception:
+            pass
         with self.store.session() as session:
             session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.kb_id == kb_id))
             row = session.get(KnowledgeBase, kb_id)
@@ -169,9 +191,47 @@ class KnowledgeManager:
             return []
         q = _tokens(query)
         with self.store.session() as session:
-            rows = list(session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.kb_id.in_(kb_ids)).limit(3000)))
-        ranked = sorted(((_score(q, _tokens(row.content)), row) for row in rows), key=lambda x: x[0], reverse=True)
-        return [{"id": row.id, "kb_id": row.kb_id, "source": row.source, "title": row.title, "content": row.content, "score": round(score, 5)} for score, row in ranked[: max(1, min(limit, 12))] if score > 0]
+            rows = list(session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.kb_id.in_(kb_ids)).limit(5000)))
+        lexical = {row.id: _score(q, _tokens(row.content)) for row in rows}
+        vector = {} if self.retrieval_mode == "lexical" else self.vector.search(kb_ids, query, limit=max(50, limit * 8))
+        q_terms = set(q)
+        ranked: list[tuple[float, KnowledgeChunk, float, float, float]] = []
+        for row in rows:
+            lex = float(lexical.get(row.id, 0.0))
+            vec = float(vector.get(row.id, 0.0))
+            row_terms = set(_tokens((row.title or "") + " " + row.content))
+            overlap = len(q_terms & row_terms) / max(1, len(q_terms))
+            title_boost = 0.08 if any(term in (row.title or "").lower() for term in q_terms) else 0.0
+            rerank = min(1.0, overlap + title_boost)
+            if self.retrieval_mode == "lexical":
+                score = lex
+            elif self.retrieval_mode == "vector":
+                score = vec * 0.9 + rerank * 0.1
+            else:
+                score = lex * 0.42 + max(0.0, vec) * 0.48 + rerank * 0.10
+            ranked.append((score, row, lex, vec, rerank))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [
+            {
+                "id": row.id, "kb_id": row.kb_id, "source": row.source, "title": row.title,
+                "content": row.content, "score": round(score, 5),
+                "lexical_score": round(lex, 5), "vector_score": round(vec, 5), "rerank_score": round(rerank, 5),
+            }
+            for score, row, lex, vec, rerank in ranked[: max(1, min(limit, 24))]
+            if score > 0
+        ]
+
+    def retrieval_status(self) -> dict[str, Any]:
+        status = self.vector.status()
+        return {
+            "mode": self.retrieval_mode,
+            "embedding_provider": status.provider,
+            "embedding_model": status.model,
+            "dimensions": status.dimensions,
+            "pgvector": status.pgvector,
+            "embedding_fallback_used": status.fallback_used,
+            "last_error": status.last_error,
+        }
 
     def context(self, kb_ids: list[int], query: str, limit: int = 4) -> str:
         hits = self.search(kb_ids, query, limit)
