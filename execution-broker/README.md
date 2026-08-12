@@ -20,7 +20,7 @@ The shared request-authentication secret lets brokers submit sealed requests to 
 - `docker`: local sandbox and structured Docker operations. Local execution uses a digest-pinned image, sealed workspace generation, non-root identity, read-only root, dropped capabilities, and no network by default.
 - `ssh`: commands through locally managed profiles with sealed host, user, authority, authentication type, and known-hosts digest/fingerprint, plus a private-key digest/public fingerprint for public-key profiles or a keyed credential tag for password profiles.
 - `approver`: Telegram long polling, persistent one-time inline approval/denial, and Ed25519 decision signing. It has no Docker socket, SSH profiles, or broker capability database.
-- `admin` (v0.1.2): optional configuration boundary for the Operations Center. It can change the live feature policy, numeric approver allowlist, write-only dedicated bot token, and broker control secret. It does **not** mount the Ed25519 signing key, Docker socket, or SSH private credentials.
+- `admin` (v0.1.3): optional configuration boundary for the Operations Center. It can change the live feature policy, numeric approver allowlist, write-only dedicated bot token, and broker control secret. It does **not** mount the Ed25519 signing key, Docker socket, or SSH private credentials.
 
 All modes use Python standard-library HTTP. The image also contains OpenSSH client for SSH mode and OpenSSL for approval signing/verification.
 
@@ -56,10 +56,10 @@ There are deliberately no safe standalone defaults for execution authority: empt
 
 ## Tags and platforms
 
-Use the versioned tag `afsharidevops/hermes-execution-broker:0.1.2` or its immutable manifest digest. `latest` is unsuitable for a security boundary because it is mutable. Version `0.1.2` adds the v0.5.7 Execution Admin boundary and dynamic feature/policy-generation files while retaining the one-time signed approval model. Publish it for both Linux `amd64` and `arm64`, then pin the manifest digest for production. Confirm the tag's manifest before deployment. Source, Compose wiring, operational commands, and security documentation live in the Hermes Linux Stack repository linked above.
+Use the versioned tag `afsharidevops/hermes-execution-broker:0.1.3` or its immutable manifest digest. `latest` is unsuitable for a security boundary because it is mutable. Version `0.1.3` improves the Hermes v0.5.8 Execution Admin browser boundary and dynamic feature/policy-generation files while retaining the one-time signed approval model. Publish it for both Linux `amd64` and `arm64`, then pin the manifest digest for production. Confirm the tag's manifest before deployment. Source, Compose wiring, operational commands, and security documentation live in the Hermes Linux Stack repository linked above.
 
 
-## v0.1.2 / Hermes v0.5.7 Execution Admin
+## v0.1.3 / Hermes v0.5.8 Execution Admin
 
 Enable the optional host-published admin endpoint with `./manage.sh enable-execution-admin`. It binds to `127.0.0.1:8752` by default and requires a separate high-entropy admin key. Hermes Operations Center connects to it **directly from the operator browser**; the Smart Router backend never receives the Execution Admin key or Telegram bot token.
 

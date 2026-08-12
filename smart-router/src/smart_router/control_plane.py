@@ -27,6 +27,7 @@ from .control_db import (
     ControlDB,
     KnowledgeBase,
     KnowledgeChunk,
+    KnowledgePipeline,
     Memory,
     Plugin,
     Policy,
@@ -57,7 +58,7 @@ from .provider_health import ProviderHealthRegistry
 from .shared_state import RedisCoordinator
 from .secrets_v52 import env_or_file, redacted_url
 from .metrics import ACL_DENIES, REDIS_READINESS, SSO_LOGINS
-from .panel_v57 import PANEL_HTML
+from .panel_v58 import PANEL_HTML
 from .policy_v51 import PolicyEngine, TIER_ORDER
 from .security_v51 import Identity, ROLE_PERMISSIONS, SecurityManager, bearer
 from .guardrails_v56 import GuardrailEngine
@@ -89,9 +90,9 @@ SKILL_CATALOG: list[dict[str, Any]] = [
 ]
 
 class ControlPlane:
-    """Hermes Smart Router v0.5.7 Operations Center (v0.5.2 persisted schema).
+    """Hermes Smart Router v0.5.8 Operations Center (v0.5.2 persisted schema).
 
-    v0.5.7 preserves the v0.5.2-compatible capability-safety path while adding shared
+    v0.5.8 preserves the v0.5.2-compatible capability-safety path while adding shared
     health/circuit state, Redis-backed HA counters, OIDC, ACL-aware retrieval and
     file/Docker-secret loading.
     """
@@ -456,6 +457,8 @@ class ControlPlane:
             Route("/api/router-pipelines/{pipeline_id:int}", self.router_pipeline_api, methods=["PUT", "DELETE"]),
             Route("/api/workflows", self.workflows_api, methods=["GET", "POST"]),
             Route("/api/workflows/{workflow_id:int}", self.workflow_api, methods=["PUT", "DELETE"]),
+            Route("/api/knowledge-pipelines", self.knowledge_pipelines_api, methods=["GET", "POST"]),
+            Route("/api/knowledge-pipelines/{pipeline_id:int}", self.knowledge_pipeline_api, methods=["PUT", "DELETE"]),
             Route("/api/prompts", self.prompts_api, methods=["GET", "POST"]),
             Route("/api/prompts/{prompt_id:int}", self.prompt_api, methods=["PUT", "DELETE"]),
             Route("/api/datasets", self.datasets_api, methods=["GET", "POST"]),
@@ -1312,6 +1315,43 @@ class ControlPlane:
             except Exception: session.rollback(); return _error("workflow name already exists", "duplicate_workflow", 409)
         self.db.audit(identity.actor, identity.role, action, str(wid)); return JSONResponse({"ok": True})
 
+    async def knowledge_pipelines_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "knowledge.manage" if request.method == "POST" else "knowledge.read")
+        if isinstance(identity, Response): return identity
+        if request.method == "POST":
+            d = await _json(request)
+            try: graph = _validate_knowledge_pipeline_graph(d.get("graph") or {"nodes": [], "edges": []})
+            except ValueError as exc: return _error(str(exc), "invalid_knowledge_pipeline", 422)
+            with self.db.session() as session:
+                row = KnowledgePipeline(name=str(d.get("name", "knowledge-pipeline")).strip()[:160], description=str(d.get("description", ""))[:4000], graph_json=json.dumps(graph, separators=(",", ":")), active=bool(d.get("active", True)))
+                session.add(row)
+                try: session.commit(); session.refresh(row)
+                except Exception: session.rollback(); return _error("knowledge pipeline name already exists", "duplicate_knowledge_pipeline", 409)
+            self.db.audit(identity.actor, identity.role, "knowledge_pipeline.create", row.name)
+        with self.db.session() as session: rows = list(session.scalars(select(KnowledgePipeline).order_by(KnowledgePipeline.id)))
+        return JSONResponse([_row_dict(r, {"graph_json"}) | {"graph": _loads(r.graph_json, {"nodes": [], "edges": []})} for r in rows])
+
+    async def knowledge_pipeline_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "knowledge.manage")
+        if isinstance(identity, Response): return identity
+        pid = int(request.path_params["pipeline_id"])
+        with self.db.session() as session:
+            row = session.get(KnowledgePipeline, pid)
+            if row is None: return Response(status_code=404)
+            if request.method == "DELETE": session.delete(row); action = "knowledge_pipeline.delete"
+            else:
+                d = await _json(request)
+                if "name" in d: row.name = str(d["name"]).strip()[:160]
+                if "description" in d: row.description = str(d["description"])[:4000]
+                if "active" in d: row.active = bool(d["active"])
+                if "graph" in d:
+                    try: row.graph_json = json.dumps(_validate_knowledge_pipeline_graph(d["graph"]), separators=(",", ":"))
+                    except ValueError as exc: return _error(str(exc), "invalid_knowledge_pipeline", 422)
+                row.updated_at = datetime.now(timezone.utc).isoformat(); action = "knowledge_pipeline.update"
+            try: session.commit()
+            except Exception: session.rollback(); return _error("knowledge pipeline name already exists", "duplicate_knowledge_pipeline", 409)
+        self.db.audit(identity.actor, identity.role, action, str(pid)); return JSONResponse({"ok": True})
+
     async def prompts_api(self, request: Request) -> Response:
         identity = self._admin_identity(request, "agents.manage" if request.method == "POST" else "panel.read")
         if isinstance(identity, Response): return identity
@@ -1463,7 +1503,7 @@ class ControlPlane:
             "ldap": {"configured": configured("LDAP"), "status": "connector_foundation" if configured("LDAP") else "not_configured"},
             "saml": {"configured": configured("SAML"), "status": "connector_foundation" if configured("SAML") else "not_configured"},
             "scim": {"configured": configured("SCIM"), "status": "provisioning_foundation" if configured("SCIM") else "not_configured"},
-            "note": "v0.5.7 exposes enterprise identity readiness without storing IdP secrets in the browser. OIDC is the completed interactive login path; LDAP/SAML/SCIM require deployment-specific connector integration before production use.",
+            "note": "v0.5.8 exposes enterprise identity readiness without storing IdP secrets in the browser. OIDC is the completed interactive login path; LDAP/SAML/SCIM require deployment-specific connector integration before production use.",
         })
 
     async def audit_api(self, request: Request) -> Response:
@@ -1906,6 +1946,33 @@ def _validate_workflow_graph(value: Any) -> dict[str, Any]:
         if src not in ids or dst not in ids: raise ValueError("workflow edge references an unknown node")
         clean_edges.append({"from":src,"to":dst,"condition":str(edge.get("condition", ""))[:500]})
     return {"nodes":clean_nodes,"edges":clean_edges}
+
+
+def _validate_knowledge_pipeline_graph(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict): raise ValueError("knowledge pipeline graph must be an object")
+    nodes=value.get("nodes", []); edges=value.get("edges", [])
+    if not isinstance(nodes, list) or not isinstance(edges, list): raise ValueError("knowledge pipeline nodes and edges must be lists")
+    if len(nodes)>160 or len(edges)>400: raise ValueError("knowledge pipeline graph is too large")
+    allowed={"data_source","extract","transform","chunk","embed","index","knowledge_base","qa","output"}
+    clean_nodes=[]; ids=set()
+    for node in nodes:
+        if not isinstance(node, dict): raise ValueError("knowledge pipeline node must be an object")
+        nid=str(node.get("id", "")).strip()[:80]; kind=str(node.get("type", "")).strip()
+        if not nid or nid in ids: raise ValueError("knowledge pipeline node IDs must be unique")
+        if kind not in allowed: raise ValueError(f"unsupported knowledge pipeline node type: {kind}")
+        ids.add(nid)
+        ref_id=node.get("ref_id")
+        if ref_id is not None:
+            try: ref_id=int(ref_id)
+            except (TypeError,ValueError): raise ValueError("knowledge pipeline ref_id must be numeric when provided")
+        clean_nodes.append({"id":nid,"type":kind,"label":str(node.get("label", nid))[:160],"ref_id":ref_id,"config":node.get("config") if isinstance(node.get("config"),dict) else {}})
+    clean_edges=[]
+    for edge in edges:
+        if not isinstance(edge, dict): raise ValueError("knowledge pipeline edge must be an object")
+        src=str(edge.get("from", "")); dst=str(edge.get("to", ""))
+        if src not in ids or dst not in ids: raise ValueError("knowledge pipeline edge references an unknown node")
+        clean_edges.append({"from":src,"to":dst,"condition":str(edge.get("condition", ""))[:500]})
+    return {"nodes":clean_nodes,"edges":clean_edges,"version":1}
 
 
 def _trace_safe(value: Any) -> Any:

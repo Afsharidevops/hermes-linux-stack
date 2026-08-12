@@ -190,6 +190,17 @@ class RouterPipeline(Base):
     updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
 
 
+class KnowledgePipeline(Base):
+    __tablename__ = "v58_knowledge_pipelines"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    graph_json: Mapped[str] = mapped_column(Text, default='{"nodes":[],"edges":[]}')
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
 class Workflow(Base):
     __tablename__ = "v56_workflows"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -428,9 +439,9 @@ class ControlDB:
         with Session(self.engine) as session:
             row = session.get(SchemaVersion, "smart-router-control")
             if row is None:
-                session.add(SchemaVersion(component="smart-router-control", version="0.5.7"))
+                session.add(SchemaVersion(component="smart-router-control", version="0.5.8"))
             else:
-                row.version = "0.5.7"
+                row.version = "0.5.8"
                 row.updated_at = utcnow()
             session.commit()
 

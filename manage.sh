@@ -19,7 +19,7 @@ trap cleanup_temp_secrets EXIT
 
 usage() {
   cat <<'EOF'
-Hermes Linux Stack Manager v0.5.7
+Hermes Linux Stack Manager v0.5.8
 
 Usage:
   ./manage.sh                 Open the interactive manager
@@ -238,7 +238,7 @@ services_menu() {
   while true; do
     menu_title 'Services & Logs'
     printf '%s\n' '1) Status                 Show all containers and ports'
-    printf '%s\n' '2) Health                 Run v0.5.7 service health checks'
+    printf '%s\n' '2) Health                 Run v0.5.8 service health checks'
     printf '%s\n' '3) Start                  Start selected stack services'
     printf '%s\n' '4) Stop                   Stop running stack services'
     printf '%s\n' '5) Restart                Restart running stack services'
@@ -276,7 +276,7 @@ services_menu() {
 router_menu() {
   local choice value file
   while true; do
-    menu_title 'Hermes Smart Router v0.5.7'
+    menu_title 'Hermes Smart Router v0.5.8'
     printf '%s\n' 'Observe & access'
     printf '%s\n' '  1) Status & URLs            Mode, policy, features and endpoints'
     printf '%s\n' '  2) Dashboard / Control      URLs and credential guidance'
@@ -506,7 +506,7 @@ uninstall_menu() {
 interactive_menu() {
   local choice
   while true; do
-    menu_title 'Hermes Linux Stack Manager v0.5.7'
+    menu_title 'Hermes Linux Stack Manager v0.5.8'
     printf '%s\n' 'Quick administration — choose a group; direct CLI commands still work.'
     printf '\n%s\n' '1) Overview & health          Status, health, version, diagnostics'
     printf '%s\n'   '2) Services & logs            Start/stop/restart and service logs'
@@ -516,7 +516,7 @@ interactive_menu() {
     printf '%s\n'   '6) Execution & SSH            Sandbox, Docker, SSH profiles, approvals'
     printf '%s\n'   '7) Maintenance & recovery     Updates, backup, restore, rollback'
     printf '%s\n'   '8) Security & integrity       Doctor, image pins, access credentials'
-    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.7 wizard again'
+    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.8 wizard again'
     printf '%s\n'   '10) Uninstall                 Safe remove or explicit purge'
     printf '%s\n'   '0) Exit'
     read -r -p 'Choose [0]: ' choice
@@ -2054,6 +2054,70 @@ PY
     printf 'Execution admin UI enabled on %s:%s. The separate admin key was not printed.\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_BIND_IP | sed 's/^$/127.0.0.1/')" "$(env_value "$ENV_FILE" EXECUTION_ADMIN_PORT | sed 's/^$/8752/')"
     printf 'Use ./manage.sh show-execution-admin-key from a trusted terminal when you need to connect the Operations Center page.\n'
     ;;
+  configure-execution-admin-browser)
+    origin="${2:-}"; bind_ip="${3:-}"
+    [[ -z "${4:-}" && -n "$origin" ]] || { printf 'Usage: ./manage.sh configure-execution-admin-browser ORIGIN [PRIVATE_IPV4]\n' >&2; exit 2; }
+    validation="$(python3 - "$origin" "$bind_ip" <<'EXECADMINPY'
+import ipaddress,sys
+from urllib.parse import urlsplit
+origin=sys.argv[1].strip().rstrip('/')
+bind=sys.argv[2].strip()
+try:
+    u=urlsplit(origin)
+except Exception:
+    raise SystemExit('Invalid origin.')
+if u.scheme not in {'http','https'} or not u.hostname or u.username or u.password or (u.path not in {'','/'}) or u.query or u.fragment:
+    raise SystemExit('Origin must be an exact http(s) origin such as http://192.168.1.20:8787.')
+try:
+    port=u.port
+except ValueError:
+    raise SystemExit('Origin port is invalid.')
+if port is not None and not (1 <= port <= 65535):
+    raise SystemExit('Origin port is invalid.')
+if not bind:
+    try: bind=str(ipaddress.ip_address(u.hostname))
+    except ValueError: raise SystemExit('When ORIGIN uses DNS, pass the server private IPv4 as the second argument.')
+try: ip=ipaddress.ip_address(bind)
+except ValueError: raise SystemExit('Bind address must be an IPv4 address.')
+if ip.version != 4: raise SystemExit('This helper currently requires IPv4.')
+if ip.is_unspecified or ip.is_multicast:
+    raise SystemExit('Wildcard/multicast binds are refused. Use the exact private administration address.')
+if not (ip.is_private or ip.is_loopback or ip.is_link_local):
+    raise SystemExit('Refusing a public Execution Admin bind. Use a private/loopback administration address or a trusted reverse proxy.')
+print(origin)
+print(str(ip))
+EXECADMINPY
+    )" || { printf '%s\n' "$validation" >&2; exit 2; }
+    origin="$(printf '%s\n' "$validation" | sed -n '1p')"
+    bind_ip="$(printf '%s\n' "$validation" | sed -n '2p')"
+    current="$(env_value "$ENV_FILE" EXECUTION_ADMIN_ALLOWED_ORIGINS)"
+    current="${current:-http://127.0.0.1:8787,http://localhost:8787}"
+    allowed="$(python3 - "$current" "$origin" <<'EXECORIGINPY'
+import sys
+seen=[]
+for item in (sys.argv[1]+','+sys.argv[2]).split(','):
+    item=item.strip().rstrip('/')
+    if item and item not in seen: seen.append(item)
+print(','.join(seen))
+EXECORIGINPY
+    )"
+    ensure_execution_paths; sync_execution_admin_metadata
+    root="$(execution_root)"
+    if [[ ! -s "$root/admin-key" ]]; then
+      tmp="$(mktemp "$root/admin-key.tmp.XXXXXX")"; random_hex 32 > "$tmp"; chown 10003:10003 "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$root/admin-key"
+    fi
+    replace_env_value "$ENV_FILE" EXECUTION_ADMIN_ENABLED true
+    replace_env_value "$ENV_FILE" EXECUTION_ADMIN_BIND_IP "$bind_ip"
+    replace_env_value "$ENV_FILE" EXECUTION_ADMIN_ALLOWED_ORIGINS "$allowed"
+    [[ -n "$(env_value "$ENV_FILE" EXECUTION_ADMIN_PORT)" ]] || replace_env_value "$ENV_FILE" EXECUTION_ADMIN_PORT 8752
+    sync_execution_profiles
+    compose pull execution-admin
+    compose up -d --no-deps --force-recreate execution-admin
+    printf 'Execution Admin browser access configured.\n'
+    printf 'Bind: %s:%s\n' "$bind_ip" "$(env_value "$ENV_FILE" EXECUTION_ADMIN_PORT | sed 's/^$/8752/')"
+    printf 'Allowed origin added: %s\n' "$origin"
+    printf 'The separate admin key was not printed. Use ./manage.sh show-execution-admin-key in a trusted terminal.\n'
+    ;;
   disable-execution-admin)
     [[ -z "${2:-}" ]] || { printf 'Usage: ./manage.sh disable-execution-admin\n' >&2; exit 2; }
     replace_env_value "$ENV_FILE" EXECUTION_ADMIN_ENABLED false
@@ -2067,6 +2131,7 @@ PY
     printf 'Bind: %s:%s\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_BIND_IP | sed 's/^$/127.0.0.1/')" "$(env_value "$ENV_FILE" EXECUTION_ADMIN_PORT | sed 's/^$/8752/')"
     printf 'Allowed origins: %s\n' "$(env_value "$ENV_FILE" EXECUTION_ADMIN_ALLOWED_ORIGINS | sed 's/^$/http:\/\/127.0.0.1:8787,http:\/\/localhost:8787/')"
     [[ -s "$(execution_root)/admin-key" ]] && printf 'Admin key: configured (hidden)\n' || printf 'Admin key: missing\n'
+    printf 'Remote browser helper: ./manage.sh configure-execution-admin-browser ORIGIN PRIVATE_IPV4\n'
     ;;
   rotate-execution-admin-key)
     [[ -z "${2:-}" ]] || { printf 'Do not pass execution admin keys in argv.\n' >&2; exit 2; }
@@ -2504,7 +2569,7 @@ PY
       exit 1
     fi
     base="$(router_local_base_url)"
-    printf 'Smart Router v0.5.7 stack integration\n'
+    printf 'Smart Router v0.5.8 stack integration\n'
     printf '  image: %s:%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_REPOSITORY)" "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_TAG)"
     printf '  base URL: %s\n' "$base"
     printf '  OpenAI API: %s/v1\n' "$base"
@@ -2588,7 +2653,7 @@ PY
     ;;
   router-replay)
     dataset="${2:-}"; [[ -f "$dataset" ]] || { printf 'Requests JSONL file required\n' >&2; exit 2; }
-    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.7.jsonl}"
+    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.8.jsonl}"
     dataset="$(cd "$(dirname "$dataset")" && pwd)/$(basename "$dataset")"; mkdir -p "$(dirname "$output")"; touch "$output"; output="$(cd "$(dirname "$output")" && pwd)/$(basename "$output")"
     compose run --rm --no-deps -v "$dataset:/work/input.jsonl:ro" -v "$output:/work/output.jsonl" smart-router python -m smart_router.eval.replay /work/input.jsonl -o /work/output.jsonl
     ;;

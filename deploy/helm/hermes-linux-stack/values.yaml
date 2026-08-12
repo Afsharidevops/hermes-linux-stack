@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: afsharidevops/hermes-smart-router
-  tag: "0.5.7"
+  tag: "0.5.8"
   pullPolicy: IfNotPresent
 
 service:

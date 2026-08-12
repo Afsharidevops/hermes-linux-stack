@@ -455,7 +455,7 @@ profile_enabled() {
   [[ ",$configured," == *",$profile,"* ]]
 }
 
-printf '\nHermes Linux Stack v0.5.7 Easy Installer\n'
+printf '\nHermes Linux Stack v0.5.8 Easy Installer\n'
 printf '%s\n' '================================'
 lan_ip="$(detect_lan_ipv4 || true)"
 if [[ -n "$lan_ip" ]]; then
@@ -512,7 +512,7 @@ if [[ -f "$ENV_FILE" ]]; then
       configure_smart_router=true
     fi
   elif [[ "$install_omni" == true && "$install_hermes" == true ]] \
-    && confirm "Enable Hermes Smart Router v0.5.7 (recommended)?" y; then
+    && confirm "Enable Hermes Smart Router v0.5.8 (recommended)?" y; then
     install_smart_router=true
     configure_smart_router=true
   fi
@@ -552,7 +552,7 @@ else
   configure_webui="$install_webui"
   install_smart_router=false
   if [[ "$install_omni" == true && "$install_hermes" == true ]] \
-    && confirm "Enable Hermes Smart Router v0.5.7 (recommended)?" y; then
+    && confirm "Enable Hermes Smart Router v0.5.8 (recommended)?" y; then
     install_smart_router=true
     configure_smart_router=true
   fi
@@ -683,7 +683,7 @@ telegram_home="$(existing_hermes_env_value TELEGRAM_HOME_CHANNEL)"
 api_enabled="$(existing_hermes_env_value API_SERVER_ENABLED)"; api_enabled="${api_enabled:-false}"
 api_key="$(existing_hermes_env_value API_SERVER_KEY)"
 smart_router_image_repository="$(existing_env_value SMART_ROUTER_IMAGE_REPOSITORY)"; smart_router_image_repository="${smart_router_image_repository:-afsharidevops/hermes-smart-router}"
-smart_router_image_tag="$(existing_env_value SMART_ROUTER_IMAGE_TAG)"; smart_router_image_tag="${smart_router_image_tag:-0.5.7}"
+smart_router_image_tag="$(existing_env_value SMART_ROUTER_IMAGE_TAG)"; smart_router_image_tag="${smart_router_image_tag:-0.5.8}"
 smart_router_bind="$(existing_env_value SMART_ROUTER_BIND_IP)"; smart_router_bind="${smart_router_bind:-127.0.0.1}"
 smart_router_port="$(existing_env_value SMART_ROUTER_PORT)"; smart_router_port="${smart_router_port:-8787}"
 smart_router_mode="$(existing_env_value SMART_ROUTER_MODE)"; smart_router_mode="${smart_router_mode:-observe}"
@@ -719,7 +719,7 @@ caddy_image="$(existing_env_value CADDY_IMAGE)"; caddy_image="${caddy_image:-cad
 execution_features="$(existing_env_value EXECUTION_FEATURES)"
 execution_generation="$(existing_env_value EXECUTION_POLICY_GENERATION)"; execution_generation="${execution_generation:-0}"
 execution_workspace_generation="$(existing_env_value EXECUTION_WORKSPACE_GENERATION)"; execution_workspace_generation="${execution_workspace_generation:-$execution_generation}"
-execution_broker_image="$(existing_env_value EXECUTION_BROKER_IMAGE)"; execution_broker_image="${execution_broker_image:-afsharidevops/hermes-execution-broker:0.1.2}"
+execution_broker_image="$(existing_env_value EXECUTION_BROKER_IMAGE)"; execution_broker_image="${execution_broker_image:-afsharidevops/hermes-execution-broker:0.1.3}"
 execution_sandbox_image="$(existing_env_value EXECUTION_SANDBOX_IMAGE)"; execution_sandbox_image="${execution_sandbox_image:-python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419}"
 execution_run_as="$(existing_env_value EXECUTION_RUN_AS)"; execution_run_as="${execution_run_as:-$execution_runtime_uid:$execution_runtime_gid}"
 execution_docker_gid="$(existing_env_value EXECUTION_DOCKER_GID)"; execution_docker_gid="${execution_docker_gid:-$(stat -c %g /var/run/docker.sock 2>/dev/null || printf 65534)}"
@@ -762,7 +762,7 @@ case "$n8n_mcp_mode" in
 esac
 
 if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; then
-  printf '\nHermes Smart Router v0.5.7 settings\n'
+  printf '\nHermes Smart Router v0.5.8 settings\n'
   printf '%s\n' '-----------------------------------'
   printf '%s\n' 'Smart routing applies to model=auto. Tier aliases auto-fast/auto-standard/auto-strong are exposed only when tier overrides are enabled.'
   printf '%s\n' 'Explicit upstream model names pass through without automatic tier selection.'
@@ -791,7 +791,7 @@ if [[ "$configure_smart_router" == true && "$install_smart_router" == true ]]; t
     smart_router_allow_tier_overrides=false
   fi
   if confirm "Enable the Smart Router telemetry dashboard (/dashboard)?" "$([[ "$smart_router_dashboard_enabled" == true ]] && printf y || printf n)"; then smart_router_dashboard_enabled=true; else smart_router_dashboard_enabled=false; fi
-  if confirm "Enable the v0.5.7 Hermes Operations Center (/control)?" "$([[ "$smart_router_control_plane_enabled" == true ]] && printf y || printf n)"; then smart_router_control_plane_enabled=true; else smart_router_control_plane_enabled=false; fi
+  if confirm "Enable the v0.5.8 Hermes Operations Center (/control)?" "$([[ "$smart_router_control_plane_enabled" == true ]] && printf y || printf n)"; then smart_router_control_plane_enabled=true; else smart_router_control_plane_enabled=false; fi
   if [[ "$smart_router_control_plane_enabled" == true ]]; then
     if confirm "Require authentication for Smart Router API/control-plane requests?" "$([[ "$smart_router_require_auth" == true ]] && printf y || printf n)"; then smart_router_require_auth=true; else smart_router_require_auth=false; fi
     [[ "$smart_router_require_auth" == true ]] || warn "Authentication is disabled. Keep the Smart Router bound to loopback unless you fully understand the exposure risk."
