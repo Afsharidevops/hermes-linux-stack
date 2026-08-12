@@ -83,7 +83,7 @@ def create_app(
     policy_runtime = build_policy_runtime(settings)
     observations = ObservationWriter(settings.observation_file)
     cost_ledger = CostLedger.from_env(default_database_path=settings.database_path)
-    control_plane = ControlPlane(settings)  # Hermes Smart Router v0.5.5 Operations Center hook
+    control_plane = ControlPlane(settings)  # Hermes Smart Router v0.5.6 Operations Center hook
     timeout = httpx.Timeout(
         connect=settings.connect_timeout_seconds,
         read=settings.read_timeout_seconds,
@@ -159,6 +159,26 @@ def create_app(
         payload["version"] = __version__
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
+    async def dashboard_traces(request: Request) -> Response:
+        auth_error = _client_auth_error(request, settings)
+        if auth_error:
+            return auth_error
+        if not dashboard_enabled():
+            return Response(status_code=404)
+        try:
+            limit = max(1, min(250, int(request.query_params.get("limit", "80"))))
+        except ValueError:
+            return _openai_error("limit must be an integer", "invalid_trace_limit", 400)
+        return JSONResponse(control_plane.recent_traces(limit), headers={"Cache-Control": "no-store"})
+
+    async def dashboard_trace(request: Request) -> Response:
+        auth_error = _client_auth_error(request, settings)
+        if auth_error:
+            return auth_error
+        if not dashboard_enabled():
+            return Response(status_code=404)
+        return JSONResponse(control_plane.trace_detail(str(request.path_params["request_id"])[:80]), headers={"Cache-Control": "no-store"})
+
 
     async def models(request: Request) -> Response:
         auth_error = _client_auth_error(request, settings)
@@ -233,9 +253,10 @@ def create_app(
 
         # Explicit model requests remain byte-transparent and bypass Smart Router policy.
         if requested_model not in AUTO_ALIASES:
-            return await _dispatch(
-                request, raw, headers, url, stream, settings.mode, "explicit", started
-            )
+            control_plane.trace(request, "selected_route", "explicit", {"model": requested_model, "automatic_routing": False})
+            response = await _dispatch(request, raw, headers, url, stream, settings.mode, "explicit", started)
+            control_plane.trace(request, "result", "ok" if response.status_code < 400 else "error", {"status_code": response.status_code, "explicit_model": requested_model})
+            return response
 
         header_tier = request.headers.get("x-router-tier")
         try:
@@ -255,6 +276,7 @@ def create_app(
         try:
             decision = decide(body, settings, requested_tier, policy_runtime)
             proposal = propose_budget(body, decision, settings)
+            control_plane.trace_routing_decision(request, decision, proposal)
         except (TypeError, ValueError, OverflowError) as error:
             return _openai_error(str(error), "invalid_routing_request", 422)
 
@@ -393,6 +415,8 @@ def create_app(
         Route("/router/policy", router_info, methods=["GET"]),  # v0.5.1 manage.sh compatibility
         Route("/dashboard", dashboard, methods=["GET"]),
         Route("/dashboard/api/summary", dashboard_summary, methods=["GET"]),
+        Route("/dashboard/api/traces", dashboard_traces, methods=["GET"]),
+        Route("/dashboard/api/traces/{request_id:str}", dashboard_trace, methods=["GET"]),
         Mount("/control", app=control_plane.app),
         Route("/v1/models", models, methods=["GET"]),
         Route("/v1/chat/completions", completions, methods=["POST"]),
@@ -441,9 +465,27 @@ async def _dispatch(
             )
             response_holder["response"] = response
         else:
-            response = await proxy_buffered(
-                request.app.state.client, "POST", url, headers, content
-            )
+            retry_count = max(0, min(5, int(getattr(request.state, "v56_retry_count", 0) or 0)))
+            fallback_models = list(getattr(request.state, "v56_fallback_models", []) or [])
+            attempt = 0
+            current_content = content
+            response = await proxy_buffered(request.app.state.client, "POST", url, headers, current_content)
+            while response.status_code in {408, 425, 429, 500, 502, 503, 504} and attempt < retry_count:
+                attempt += 1
+                control = getattr(request.app.state, "control_plane", None)
+                if control is not None:
+                    control.trace(request, "retry", "attempt", {"attempt": attempt, "status_code": response.status_code})
+                if fallback_models and attempt - 1 < len(fallback_models):
+                    try:
+                        retry_body = json.loads(content)
+                        retry_body["model"] = fallback_models[attempt - 1]
+                        current_content = json.dumps(retry_body, ensure_ascii=False, separators=(",", ":")).encode()
+                        if control is not None:
+                            control.trace(request, "fallback", "retry_model", {"attempt": attempt, "model": fallback_models[attempt - 1]})
+                    except Exception:
+                        current_content = content
+                await asyncio.sleep(min(0.25 * (2 ** (attempt - 1)), 2.0))
+                response = await proxy_buffered(request.app.state.client, "POST", url, headers, current_content)
             _record_actual_usage(response)
     except httpx.HTTPError as error:
         logger.error(json.dumps({"event": "upstream_error", "reason": type(error).__name__}))

@@ -106,7 +106,7 @@ def build_policy_runtime(settings: Settings) -> PolicyRuntime:
     calibration = _load_calibration(settings.calibration_file)
     learned: LearnedPolicy | None = None
     learned_error: str | None = None
-    # v0.5.5 can switch policy from the Operations Center without a process
+    # v0.5.6 can switch policy from the Operations Center without a process
     # restart. Pre-load an available learned artifact even when the initial
     # environment policy is heuristic/calibrated, so a later UI switch is
     # immediately effective. Missing artifacts remain harmless unless learned

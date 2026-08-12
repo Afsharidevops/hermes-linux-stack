@@ -3,7 +3,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n "$ROOT_DIR/manage.sh"
 help="$($ROOT_DIR/manage.sh help)"
-grep -q 'Hermes Linux Stack Manager v0.5.5' <<<"$help"
+grep -q 'Hermes Linux Stack Manager v0.5.6' <<<"$help"
 grep -q 'Interactive groups:' <<<"$help"
 grep -q 'router                      Smart Router dashboard' <<<"$help"
 
