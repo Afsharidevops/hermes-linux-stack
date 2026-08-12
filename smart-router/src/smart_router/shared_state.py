@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import dataclass
 
-try:  # Optional at source-test time; installed by the v0.5.4 package image.
+try:  # Optional at source-test time; installed by the v0.5.5 package image.
     import redis  # type: ignore
 except Exception:  # pragma: no cover - exercised when dependency is intentionally absent
     redis = None

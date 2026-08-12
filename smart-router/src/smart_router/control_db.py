@@ -30,6 +30,17 @@ class User(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
 
 
+class AccessGroup(Base):
+    __tablename__ = "v55_access_groups"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    member_users_json: Mapped[str] = mapped_column(Text, default="[]")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
 class ApiKey(Base):
     __tablename__ = "v51_api_keys"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -185,6 +196,29 @@ class Plugin(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
 
 
+class Skill(Base):
+    __tablename__ = "v55_skills"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(80), default="general", index=True)
+    source: Mapped[str] = mapped_column(String(40), default="manual")
+    commercial: Mapped[bool] = mapped_column(Boolean, default=False)
+    license_note: Mapped[str] = mapped_column(Text, default="")
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    manifest_json: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class AgentSkillLink(Base):
+    __tablename__ = "v55_agent_skills"
+    agent_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    skill_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
 class RateCounter(Base):
     __tablename__ = "v51_rate_counters"
     key: Mapped[str] = mapped_column(String(240), primary_key=True)
@@ -197,6 +231,13 @@ class SchemaVersion(Base):
     __tablename__ = "schema_versions"
     component: Mapped[str] = mapped_column(String(80), primary_key=True)
     version: Mapped[str] = mapped_column(String(40), default="0.5.2")
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
+class RuntimeSetting(Base):
+    __tablename__ = "v55_runtime_settings"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value_json: Mapped[str] = mapped_column(Text, default="null")
     updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
 
 
@@ -272,9 +313,9 @@ class ControlDB:
         with Session(self.engine) as session:
             row = session.get(SchemaVersion, "smart-router-control")
             if row is None:
-                session.add(SchemaVersion(component="smart-router-control", version="0.5.2"))
+                session.add(SchemaVersion(component="smart-router-control", version="0.5.5"))
             else:
-                row.version = "0.5.2"
+                row.version = "0.5.5"
                 row.updated_at = utcnow()
             session.commit()
 
@@ -290,6 +331,39 @@ class ControlDB:
             return True
         except Exception:
             return False
+
+    def schema_version(self) -> str:
+        with self.session() as session:
+            row = session.get(SchemaVersion, "smart-router-control")
+            return row.version if row else "unknown"
+
+    def runtime_setting(self, key: str, default: Any = None) -> Any:
+        with self.session() as session:
+            row = session.get(RuntimeSetting, key)
+            if row is None:
+                return default
+            try:
+                return json.loads(row.value_json)
+            except Exception:
+                return default
+
+    def set_runtime_setting(self, key: str, value: Any) -> None:
+        with self.session() as session:
+            row = session.get(RuntimeSetting, key)
+            if row is None:
+                row = RuntimeSetting(key=key)
+                session.add(row)
+            row.value_json = json.dumps(value, separators=(",", ":"))
+            row.updated_at = utcnow()
+            session.commit()
+
+    def delete_runtime_settings(self, keys: list[str]) -> None:
+        with self.session() as session:
+            for key in keys:
+                row = session.get(RuntimeSetting, key)
+                if row is not None:
+                    session.delete(row)
+            session.commit()
 
     def bootstrap_profiles(self, defaults: dict[str, str]) -> None:
         with self.session() as session:
