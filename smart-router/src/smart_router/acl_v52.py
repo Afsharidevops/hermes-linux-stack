@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Any
 
 from sqlalchemy import delete, or_, select
 
-from .control_db import ACLRule, ControlDB
+from .control_db import ACLRule, AccessGroup, ControlDB
 from .security_v51 import Identity
 
 
@@ -24,6 +25,14 @@ class ACLManager:
         if identity.api_key_id is not None:
             subjects.append(("virtual_key", str(identity.api_key_id)))
         with self.db.session() as session:
+            groups = list(session.scalars(select(AccessGroup).where(AccessGroup.active.is_(True))))
+            for group in groups:
+                try:
+                    members = json.loads(group.member_users_json or "[]")
+                except Exception:
+                    members = []
+                if identity.actor in members:
+                    subjects.append(("group", group.name))
             rows = list(session.scalars(select(ACLRule).where(
                 ACLRule.resource_type == resource_type,
                 or_(ACLRule.resource_id == rid, ACLRule.resource_id == "*"),

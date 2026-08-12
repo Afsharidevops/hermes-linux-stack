@@ -106,7 +106,16 @@ def build_policy_runtime(settings: Settings) -> PolicyRuntime:
     calibration = _load_calibration(settings.calibration_file)
     learned: LearnedPolicy | None = None
     learned_error: str | None = None
-    if settings.policy == "learned":
+    # v0.5.5 can switch policy from the Operations Center without a process
+    # restart. Pre-load an available learned artifact even when the initial
+    # environment policy is heuristic/calibrated, so a later UI switch is
+    # immediately effective. Missing artifacts remain harmless unless learned
+    # mode is actually selected.
+    learned_files_present = (
+        Path(settings.learned_model_file).is_file()
+        and Path(settings.learned_metadata_file).is_file()
+    )
+    if settings.policy == "learned" or learned_files_present:
         try:
             learned = load_learned_policy(
                 settings.learned_model_file,
@@ -116,7 +125,8 @@ def build_policy_runtime(settings: Settings) -> PolicyRuntime:
             )
         except Exception as exc:  # fail-open is deliberate at startup
             learned_error = type(exc).__name__
-            FAIL_OPEN.labels(f"learned_load_{learned_error}").inc()
+            if settings.policy == "learned":
+                FAIL_OPEN.labels(f"learned_load_{learned_error}").inc()
     return PolicyRuntime(calibration, learned, learned_error)
 
 

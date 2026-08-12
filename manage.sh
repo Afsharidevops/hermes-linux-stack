@@ -19,7 +19,7 @@ trap cleanup_temp_secrets EXIT
 
 usage() {
   cat <<'EOF'
-Hermes Linux Stack Manager v0.5.4
+Hermes Linux Stack Manager v0.5.5
 
 Usage:
   ./manage.sh                 Open the interactive manager
@@ -181,6 +181,44 @@ PYROUTER
   fi
 }
 
+router_api_request() {
+  local method="$1" path="$2" key="${3:-}" data="${4:-}" base
+  base="$(router_local_base_url)"
+  if command -v curl >/dev/null 2>&1; then
+    local args=(-fsS --connect-timeout 3 --max-time 10 -X "$method")
+    [[ -n "$key" ]] && args+=(-H "Authorization: Bearer $key")
+    if [[ -n "$data" ]]; then
+      args+=(-H 'Content-Type: application/json' --data "$data")
+    fi
+    curl "${args[@]}" "$base$path"
+  else
+    ROUTER_URL="$base$path" ROUTER_KEY="$key" ROUTER_METHOD="$method" ROUTER_DATA="$data" python3 - <<'PYROUTER_MUTATE'
+import os, urllib.request
+data=os.environ.get('ROUTER_DATA','').encode() or None
+req=urllib.request.Request(os.environ['ROUTER_URL'], data=data, method=os.environ['ROUTER_METHOD'])
+if os.environ.get('ROUTER_KEY'):
+    req.add_header('Authorization','Bearer '+os.environ['ROUTER_KEY'])
+if data is not None:
+    req.add_header('Content-Type','application/json')
+with urllib.request.urlopen(req, timeout=10) as r:
+    print(r.read().decode(), end='')
+PYROUTER_MUTATE
+  fi
+}
+
+router_runtime_set() {
+  local json="$1" key response
+  key="$(env_value "$ENV_FILE" SMART_ROUTER_ADMIN_API_KEY)"
+  for _ in {1..30}; do
+    if response="$(router_api_request PUT /control/api/system "$key" "$json" 2>/dev/null)"; then
+      printf '%s' "$response"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 pretty_json() {
   python3 -m json.tool 2>/dev/null || cat
 }
@@ -200,7 +238,7 @@ services_menu() {
   while true; do
     menu_title 'Services & Logs'
     printf '%s\n' '1) Status                 Show all containers and ports'
-    printf '%s\n' '2) Health                 Run v0.5.4 service health checks'
+    printf '%s\n' '2) Health                 Run v0.5.5 service health checks'
     printf '%s\n' '3) Start                  Start selected stack services'
     printf '%s\n' '4) Stop                   Stop running stack services'
     printf '%s\n' '5) Restart                Restart running stack services'
@@ -238,7 +276,7 @@ services_menu() {
 router_menu() {
   local choice value file
   while true; do
-    menu_title 'Hermes Smart Router v0.5.4'
+    menu_title 'Hermes Smart Router v0.5.5'
     printf '%s\n' 'Observe & access'
     printf '%s\n' '  1) Status & URLs            Mode, policy, features and endpoints'
     printf '%s\n' '  2) Dashboard / Control      URLs and credential guidance'
@@ -458,7 +496,7 @@ uninstall_menu() {
 interactive_menu() {
   local choice
   while true; do
-    menu_title 'Hermes Linux Stack Manager v0.5.4'
+    menu_title 'Hermes Linux Stack Manager v0.5.5'
     printf '%s\n' 'Quick administration — choose a group; direct CLI commands still work.'
     printf '\n%s\n' '1) Overview & health          Status, health, version, diagnostics'
     printf '%s\n'   '2) Services & logs            Start/stop/restart and service logs'
@@ -468,7 +506,7 @@ interactive_menu() {
     printf '%s\n'   '6) Execution & SSH            Sandbox, Docker, SSH profiles, approvals'
     printf '%s\n'   '7) Maintenance & recovery     Updates, backup, restore, rollback'
     printf '%s\n'   '8) Security & integrity       Doctor, image pins, access credentials'
-    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.4 wizard again'
+    printf '%s\n'   '9) Reconfigure installation   Run the v0.5.5 wizard again'
     printf '%s\n'   '10) Uninstall                 Safe remove or explicit purge'
     printf '%s\n'   '0) Exit'
     read -r -p 'Choose [0]: ' choice
@@ -1702,6 +1740,10 @@ for name, service in (data.get("services") or {}).items():
       printf 'Smart Router was recreated but did not become ready.\n' >&2
       exit 1
     }
+    if ! router_runtime_set "{\"router_mode\":\"$mode\"}" >/dev/null; then
+      printf 'WARNING: mode was written to .env, but the Operations Center runtime override could not be synchronized.\n' >&2
+      printf 'If a previous UI override exists, open System and choose Reset to environment, then retry.\n' >&2
+    fi
     printf 'Smart Router mode changed to %s and is ready.\n' "$mode"
     ;;
   show-telegram-users)
@@ -2361,7 +2403,7 @@ PY
       exit 1
     fi
     base="$(router_local_base_url)"
-    printf 'Smart Router v0.5.4 stack integration\n'
+    printf 'Smart Router v0.5.5 stack integration\n'
     printf '  image: %s:%s\n' "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_REPOSITORY)" "$(env_value "$ENV_FILE" SMART_ROUTER_IMAGE_TAG)"
     printf '  base URL: %s\n' "$base"
     printf '  OpenAI API: %s/v1\n' "$base"
@@ -2424,6 +2466,10 @@ PY
     [[ "$policy" != calibrated || -s "$ROOT_DIR/smart-router/policy/calibrated.json" ]] || { printf 'calibrated policy missing\n' >&2; exit 1; }
     replace_env_value "$ENV_FILE" SMART_ROUTER_POLICY "$policy"
     compose up -d --no-deps --force-recreate smart-router
+    if ! router_runtime_set "{\"router_policy\":\"$policy\"}" >/dev/null; then
+      printf 'WARNING: policy was written to .env, but the Operations Center runtime override could not be synchronized.\n' >&2
+      printf 'If a previous UI override exists, open System and choose Reset to environment, then retry.\n' >&2
+    fi
     printf 'router policy: %s\n' "$policy"
     ;;
   router-info)
@@ -2441,7 +2487,7 @@ PY
     ;;
   router-replay)
     dataset="${2:-}"; [[ -f "$dataset" ]] || { printf 'Requests JSONL file required\n' >&2; exit 2; }
-    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.4.jsonl}"
+    output="${3:-$ROOT_DIR/data/smart-router/replay-v0.5.5.jsonl}"
     dataset="$(cd "$(dirname "$dataset")" && pwd)/$(basename "$dataset")"; mkdir -p "$(dirname "$output")"; touch "$output"; output="$(cd "$(dirname "$output")" && pwd)/$(basename "$output")"
     compose run --rm --no-deps -v "$dataset:/work/input.jsonl:ro" -v "$output:/work/output.jsonl" smart-router python -m smart_router.eval.replay /work/input.jsonl -o /work/output.jsonl
     ;;

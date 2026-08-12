@@ -36,6 +36,10 @@ from .control_db import (
     Team,
     User,
     ACLRule,
+    AccessGroup,
+    AgentSkillLink,
+    RuntimeSetting,
+    Skill,
 )
 from .knowledge_v51 import KnowledgeManager
 from .acl_v52 import ACLManager
@@ -58,10 +62,26 @@ class FinalRoute:
     error: JSONResponse | None = None
 
 
-class ControlPlane:
-    """Hermes Smart Router v0.5.4 Operations Center (v0.5.2 persisted schema).
+PLUGIN_CATALOG: list[dict[str, Any]] = [
+    {"catalog_id":"github-mcp","name":"github-mcp","kind":"mcp","description":"GitHub repository, issue, and pull-request tool registration template.","endpoint":"","risk":"medium","manifest":{"capabilities":["repositories","issues","pull_requests"],"install":"configure endpoint/transport after registry install"}},
+    {"catalog_id":"postgres-readonly","name":"postgres-readonly","kind":"mcp","description":"Read-only PostgreSQL query tool registration template.","endpoint":"","risk":"medium","manifest":{"recommended_policy":"read_only"}},
+    {"catalog_id":"kubernetes-observer","name":"kubernetes-observer","kind":"mcp","description":"Kubernetes observation tools for get/list/logs; mutation should remain approval gated.","endpoint":"","risk":"high","manifest":{"recommended_permissions":["get","list","logs"]}},
+    {"catalog_id":"mikrotik-observer","name":"mikrotik-observer","kind":"http","description":"MikroTik inventory/health tool template. Configure a trusted internal endpoint and least privilege.","endpoint":"","risk":"high","manifest":{"recommended_mode":"read_first"}},
+]
 
-    v0.5.4 preserves the v0.5.2 deterministic capability-safety path while adding shared
+SKILL_CATALOG: list[dict[str, Any]] = [
+    {"catalog_id":"linux-operations","name":"Linux Operations","category":"infrastructure","description":"Linux service, storage, package, process, and troubleshooting discipline.","instructions":"Diagnose before changing state. Prefer reversible commands, show validation steps, and call out downtime or data-loss risk.","manifest":{"tags":["linux","systemd","storage","troubleshooting"]}},
+    {"catalog_id":"docker-operations","name":"Docker Operations","category":"containers","description":"Docker/Compose troubleshooting, lifecycle, health, volumes, and networking.","instructions":"Inspect compose config, container health, logs, mounts, networks, and image identity before recreating services. Preserve persistent volumes unless explicitly asked to purge.","manifest":{"tags":["docker","compose","containers"]}},
+    {"catalog_id":"network-engineering","name":"Network Engineering","category":"networking","description":"TCP/IP, DNS, routing, firewall, VLAN, MTU, packet-flow, and connectivity analysis.","instructions":"Build a packet-path hypothesis, separate L2/L3/L4/application failures, and prefer measurable tests such as ip route, ss, dig, curl, ping, traceroute, and packet capture when appropriate.","manifest":{"tags":["networking","dns","routing","firewall"]}},
+    {"catalog_id":"mikrotik-engineering","name":"MikroTik Engineering","category":"networking","description":"RouterOS-aware configuration review and troubleshooting guidance.","instructions":"Use RouterOS concepts accurately, preserve remote-management access, export/backup before risky changes, and distinguish bridge/VLAN/routing/firewall/NAT layers.","manifest":{"tags":["mikrotik","routeros","vlan","firewall"]}},
+    {"catalog_id":"automation-safety","name":"Automation Safety","category":"automation","description":"Safe shell/Python/CI automation with idempotency, dry-run, validation, and rollback.","instructions":"Prefer idempotent operations, explicit inputs, dry-run support, bounded retries, actionable errors, backups before mutation, and post-change verification.","manifest":{"tags":["automation","bash","python","ci"]}},
+    {"catalog_id":"incident-response","name":"Infrastructure Incident Response","category":"operations","description":"Evidence-first incident triage and recovery workflow.","instructions":"Preserve evidence, establish impact and timeline, prioritize containment and service restoration, avoid destructive cleanup before root cause is understood, and record verification after recovery.","manifest":{"tags":["incident","triage","recovery"]}},
+]
+
+class ControlPlane:
+    """Hermes Smart Router v0.5.5 Operations Center (v0.5.2 persisted schema).
+
+    v0.5.5 preserves the v0.5.2-compatible capability-safety path while adding shared
     health/circuit state, Redis-backed HA counters, OIDC, ACL-aware retrieval and
     file/Docker-secret loading.
     """
@@ -70,7 +90,10 @@ class ControlPlane:
         self.settings = settings
         self.enabled = _env_bool("SMART_ROUTER_CONTROL_PLANE_ENABLED", True)
         self.require_auth = _env_bool("SMART_ROUTER_REQUIRE_AUTH", False)
-        self.ha_mode = _env_bool("SMART_ROUTER_HA_MODE", False)
+        self.env_mode = settings.mode
+        self.env_policy = settings.policy
+        self.env_ha_mode = _env_bool("SMART_ROUTER_HA_MODE", False)
+        self.ha_mode = self.env_ha_mode
         configured_db_url = os.getenv("SMART_ROUTER_CONTROL_DATABASE_URL")
         if configured_db_url:
             self.db_url = configured_db_url
@@ -79,6 +102,7 @@ class ControlPlane:
             control_path = os.path.join(os.path.dirname(router_db_path) or ".", "control-v0.5.2.sqlite3")
             self.db_url = f"sqlite:///{control_path}"
         self.db = ControlDB(self.db_url)
+        self._apply_runtime_overrides()
         self.security = SecurityManager(
             self.db,
             settings.hmac_secret,
@@ -265,6 +289,8 @@ class ControlPlane:
             Route("/api/routes", self.routes_api, methods=["GET", "PUT"]),
             Route("/api/providers/discover", self.provider_discover, methods=["GET"]),
             Route("/api/users", self.users_api, methods=["GET", "POST"]),
+            Route("/api/groups", self.groups_api, methods=["GET", "POST"]),
+            Route("/api/groups/{group_id:int}", self.group_api, methods=["PUT", "DELETE"]),
             Route("/api/users/{user_id:int}", self.user_api, methods=["PUT", "DELETE"]),
             Route("/api/keys", self.keys_api, methods=["GET", "POST"]),
             Route("/api/keys/{key_id:int}", self.key_api, methods=["PUT", "DELETE"]),
@@ -286,14 +312,20 @@ class ControlPlane:
             Route("/api/teams/{team_id:int}", self.team_api, methods=["PUT", "DELETE"]),
             Route("/api/teams/{team_id:int}/run", self.team_run_api, methods=["POST"]),
             Route("/api/plugins", self.plugins_api, methods=["GET", "POST"]),
+            Route("/api/plugins/catalog", self.plugin_catalog_api, methods=["GET"]),
+            Route("/api/plugins/install", self.plugin_install_api, methods=["POST"]),
             Route("/api/plugins/{plugin_id:int}", self.plugin_api, methods=["PUT", "DELETE"]),
+            Route("/api/skills", self.skills_api, methods=["GET", "POST"]),
+            Route("/api/skills/catalog", self.skill_catalog_api, methods=["GET"]),
+            Route("/api/skills/install", self.skill_install_api, methods=["POST"]),
+            Route("/api/skills/{skill_id:int}", self.skill_api, methods=["PUT", "DELETE"]),
             Route("/api/audit", self.audit_api, methods=["GET"]),
             Route("/api/acls", self.acls_api, methods=["GET", "POST"]),
             Route("/api/acls/{rule_id:int}", self.acl_api, methods=["DELETE"]),
             Route("/api/provider-health", self.provider_health_api, methods=["GET"]),
             Route("/api/provider-quality", self.provider_quality_api, methods=["GET"]),
             Route("/api/outcomes", self.outcomes_api, methods=["GET", "POST"]),
-            Route("/api/system", self.system_api, methods=["GET"]),
+            Route("/api/system", self.system_api, methods=["GET", "PUT", "DELETE"]),
         ]
 
     async def panel(self, _: Request) -> Response:
@@ -362,7 +394,7 @@ class ControlPlane:
         identity = self._admin_identity(request, "panel.read")
         if isinstance(identity, Response):
             return identity
-        return JSONResponse({"actor": identity.actor, "role": identity.role, "team": identity.team, "permissions": sorted(ROLE_PERMISSIONS.get(identity.role, set()))})
+        return JSONResponse({"actor": identity.actor, "role": identity.role, "team": identity.team, "groups": self._groups_for_user(identity.actor), "permissions": sorted(ROLE_PERMISSIONS.get(identity.role, set()))})
 
     async def summary(self, request: Request) -> Response:
         identity = self._admin_identity(request, "panel.read")
@@ -496,6 +528,58 @@ class ControlPlane:
                     except ValueError as exc: return _error(str(exc), "invalid_password", 422)
             s.commit()
         self.db.audit(identity.actor, identity.role, "user.update", str(uid))
+        return JSONResponse({"ok": True})
+
+    async def groups_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "users.manage" if request.method == "POST" else "panel.read")
+        if isinstance(identity, Response): return identity
+        if request.method == "POST":
+            d = await _json(request)
+            name = str(d.get("name", "")).strip()[:120]
+            if not name:
+                return _error("group name is required", "invalid_group", 422)
+            try:
+                members = self._valid_group_members(d.get("members") or [])
+            except ValueError as exc:
+                return _error(str(exc), "invalid_group_members", 422)
+            with self.db.session() as session:
+                row = AccessGroup(name=name, description=str(d.get("description", ""))[:2000], member_users_json=json.dumps(members), active=bool(d.get("active", True)))
+                session.add(row)
+                try:
+                    session.commit(); session.refresh(row)
+                except Exception:
+                    session.rollback(); return _error("group name already exists", "duplicate_group", 409)
+            self.db.audit(identity.actor, identity.role, "group.create", row.name, detail={"members": len(members)})
+        with self.db.session() as session:
+            rows = list(session.scalars(select(AccessGroup).order_by(AccessGroup.name)))
+        return JSONResponse([_group_dict(row) for row in rows])
+
+    async def group_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "users.manage")
+        if isinstance(identity, Response): return identity
+        gid = int(request.path_params["group_id"])
+        with self.db.session() as session:
+            row = session.get(AccessGroup, gid)
+            if row is None: return Response(status_code=404)
+            if request.method == "DELETE":
+                row.active = False
+            else:
+                d = await _json(request)
+                if "name" in d:
+                    name = str(d["name"]).strip()[:120]
+                    if not name: return _error("group name is required", "invalid_group", 422)
+                    row.name = name
+                if "description" in d: row.description = str(d["description"])[:2000]
+                if "members" in d:
+                    try: row.member_users_json = json.dumps(self._valid_group_members(d["members"]))
+                    except ValueError as exc: return _error(str(exc), "invalid_group_members", 422)
+                if "active" in d: row.active = bool(d["active"])
+                row.updated_at = datetime.now(timezone.utc).isoformat()
+            try:
+                session.commit()
+            except Exception:
+                session.rollback(); return _error("group name already exists", "duplicate_group", 409)
+        self.db.audit(identity.actor, identity.role, "group.update" if request.method != "DELETE" else "group.disable", str(gid))
         return JSONResponse({"ok": True})
 
     async def keys_api(self, request: Request) -> Response:
@@ -678,35 +762,61 @@ class ControlPlane:
         if isinstance(identity, Response): return identity
         if request.method == "POST":
             d = await _json(request)
-            with self.db.session() as s:
-                row = Agent(name=str(d.get("name", "agent")).strip(), description=str(d.get("description", "")), system_prompt=str(d.get("system_prompt", "")), tier=str(d.get("tier", "auto")), profile=str(d.get("profile", "auto")), knowledge_json=json.dumps(d.get("knowledge") or []), plugins_json=json.dumps(d.get("plugins") or []), permissions_json=json.dumps(d.get("permissions") or []), active=bool(d.get("active", True)))
-                s.add(row)
-                try: s.commit()
-                except Exception: s.rollback(); return _error("agent name already exists", "duplicate_agent", 409)
-            self.db.audit(identity.actor, identity.role, "agent.create", row.name)
+            validated = self._validated_agent_payload(d)
+            if isinstance(validated, Response): return validated
+            with self.db.session() as session:
+                row = Agent(**validated["agent_fields"])
+                session.add(row)
+                try:
+                    session.commit(); session.refresh(row)
+                except Exception:
+                    session.rollback(); return _error("agent name already exists", "duplicate_agent", 409)
+                for skill_id in validated["skill_ids"]:
+                    session.add(AgentSkillLink(agent_id=row.id, skill_id=skill_id))
+                session.commit()
+            self.db.audit(identity.actor, identity.role, "agent.create", validated["agent_fields"]["name"], detail={"skills": validated["skill_ids"]})
         return await self._agents_list()
 
     async def _agents_list(self) -> Response:
-        with self.db.session() as s: rows = list(s.scalars(select(Agent).order_by(Agent.id)))
-        return JSONResponse([_agent_dict(r) for r in rows])
+        with self.db.session() as session:
+            rows = list(session.scalars(select(Agent).order_by(Agent.id)))
+            links = list(session.scalars(select(AgentSkillLink)))
+        by_agent: dict[int, list[int]] = {}
+        for link in links:
+            by_agent.setdefault(link.agent_id, []).append(link.skill_id)
+        return JSONResponse([_agent_dict(row) | {"skills": sorted(by_agent.get(row.id, []))} for row in rows])
 
     async def agent_api(self, request: Request) -> Response:
         identity = self._admin_identity(request, "agents.manage")
         if isinstance(identity, Response): return identity
         aid = int(request.path_params["agent_id"])
-        with self.db.session() as s:
-            row = s.get(Agent, aid)
+        with self.db.session() as session:
+            row = session.get(Agent, aid)
             if not row: return Response(status_code=404)
-            if request.method == "DELETE": row.active = False
+            if request.method == "DELETE":
+                if request.query_params.get("purge", "").lower() in {"1", "true", "yes"}:
+                    for link in list(session.scalars(select(AgentSkillLink).where(AgentSkillLink.agent_id == aid))):
+                        session.delete(link)
+                    session.delete(row)
+                    action = "agent.delete"
+                else:
+                    row.active = False
+                    action = "agent.disable"
             else:
                 d = await _json(request)
-                for key in ("name", "description", "system_prompt", "tier", "profile"):
-                    if key in d: setattr(row, key, str(d[key]))
-                if "knowledge" in d: row.knowledge_json = json.dumps(d["knowledge"])
-                if "plugins" in d: row.plugins_json = json.dumps(d["plugins"])
-                if "permissions" in d: row.permissions_json = json.dumps(d["permissions"])
-                if "active" in d: row.active = bool(d["active"])
-            s.commit()
+                merged = _agent_dict(row)
+                merged.update({k: v for k, v in d.items() if k in {"name","description","system_prompt","tier","profile","knowledge","plugins","permissions","active","skills"}})
+                validated = self._validated_agent_payload(merged, existing_id=aid)
+                if isinstance(validated, Response): return validated
+                for key, value in validated["agent_fields"].items(): setattr(row, key, value)
+                for link in list(session.scalars(select(AgentSkillLink).where(AgentSkillLink.agent_id == aid))): session.delete(link)
+                for skill_id in validated["skill_ids"]: session.add(AgentSkillLink(agent_id=aid, skill_id=skill_id))
+                action = "agent.update"
+            try:
+                session.commit()
+            except Exception:
+                session.rollback(); return _error("agent name already exists", "duplicate_agent", 409)
+        self.db.audit(identity.actor, identity.role, action, str(aid))
         return JSONResponse({"ok": True})
 
     async def agent_run_api(self, request: Request) -> Response:
@@ -788,6 +898,27 @@ class ControlPlane:
         with self.db.session() as s: rows = list(s.scalars(select(Plugin).order_by(Plugin.id)))
         return JSONResponse([_plugin_dict(r) for r in rows])
 
+    async def plugin_catalog_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "panel.read")
+        if isinstance(identity, Response): return identity
+        with self.db.session() as session:
+            installed = {row.name for row in session.scalars(select(Plugin))}
+        return JSONResponse([item | {"installed": item["name"] in installed} for item in PLUGIN_CATALOG])
+
+    async def plugin_install_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "plugins.manage")
+        if isinstance(identity, Response): return identity
+        d = await _json(request); catalog_id = str(d.get("catalog_id", ""))
+        item = next((x for x in PLUGIN_CATALOG if x["catalog_id"] == catalog_id), None)
+        if item is None: return _error("unknown plugin catalog item", "invalid_plugin_catalog", 404)
+        with self.db.session() as session:
+            existing = session.scalar(select(Plugin).where(Plugin.name == item["name"]))
+            if existing is not None: return JSONResponse({"ok": True, "id": existing.id, "installed": True})
+            row = Plugin(name=item["name"], kind=item["kind"], description=item["description"], endpoint=item.get("endpoint", ""), manifest_json=json.dumps(item.get("manifest") or {}), risk=item["risk"], enabled=False)
+            session.add(row); session.commit(); session.refresh(row)
+        self.db.audit(identity.actor, identity.role, "plugin.install_catalog", row.name)
+        return JSONResponse({"ok": True, "id": row.id, "installed": True})
+
     async def plugin_api(self, request: Request) -> Response:
         identity = self._admin_identity(request, "plugins.manage")
         if isinstance(identity, Response): return identity
@@ -803,6 +934,67 @@ class ControlPlane:
                 if "manifest" in d: row.manifest_json = json.dumps(d["manifest"])
                 if "enabled" in d: row.enabled = bool(d["enabled"])
             s.commit()
+        return JSONResponse({"ok": True})
+
+    async def skills_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "plugins.manage" if request.method == "POST" else "panel.read")
+        if isinstance(identity, Response): return identity
+        if request.method == "POST":
+            d = await _json(request)
+            name = str(d.get("name", "")).strip()[:160]
+            if not name: return _error("skill name is required", "invalid_skill", 422)
+            row = Skill(name=name, description=str(d.get("description", ""))[:4000], category=str(d.get("category", "general"))[:80], source=str(d.get("source", "manual"))[:40], commercial=bool(d.get("commercial", False)), license_note=str(d.get("license_note", ""))[:4000], instructions=str(d.get("instructions", ""))[:20000], manifest_json=json.dumps(d.get("manifest") or {}), enabled=bool(d.get("enabled", True)))
+            with self.db.session() as session:
+                session.add(row)
+                try: session.commit(); session.refresh(row)
+                except Exception: session.rollback(); return _error("skill name already exists", "duplicate_skill", 409)
+            self.db.audit(identity.actor, identity.role, "skill.create", row.name)
+        with self.db.session() as session:
+            rows = list(session.scalars(select(Skill).order_by(Skill.name)))
+        return JSONResponse([_skill_dict(row) for row in rows])
+
+    async def skill_catalog_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "panel.read")
+        if isinstance(identity, Response): return identity
+        with self.db.session() as session:
+            installed = {row.name for row in session.scalars(select(Skill))}
+        return JSONResponse([item | {"installed": item["name"] in installed} for item in SKILL_CATALOG])
+
+    async def skill_install_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "plugins.manage")
+        if isinstance(identity, Response): return identity
+        d = await _json(request); catalog_id = str(d.get("catalog_id", ""))
+        item = next((x for x in SKILL_CATALOG if x["catalog_id"] == catalog_id), None)
+        if item is None: return _error("unknown skill catalog item", "invalid_skill_catalog", 404)
+        with self.db.session() as session:
+            existing = session.scalar(select(Skill).where(Skill.name == item["name"]))
+            if existing is not None: return JSONResponse({"ok": True, "id": existing.id, "installed": True})
+            row = Skill(name=item["name"], description=item["description"], category=item["category"], source="catalog", commercial=False, license_note=item.get("license_note", ""), instructions=item["instructions"], manifest_json=json.dumps(item.get("manifest") or {}), enabled=True)
+            session.add(row); session.commit(); session.refresh(row)
+        self.db.audit(identity.actor, identity.role, "skill.install_catalog", row.name)
+        return JSONResponse({"ok": True, "id": row.id, "installed": True})
+
+    async def skill_api(self, request: Request) -> Response:
+        identity = self._admin_identity(request, "plugins.manage")
+        if isinstance(identity, Response): return identity
+        sid = int(request.path_params["skill_id"])
+        with self.db.session() as session:
+            row = session.get(Skill, sid)
+            if row is None: return Response(status_code=404)
+            if request.method == "DELETE":
+                for link in list(session.scalars(select(AgentSkillLink).where(AgentSkillLink.skill_id == sid))): session.delete(link)
+                session.delete(row)
+            else:
+                d = await _json(request)
+                for key in ("name","description","category","source","license_note","instructions"):
+                    if key in d: setattr(row, key, str(d[key]))
+                if "commercial" in d: row.commercial = bool(d["commercial"])
+                if "enabled" in d: row.enabled = bool(d["enabled"])
+                if "manifest" in d: row.manifest_json = json.dumps(d["manifest"] or {})
+                row.updated_at = datetime.now(timezone.utc).isoformat()
+            try: session.commit()
+            except Exception: session.rollback(); return _error("skill name already exists", "duplicate_skill", 409)
+        self.db.audit(identity.actor, identity.role, "skill.delete" if request.method == "DELETE" else "skill.update", str(sid))
         return JSONResponse({"ok": True})
 
     async def audit_api(self, request: Request) -> Response:
@@ -888,17 +1080,50 @@ class ControlPlane:
         return JSONResponse({"ok": True})
 
     async def system_api(self, request: Request) -> Response:
-        identity = self._admin_identity(request, "panel.read")
+        permission = "panel.write" if request.method in {"PUT", "DELETE"} else "panel.read"
+        identity = self._admin_identity(request, permission)
         if isinstance(identity, Response): return identity
+        if request.method == "PUT":
+            d = await _json(request)
+            if "router_mode" in d:
+                mode = str(d["router_mode"]).lower()
+                if mode not in {"observe", "route"}: return _error("router mode must be observe or route", "invalid_router_mode", 422)
+                object.__setattr__(self.settings, "mode", mode); self.db.set_runtime_setting("router_mode", mode)
+            if "router_policy" in d:
+                policy = str(d["router_policy"]).lower()
+                if policy not in {"heuristic", "calibrated", "learned"}: return _error("router policy must be heuristic, calibrated, or learned", "invalid_router_policy", 422)
+                object.__setattr__(self.settings, "policy", policy); self.db.set_runtime_setting("router_policy", policy)
+            if "ha_mode" in d:
+                enabled = bool(d["ha_mode"])
+                if enabled and not self.redis.enabled:
+                    return _error("HA mode requires SMART_ROUTER_REDIS_URL so shared state is available", "ha_requires_redis", 422)
+                self.ha_mode = enabled; self.db.set_runtime_setting("ha_mode", enabled)
+            self.db.audit(identity.actor, identity.role, "system.runtime.update", detail={"router_mode": self.settings.mode, "router_policy": self.settings.policy, "ha_mode": self.ha_mode})
+        elif request.method == "DELETE":
+            self.db.delete_runtime_settings(["router_mode", "router_policy", "ha_mode"])
+            object.__setattr__(self.settings, "mode", self.env_mode)
+            object.__setattr__(self.settings, "policy", self.env_policy)
+            self.ha_mode = self.env_ha_mode
+            self.db.audit(identity.actor, identity.role, "system.runtime.reset")
+        return self._system_response()
+
+    def _system_response(self) -> Response:
         redis_ok = self.redis.ping()
         REDIS_READINESS.set(1 if redis_ok else 0)
         return JSONResponse({
             "version": __version__, "operations_center": "Hermes Operations Center",
-            "control_db": redacted_url(self.db_url), "database_ok": self.db.ping(), "ha_mode": self.ha_mode,
+            "control_db": redacted_url(self.db_url), "database_ok": self.db.ping(), "control_schema": self.db.schema_version(),
+            "database_compatibility": "in-place upgrade; filename remains control-v0.5.2.sqlite3 unless operator overrides SMART_ROUTER_CONTROL_DATABASE_URL",
+            "ha_mode": self.ha_mode,
             "knowledge_storage": self.knowledge.storage_mode, "knowledge_db": redacted_url(self.knowledge.database_url),
             "knowledge_database_ok": self.knowledge.ping(), "knowledge_retrieval": "lexical",
             "require_auth": self.require_auth, "upstream": self.settings.upstream_base_url, "upstream_health": self.settings.upstream_health_url,
             "router_mode": self.settings.mode, "router_policy": self.settings.policy,
+            "config_source": {
+                "router_mode": "operations_db" if self.db.runtime_setting("router_mode") is not None else "environment",
+                "router_policy": "operations_db" if self.db.runtime_setting("router_policy") is not None else "environment",
+                "ha_mode": "operations_db" if self.db.runtime_setting("ha_mode") is not None else "environment",
+            },
             "redis_enabled": self.redis.enabled, "redis_ok": redis_ok, "oidc_enabled": self.oidc.enabled,
             "acl_default_deny": self.acl.default_deny,
             "rate_limits": {
@@ -908,6 +1133,57 @@ class ControlPlane:
         })
 
     # -------------------- internals --------------------
+
+    def _apply_runtime_overrides(self) -> None:
+        mode = self.db.runtime_setting("router_mode")
+        policy = self.db.runtime_setting("router_policy")
+        ha_mode = self.db.runtime_setting("ha_mode")
+        if mode in {"observe", "route"}: object.__setattr__(self.settings, "mode", mode)
+        if policy in {"heuristic", "calibrated", "learned"}: object.__setattr__(self.settings, "policy", policy)
+        if isinstance(ha_mode, bool): self.ha_mode = ha_mode
+
+    def _groups_for_user(self, username: str) -> list[str]:
+        result: list[str] = []
+        with self.db.session() as session:
+            groups = list(session.scalars(select(AccessGroup).where(AccessGroup.active.is_(True))))
+        for group in groups:
+            if username in _loads(group.member_users_json, []): result.append(group.name)
+        return sorted(result)
+
+    def _valid_group_members(self, members: Any) -> list[str]:
+        values = sorted({str(x).strip() for x in members if str(x).strip()}) if isinstance(members, list) else []
+        with self.db.session() as session:
+            existing = {row.username for row in session.scalars(select(User))}
+        missing = [name for name in values if name not in existing]
+        if missing:
+            raise ValueError("unknown group members: " + ", ".join(missing))
+        return values
+
+    def _validated_agent_payload(self, d: dict[str, Any], existing_id: int | None = None) -> dict[str, Any] | Response:
+        name = str(d.get("name", "")).strip()[:160]
+        if not name: return _error("agent name is required", "invalid_agent", 422)
+        tier = str(d.get("tier", "auto")).lower()
+        profile = str(d.get("profile", "auto")).lower()
+        if tier not in {"auto", "fast", "standard", "strong"}: return _error("invalid agent tier", "invalid_agent", 422)
+        if profile not in {"auto", "fast", "standard", "strong", "coding", "vision"}: return _error("invalid agent profile", "invalid_agent", 422)
+        try:
+            knowledge = sorted({int(x) for x in (d.get("knowledge") or [])})
+            plugins = sorted({int(x) for x in (d.get("plugins") or [])})
+            skills = sorted({int(x) for x in (d.get("skills") or [])})
+        except (TypeError, ValueError): return _error("knowledge, plugins, and skills must contain numeric IDs", "invalid_agent", 422)
+        with self.db.session() as session:
+            kb_existing = {x for x in knowledge if session.get(KnowledgeBase, x) is not None}
+            plugin_existing = {x for x in plugins if session.get(Plugin, x) is not None}
+            skill_existing = {x for x in skills if session.get(Skill, x) is not None}
+        missing_kb = sorted(set(knowledge) - kb_existing); missing_plugins = sorted(set(plugins) - plugin_existing); missing_skills = sorted(set(skills) - skill_existing)
+        if missing_kb: return _error("knowledge base IDs do not exist: " + ", ".join(map(str, missing_kb)), "invalid_agent_knowledge", 422)
+        if missing_plugins: return _error("plugin IDs do not exist: " + ", ".join(map(str, missing_plugins)), "invalid_agent_plugins", 422)
+        if missing_skills: return _error("skill IDs do not exist: " + ", ".join(map(str, missing_skills)), "invalid_agent_skills", 422)
+        return {"agent_fields": {
+            "name": name, "description": str(d.get("description", ""))[:4000], "system_prompt": str(d.get("system_prompt", ""))[:40000],
+            "tier": tier, "profile": profile, "knowledge_json": json.dumps(knowledge), "plugins_json": json.dumps(plugins),
+            "permissions_json": json.dumps(d.get("permissions") or []), "active": bool(d.get("active", True)),
+        }, "skill_ids": skills}
 
     def _admin_identity(self, request: Request, permission: str) -> Identity | Response:
         token = bearer(request.headers)
@@ -1028,16 +1304,26 @@ class ControlPlane:
     async def _run_agent(self, agent_id: int, task: str, messages: Any) -> dict[str, Any] | Response:
         with self.db.session() as s:
             agent = s.get(Agent, agent_id)
+            if agent is not None:
+                skill_ids = [link.skill_id for link in s.scalars(select(AgentSkillLink).where(AgentSkillLink.agent_id == agent_id))]
+                skills = [skill for sid in skill_ids if (skill := s.get(Skill, sid)) is not None and skill.enabled]
+            else:
+                skills = []
         if not agent or not agent.active: return _error("agent not found", "agent_not_found", 404)
         msg = list(messages) if isinstance(messages, list) else [{"role": "user", "content": task}]
-        if agent.system_prompt: msg.insert(0, {"role": "system", "content": agent.system_prompt})
+        system_parts = [agent.system_prompt.strip()] if agent.system_prompt.strip() else []
+        if skills:
+            skill_text = "\n\n".join(f"Skill: {skill.name}\n{skill.instructions.strip()}" for skill in skills if skill.instructions.strip())[:30000]
+            if skill_text:
+                system_parts.append("Assigned Hermes skills:\n" + skill_text)
+        if system_parts: msg.insert(0, {"role": "system", "content": "\n\n".join(system_parts)})
         # Internal orchestration stays on the public `auto` model so existing
         # SMART_ROUTER_ALLOW_TIER_OVERRIDES safety semantics are preserved.
         # A trusted v0.5.1 profile selects the desired capability pool instead.
         profile = agent.profile if agent.profile in {"fast", "standard", "strong", "coding", "vision"} else agent.tier
         if profile not in {"fast", "standard", "strong", "coding", "vision"}:
             profile = "auto"
-        metadata = {"hermes": {"agent_id": agent.id, "knowledge_bases": _loads(agent.knowledge_json, [])}}
+        metadata = {"hermes": {"agent_id": agent.id, "knowledge_bases": _loads(agent.knowledge_json, []), "skill_ids": [skill.id for skill in skills]}}
         body = {"model": "auto", "messages": msg, "metadata": metadata}
         return await self._local_chat(body, profile=profile)
 
@@ -1103,6 +1389,12 @@ def _row_dict(row: Any, exclude: set[str] | None = None) -> dict[str, Any]:
     exclude = exclude or set()
     return {column.name: getattr(row, column.name) for column in row.__table__.columns if column.name not in exclude}
 
+
+def _group_dict(r: AccessGroup) -> dict[str, Any]:
+    return _row_dict(r, exclude={"member_users_json"}) | {"members": _loads(r.member_users_json, [])}
+
+def _skill_dict(r: Skill) -> dict[str, Any]:
+    return _row_dict(r, exclude={"manifest_json"}) | {"manifest": _loads(r.manifest_json, {})}
 
 def _agent_dict(r: Agent) -> dict[str, Any]:
     return _row_dict(r, {"knowledge_json", "plugins_json", "permissions_json"}) | {"knowledge": _loads(r.knowledge_json, []), "plugins": _loads(r.plugins_json, []), "permissions": _loads(r.permissions_json, [])}
