@@ -298,6 +298,13 @@ class Agent(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow)
 
 
+class AgentGraph(Base):
+    __tablename__ = "v59_agent_graphs"
+    agent_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    graph_json: Mapped[str] = mapped_column(Text, default='{"nodes":[],"edges":[]}')
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow)
+
+
 class Team(Base):
     __tablename__ = "v51_agent_teams"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

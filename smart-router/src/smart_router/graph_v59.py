@@ -48,6 +48,21 @@ WORKFLOW_PORTS: dict[str, NodePorts] = {
 }
 
 
+# Agent Studio uses the same typed relationship model as workflow agent nodes, but
+# persists a composition graph separately from the agent's execution configuration.
+AGENT_PORTS: dict[str, NodePorts] = {
+    "input": NodePorts(outputs=(Port("default", "flow"),)),
+    "agent": NodePorts(
+        inputs=(Port("default", "flow"), Port("context", "knowledge"), Port("tools", "tool")),
+        outputs=(Port("result", "answer"),),
+    ),
+    "knowledge": NodePorts(outputs=(Port("context", "knowledge"),)),
+    "skill": NodePorts(outputs=(Port("tools", "tool"),)),
+    "plugin": NodePorts(outputs=(Port("tools", "tool"),)),
+    "output": NodePorts(inputs=(Port("answer", "answer"),)),
+}
+
+
 KNOWLEDGE_PORTS: dict[str, NodePorts] = {
     "data_source": NodePorts(outputs=(Port("default", "raw"),)),
     "extract": NodePorts(inputs=(Port("default", "raw"),), outputs=(Port("default", "text"),)),
@@ -63,9 +78,40 @@ KNOWLEDGE_PORTS: dict[str, NodePorts] = {
 }
 
 
+# Router Pipeline supports explicit named branch outputs. The graph describes
+# orchestration only; approval ports never grant execution authority.
+ROUTER_PORTS: dict[str, NodePorts] = {
+    "classifier": NodePorts(
+        inputs=(Port("default", "route_flow"),),
+        outputs=(Port("coding", "route_flow"), Port("vision", "route_flow"), Port("default", "route_flow")),
+    ),
+    "condition": NodePorts(
+        inputs=(Port("default", "route_flow"),),
+        outputs=(Port("true", "route_flow"), Port("false", "route_flow"), Port("default", "route_flow")),
+    ),
+    "capability_filter": NodePorts(
+        inputs=(Port("default", "route_flow"),),
+        outputs=(Port("matched", "route_flow"), Port("unmatched", "route_flow"), Port("default", "route_flow")),
+    ),
+    "health_filter": NodePorts(
+        inputs=(Port("default", "route_flow"),),
+        outputs=(Port("healthy", "route_flow"), Port("unhealthy", "route_flow"), Port("default", "route_flow")),
+    ),
+    "approval": NodePorts(
+        inputs=(Port("default", "route_flow"),),
+        outputs=(Port("approved", "route_flow"), Port("rejected", "route_flow"), Port("timeout", "route_flow"), Port("default", "route_flow")),
+    ),
+    "cost_latency_score": NodePorts(inputs=(Port("default", "route_flow"),), outputs=(Port("default", "route_flow"),)),
+    "load_balance": NodePorts(inputs=(Port("default", "route_flow"),), outputs=(Port("default", "route_flow"),)),
+    "route": NodePorts(inputs=(Port("default", "route_flow"),), outputs=(Port("default", "route_flow"),)),
+    "retry": NodePorts(inputs=(Port("default", "route_flow"),), outputs=(Port("default", "route_flow"),)),
+    "fallback": NodePorts(inputs=(Port("default", "route_flow"),), outputs=(Port("default", "route_flow"),)),
+}
+
+
 _COMPATIBILITY: dict[str, set[str]] = {
     "flow": {"flow"},
-    "answer": {"answer", "flow"},
+    "answer": {"answer", "flow", "answer_or_knowledge"},
     "knowledge": {"knowledge", "answer_or_knowledge"},
     "tool": {"tool"},
     "raw": {"raw", "text_or_raw", "chunks_or_text", "knowledge_sink"},
@@ -73,12 +119,20 @@ _COMPATIBILITY: dict[str, set[str]] = {
     "chunks": {"chunks_or_text", "knowledge_sink"},
     "embeddings": {"embeddings", "knowledge_sink"},
     "index": {"index", "knowledge_sink"},
-    "answer": {"answer", "flow", "answer_or_knowledge"},
+    "route_flow": {"route_flow"},
+}
+
+
+_PORT_TABLES: dict[str, dict[str, NodePorts]] = {
+    "workflow": WORKFLOW_PORTS,
+    "agent": AGENT_PORTS,
+    "knowledge": KNOWLEDGE_PORTS,
+    "router": ROUTER_PORTS,
 }
 
 
 def ports_for(studio: str, node_type: str) -> NodePorts:
-    table = WORKFLOW_PORTS if studio == "workflow" else KNOWLEDGE_PORTS if studio == "knowledge" else None
+    table = _PORT_TABLES.get(studio)
     if table is None:
         raise ValueError(f"unsupported graph studio: {studio}")
     try:
@@ -103,7 +157,13 @@ def _find_port(ports: Iterable[Port], port_id: str) -> Port | None:
     return next((p for p in ports if p.id == port_id), None)
 
 
-def _resolve_ports(studio: str, source_type: str, target_type: str, source_port: str | None, target_port: str | None) -> tuple[Port, Port]:
+def _resolve_ports(
+    studio: str,
+    source_type: str,
+    target_type: str,
+    source_port: str | None,
+    target_port: str | None,
+) -> tuple[Port, Port]:
     source = ports_for(studio, source_type)
     target = ports_for(studio, target_type)
     if not source.outputs:
@@ -258,3 +318,96 @@ def normalize_graph(
         raise ValueError(f"{studio} graph contains an unsupported cycle")
 
     return {"nodes": clean_nodes, "edges": clean_edges, "version": GRAPH_SCHEMA_VERSION}
+
+
+def linear_node_order(graph: dict[str, Any], *, studio: str) -> list[str]:
+    """Return a single-chain node order or reject an ambiguous/disconnected graph."""
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+    ids = [str(node.get("id", "")) for node in nodes]
+    if not ids:
+        if edges:
+            raise ValueError(f"{studio} graph has edges without nodes")
+        return []
+    if len(ids) == 1:
+        if edges:
+            raise ValueError(f"{studio} single-node graph cannot contain an edge")
+        return ids
+    if len(edges) != len(ids) - 1:
+        raise ValueError(f"{studio} graph must be one connected stage chain")
+
+    indegree = {node_id: 0 for node_id in ids}
+    outgoing: dict[str, str] = {}
+    for edge in edges:
+        source = str(edge.get("source_node", edge.get("from", "")))
+        target = str(edge.get("target_node", edge.get("to", "")))
+        if source in outgoing:
+            raise ValueError(f"{studio} graph branching is reserved for the advanced routing phase")
+        outgoing[source] = target
+        indegree[target] = indegree.get(target, 0) + 1
+        if indegree[target] > 1:
+            raise ValueError(f"{studio} graph merging is reserved for the advanced routing phase")
+
+    starts = [node_id for node_id in ids if indegree[node_id] == 0]
+    if len(starts) != 1:
+        raise ValueError(f"{studio} graph must have exactly one starting stage")
+
+    order: list[str] = []
+    current: str | None = starts[0]
+    while current is not None:
+        if current in order:
+            raise ValueError(f"{studio} graph contains an unsupported cycle")
+        order.append(current)
+        current = outgoing.get(current)
+    if len(order) != len(ids):
+        raise ValueError(f"{studio} graph must be one connected stage chain")
+    return order
+
+
+def router_graph_plan(graph: dict[str, Any]) -> dict[str, Any]:
+    """Validate a Router DAG and return deterministic entry/transitions/topological order."""
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+    ids = [str(node.get("id", "")) for node in nodes]
+    if not ids:
+        return {"entry": None, "order": [], "transitions": {}}
+    indegree = {node_id: 0 for node_id in ids}
+    adjacency: dict[str, list[str]] = {node_id: [] for node_id in ids}
+    transitions: dict[str, dict[str, str]] = {node_id: {} for node_id in ids}
+    for edge in edges:
+        source = str(edge.get("source_node", edge.get("from", "")))
+        target = str(edge.get("target_node", edge.get("to", "")))
+        port = str(edge.get("source_port", "default"))
+        if port in transitions[source]:
+            raise ValueError(f"router output port {source}.{port} may have only one connection")
+        transitions[source][port] = target
+        adjacency[source].append(target)
+        indegree[target] += 1
+    starts = [node_id for node_id in ids if indegree[node_id] == 0]
+    if len(starts) != 1:
+        raise ValueError("router graph must have exactly one starting stage")
+    # Router joins are allowed, but disconnected nodes are not.
+    queue = [starts[0]]
+    seen: set[str] = set()
+    while queue:
+        node = queue.pop(0)
+        if node in seen:
+            continue
+        seen.add(node)
+        queue.extend(adjacency[node])
+    if seen != set(ids):
+        raise ValueError("router graph must be fully connected from its starting stage")
+    # Stable Kahn topological order used for the persisted stage list.
+    indegree2 = dict(indegree)
+    ready = [node_id for node_id in ids if indegree2[node_id] == 0]
+    order: list[str] = []
+    while ready:
+        node = ready.pop(0)
+        order.append(node)
+        for target in adjacency[node]:
+            indegree2[target] -= 1
+            if indegree2[target] == 0:
+                ready.append(target)
+    if len(order) != len(ids):
+        raise ValueError("router graph contains an unsupported cycle")
+    return {"entry": starts[0], "order": order, "transitions": transitions}
