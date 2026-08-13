@@ -20,7 +20,6 @@ _NPM_REGISTRY = os.getenv("STACK_NPM_REGISTRY", "https://registry.npmjs.org/")
 _PLUGIN_DIR = Path(__file__).resolve().parent
 _NPM_USER_CONFIG = _PLUGIN_DIR / "npm-user.npmrc"
 _NPM_GLOBAL_CONFIG = _PLUGIN_DIR / "npm-global.npmrc"
-_runtime_context: Any = None
 _operations: dict[str, dict[str, Any]] = {}
 
 _PY_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]{0,127})==([0-9]+(?:\.[0-9A-Za-z-]+)+)$")
@@ -32,24 +31,33 @@ _STRIPPED_ENV = frozenset({"NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONHOM
 def _json(v: Any) -> str: return json.dumps(v, separators=(",", ":"), sort_keys=True)
 def _error(m: str) -> str: return _json({"error": m})
 
-def _ctx_value(*names: str, default: Any = None) -> Any:
-    if _runtime_context is None: return default
-    for name in names:
-        value = getattr(_runtime_context, name, None)
-        if callable(value):
-            try: return value()
-            except TypeError: continue
-        if value is not None: return value
-    return default
+def _session_env(name: str, default: str = "") -> str:
+    try:
+        from gateway.session_context import get_session_env
+        return str(get_session_env(name, default) or "")
+    except Exception:
+        return str(os.getenv(name, default) or "")
 
-def _current_session_key() -> str: return str(_ctx_value("current_session_key", "session_key", default=os.getenv("HERMES_SESSION_KEY", "")) or "")
-def _session_platform() -> str:
-    value = _ctx_value("session_platform", "platform")
-    if value: return str(value)
-    key = _current_session_key(); return key.split(":", 1)[0] if ":" in key else ""
-def _cron_context() -> bool: return bool(_ctx_value("cron_context", "is_cron", default=False))
-def _approval_bypass_active() -> bool: return bool(_ctx_value("approval_bypass_active", "approval_bypass", default=False))
-def _manual_approval_mode() -> bool: return bool(_ctx_value("manual_approval_mode", "is_manual_approval", default=False))
+def _truthy(value: str) -> bool: return str(value).strip().lower() in {"1", "true", "yes", "on"}
+def _current_session_key() -> str: return _session_env("HERMES_SESSION_KEY", "")
+def _session_platform() -> str: return _session_env("HERMES_SESSION_PLATFORM", "")
+def _cron_context() -> bool: return _truthy(_session_env("HERMES_CRON_SESSION", ""))
+def _approval_bypass_active() -> bool:
+    try:
+        from tools.approval import is_approval_bypass_active
+        return bool(is_approval_bypass_active())
+    except Exception:
+        return True
+def _manual_approval_mode() -> bool:
+    try:
+        from hermes_cli.config import load_config_readonly
+        config = load_config_readonly() or {}
+        approvals = config.get("approvals") or {}
+        mode = approvals.get("mode", "manual") if isinstance(approvals, dict) else "manual"
+        if mode is False: return False
+        return str(mode).strip().lower() == "manual"
+    except Exception:
+        return False
 
 def _context_problem() -> str | None:
     if _session_platform() != "telegram" or not _current_session_key(): return "Package installation is allowed only from an interactive Telegram session."
@@ -71,8 +79,8 @@ def _prepare(kind: str, spec: str) -> str:
     _operations[pending_id] = {"kind": kind, "package": package, "version": version, "destination": destination, "command": command, "session": _current_session_key(), "state": "prepared"}
     return _json({"status": "prepared", "pending_id": pending_id, "package": package, "version": version, "destination": destination, "command": command})
 
-def _prepare_python(payload: dict[str, Any]) -> str: return _prepare("python", payload.get("spec", ""))
-def _prepare_npm(payload: dict[str, Any]) -> str: return _prepare("npm", payload.get("spec", ""))
+def _prepare_python(payload: dict[str, Any], **_: Any) -> str: return _prepare("python", payload.get("spec", ""))
+def _prepare_npm(payload: dict[str, Any], **_: Any) -> str: return _prepare("npm", payload.get("spec", ""))
 
 def _clean_env(kind: str) -> dict[str, str]:
     env = os.environ.copy()
@@ -106,28 +114,28 @@ def _install(kind: str, payload: dict[str, Any]) -> str:
     result = {"status": "installed" if completed.returncode == 0 else "failed", "returncode": completed.returncode, "output": (completed.stdout + completed.stderr)[-8000:]}
     return _json(result)
 
-def _install_python(payload: dict[str, Any]) -> str: return _install("python", payload)
-def _install_npm(payload: dict[str, Any]) -> str: return _install("npm", payload)
+def _install_python(payload: dict[str, Any], **_: Any) -> str: return _install("python", payload)
+def _install_npm(payload: dict[str, Any], **_: Any) -> str: return _install("npm", payload)
 
-def _pre_tool_call(tool_name: str, arguments: dict[str, Any] | None = None):
-    arguments = arguments or {}
+def _pre_tool_call(tool_name: str, args: dict[str, Any] | None = None, **_: Any):
+    arguments = args or {}
     if tool_name == "terminal" and _RAW_MANAGER_RE.search(str(arguments.get("command", ""))):
-        return {"action": "block", "reason": "Raw package-manager commands are blocked; use the approval-gated package tools."}
+        return {"action": "block", "message": "Raw package-manager commands are blocked; use the approval-gated package tools."}
     if tool_name in {"write_file", "edit_file", "patch_file"}:
         try: path = Path(str(arguments.get("path", ""))).resolve()
         except (OSError, ValueError): path = Path("/")
         for managed in (_PYTHON_TARGET, _NPM_PREFIX):
             try:
                 if path == managed.resolve() or managed.resolve() in path.parents:
-                    return {"action": "block", "reason": "Direct writes to managed package targets are blocked."}
+                    return {"action": "block", "message": "Direct writes to managed package targets are blocked."}
             except OSError: pass
     expected = {"stack_install_python_package": "python", "stack_install_npm_package": "npm"}.get(tool_name)
     if not expected: return None
     pending_id = str(arguments.get("pending_id", "")); item = _operations.get(pending_id)
     if not item or item.get("kind") != expected or item.get("state") != "prepared" or item.get("session") != _current_session_key():
-        return {"action": "block", "reason": "Install requires a matching prepared one-time operation."}
-    item["state"] = "approved_once"; item["rule_key"] = f"stack-package-install:{pending_id}"
-    return {"action": "approve", "rule_key": item["rule_key"], "description": f"Install exact {item['package']} {item['version']} once."}
+        return {"action": "block", "message": "Install requires a matching prepared one-time operation."}
+    item["state"] = "approval_pending"; item["rule_key"] = f"stack-package-install:{pending_id}"
+    return {"action": "approve", "rule_key": item["rule_key"], "message": f"Install exact {item['package']} {item['version']} once."}
 
 def _post_approval_response(pattern_key: str, choice: str, **_: Any):
     key = str(pattern_key).removeprefix("plugin_rule:")
@@ -138,17 +146,15 @@ def _post_approval_response(pattern_key: str, choice: str, **_: Any):
         return
 
 def _tool(name: str, description: str, handler, properties: dict[str, Any], required: list[str]):
-    return dict(name=name, description=description, handler=handler, schema={"parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}})
+    return dict(name=name, description=description, handler=handler, schema={"name": name, "description": description, "parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}})
 
 def register(context):
-    global _runtime_context
-    _runtime_context = context
     for definition in [
         _tool("stack_prepare_python_package", "Prepare an exact PyPI package version for one-time approval.", _prepare_python, {"spec": {"type": "string"}}, ["spec"]),
         _tool("stack_install_python_package", "Install a previously prepared and approved Python package.", _install_python, {"pending_id": {"type": "string"}}, ["pending_id"]),
         _tool("stack_prepare_npm_package", "Prepare an exact npm package version for one-time approval.", _prepare_npm, {"spec": {"type": "string"}}, ["spec"]),
         _tool("stack_install_npm_package", "Install a previously prepared and approved npm package.", _install_npm, {"pending_id": {"type": "string"}}, ["pending_id"]),
     ]:
-        context.register_tool(**definition)
+        context.register_tool(toolset="stack-package-policy", **definition)
     context.register_hook("pre_tool_call", _pre_tool_call)
     context.register_hook("post_approval_response", _post_approval_response)

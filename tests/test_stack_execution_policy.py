@@ -51,7 +51,7 @@ class ExecutionPolicyTest(unittest.TestCase):
         with mock.patch.object(self.plugin, "_broker_call", side_effect=self.broker) as broker:
             prepared = self.parse(self.plugin._prepare_local({"command": "id"}))
             directive = self.plugin._pre_tool_call(
-                "stack_execute_local_command", {"pending_id": prepared["pending_id"]}
+                "stack_execute_local_command", args={"pending_id": prepared["pending_id"]}, task_id="t1"
             )
             self.assertEqual(directive["action"], "approve")
             self.plugin._post_approval_response(
@@ -70,7 +70,7 @@ class ExecutionPolicyTest(unittest.TestCase):
         with mock.patch.object(self.plugin, "_broker_call", side_effect=self.broker) as broker:
             prepared = self.parse(self.plugin._prepare_local({"command": "id"}))
             directive = self.plugin._pre_tool_call(
-                "stack_execute_local_command", {"pending_id": prepared["pending_id"]}
+                "stack_execute_local_command", args={"pending_id": prepared["pending_id"]}, task_id="t1"
             )
             self.plugin._post_approval_response(
                 pattern_key=f"plugin_rule:{directive['rule_key']}", choice="session"
@@ -95,14 +95,15 @@ class ExecutionPolicyTest(unittest.TestCase):
         with mock.patch.object(self.plugin, "_broker_call", side_effect=self.broker):
             prepared = self.parse(self.plugin._prepare_local({"command": "id"}))
             result = self.plugin._pre_tool_call(
-                "stack_execute_ssh_command", {"pending_id": prepared["pending_id"]}
+                "stack_execute_ssh_command", args={"pending_id": prepared["pending_id"]}, task_id="t1"
             )
             self.assertEqual(result["action"], "block")
 
     def test_enabled_registration(self):
         class Context:
             def __init__(self): self.tools, self.hooks = [], []
-            def register_tool(self, **kwargs): self.tools.append(kwargs)
+            def register_tool(self, name, toolset, schema, handler, **kwargs):
+                self.tools.append({"name": name, "toolset": toolset, "schema": schema, "handler": handler, **kwargs})
             def register_hook(self, name, handler): self.hooks.append(name)
         context = Context()
         self.plugin.register(context)
@@ -110,6 +111,24 @@ class ExecutionPolicyTest(unittest.TestCase):
         self.assertEqual(len(names), 8)
         self.assertIn("pre_tool_call", context.hooks)
         self.assertIn("post_approval_response", context.hooks)
+        self.assertEqual({tool["toolset"] for tool in context.tools}, {"stack-execution-policy"})
+        self.assertTrue(all(tool["schema"].get("name") == tool["name"] for tool in context.tools))
+
+    def test_handler_accepts_current_runtime_kwargs(self):
+        with mock.patch.object(self.plugin, "_broker_call", side_effect=self.broker):
+            result = self.parse(self.plugin._prepare_local({"command": "id"}, task_id="t1", session_id="s1"))
+        self.assertEqual(result["status"], "prepared")
+
+    def test_current_pre_tool_directive_shape(self):
+        with mock.patch.object(self.plugin, "_broker_call", side_effect=self.broker):
+            prepared = self.parse(self.plugin._prepare_local({"command": "id"}))
+        directive = self.plugin._pre_tool_call(
+            "stack_execute_local_command", args={"pending_id": prepared["pending_id"]}, task_id="t1"
+        )
+        self.assertEqual(directive["action"], "approve")
+        self.assertIn("message", directive)
+        self.assertNotIn("description", directive)
+        self.assertNotIn("reason", directive)
 
 
 if __name__ == "__main__":

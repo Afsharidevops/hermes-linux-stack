@@ -89,14 +89,14 @@ class PackagePolicyTest(unittest.TestCase):
         two = self.prepare_python()
         self.assertNotEqual(one["pending_id"], two["pending_id"])
         directive = self.plugin._pre_tool_call(
-            "stack_install_python_package", {"pending_id": one["pending_id"]}
+            "stack_install_python_package", args={"pending_id": one["pending_id"]}, task_id="t1"
         )
         self.assertEqual(directive["action"], "approve")
         self.assertEqual(
             directive["rule_key"], f"stack-package-install:{one['pending_id']}"
         )
         replay = self.plugin._pre_tool_call(
-            "stack_install_python_package", {"pending_id": one["pending_id"]}
+            "stack_install_python_package", args={"pending_id": one["pending_id"]}, task_id="t1"
         )
         self.assertEqual(replay["action"], "block")
 
@@ -109,7 +109,8 @@ class PackagePolicyTest(unittest.TestCase):
             finally:
                 self.plugin._PYTHON_TARGET = original_target
             pending_id = prepared["pending_id"]
-            self.plugin._pre_tool_call("stack_install_python_package", {"pending_id": pending_id})
+            directive = self.plugin._pre_tool_call("stack_install_python_package", args={"pending_id": pending_id}, task_id="t1")
+            self.plugin._post_approval_response(pattern_key=f"plugin_rule:{directive['rule_key']}", choice="once")
             completed = types.SimpleNamespace(returncode=0, stdout="ok", stderr="")
             with mock.patch("subprocess.run", return_value=completed) as run:
                 result = self.parse(self.plugin._install_python({"pending_id": pending_id}))
@@ -140,7 +141,8 @@ class PackagePolicyTest(unittest.TestCase):
             finally:
                 self.plugin._PYTHON_TARGET = original_target
         pending_id = prepared["pending_id"]
-        self.plugin._pre_tool_call("stack_install_python_package", {"pending_id": pending_id})
+        directive = self.plugin._pre_tool_call("stack_install_python_package", args={"pending_id": pending_id}, task_id="t1")
+        self.plugin._post_approval_response(pattern_key=f"plugin_rule:{directive['rule_key']}", choice="once")
         with mock.patch.object(self.plugin, "_manual_approval_mode", return_value=False):
             result = self.parse(self.plugin._install_python({"pending_id": pending_id}))
         self.assertIn("error", result)
@@ -164,15 +166,15 @@ class PackagePolicyTest(unittest.TestCase):
         ]
         for command in blocked:
             with self.subTest(command=command):
-                directive = self.plugin._pre_tool_call("terminal", {"command": command})
+                directive = self.plugin._pre_tool_call("terminal", args={"command": command}, task_id="t1")
                 self.assertEqual(directive["action"], "block")
         self.assertEqual(
             self.plugin._pre_tool_call(
-                "write_file", {"path": "/opt/data/lazy-packages/evil.py"}
+                "write_file", args={"path": "/opt/data/lazy-packages/evil.py"}, task_id="t1"
             )["action"],
             "block",
         )
-        self.assertIsNone(self.plugin._pre_tool_call("terminal", {"command": "ls -la"}))
+        self.assertIsNone(self.plugin._pre_tool_call("terminal", args={"command": "ls -la"}, task_id="t1"))
 
     def test_installer_env_uses_distinct_npm_configs_and_strips_injection(self):
         with tempfile.TemporaryDirectory() as prefix:
@@ -183,7 +185,8 @@ class PackagePolicyTest(unittest.TestCase):
             finally:
                 self.plugin._NPM_PREFIX = original_prefix
         pending_id = prepared["pending_id"]
-        self.plugin._pre_tool_call("stack_install_npm_package", {"pending_id": pending_id})
+        directive = self.plugin._pre_tool_call("stack_install_npm_package", args={"pending_id": pending_id}, task_id="t1")
+        self.plugin._post_approval_response(pattern_key=f"plugin_rule:{directive['rule_key']}", choice="once")
         ambient = {
             "NPM_CONFIG_REGISTRY": "https://evil.example/",
             "NPM_CONFIG_IGNORE_SCRIPTS": "false",
@@ -255,8 +258,8 @@ class PackagePolicyTest(unittest.TestCase):
                 self.tools = []
                 self.hooks = []
 
-            def register_tool(self, **kwargs):
-                self.tools.append(kwargs)
+            def register_tool(self, name, toolset, schema, handler, **kwargs):
+                self.tools.append({"name": name, "toolset": toolset, "schema": schema, "handler": handler, **kwargs})
 
             def register_hook(self, name, handler):
                 self.hooks.append((name, handler))
@@ -270,6 +273,22 @@ class PackagePolicyTest(unittest.TestCase):
             properties = tool["schema"]["parameters"]["properties"]
             self.assertNotIn("command", properties)
             self.assertNotIn("destination", properties)
+            self.assertEqual(tool["toolset"], "stack-package-policy")
+            self.assertEqual(tool["schema"].get("name"), tool["name"])
+
+    def test_handler_accepts_current_runtime_kwargs(self):
+        result = self.parse(self.plugin._prepare_python({"spec": "requests==2.32.5"}, task_id="t1", session_id="s1"))
+        self.assertEqual(result["status"], "prepared")
+
+    def test_current_pre_tool_directive_shape(self):
+        prepared = self.prepare_python()
+        directive = self.plugin._pre_tool_call(
+            "stack_install_python_package", args={"pending_id": prepared["pending_id"]}, task_id="t1"
+        )
+        self.assertEqual(directive["action"], "approve")
+        self.assertIn("message", directive)
+        self.assertNotIn("description", directive)
+        self.assertNotIn("reason", directive)
 
 
 if __name__ == "__main__":
