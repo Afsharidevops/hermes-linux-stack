@@ -122,6 +122,34 @@ def test_skill_catalog_install_and_agent_assignment(tmp_path, monkeypatch):
         assert agent["skills"] == [sid]
 
 
+def test_direct_create_endpoints_do_not_detach_rows_before_audit(tmp_path, monkeypatch):
+    cp = _cp(tmp_path, monkeypatch)
+    with TestClient(cp.app) as client:
+        user = client.post(
+            "/api/users",
+            headers=_headers(),
+            json={"username": "audit-user", "password": "long-enough-password", "role": "user"},
+        )
+        assert user.status_code == 200
+        assert any(x["username"] == "audit-user" for x in user.json())
+
+        policy = client.post(
+            "/api/policies",
+            headers=_headers(),
+            json={"name": "audit-policy", "rule": {}, "action": {}},
+        )
+        assert policy.status_code == 200
+        assert any(x["name"] == "audit-policy" for x in policy.json())
+
+        plugin = client.post(
+            "/api/plugins",
+            headers=_headers(),
+            json={"name": "audit-plugin", "kind": "mcp", "enabled": False},
+        )
+        assert plugin.status_code == 200
+        assert any(x["name"] == "audit-plugin" for x in plugin.json())
+
+
 def test_plugin_catalog_install_is_registry_only(tmp_path, monkeypatch):
     cp = _cp(tmp_path, monkeypatch)
     with TestClient(cp.app) as client:

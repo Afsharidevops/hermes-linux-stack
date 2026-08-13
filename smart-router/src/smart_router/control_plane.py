@@ -716,7 +716,7 @@ class ControlPlane:
                 row = User(username=str(d.get("username", "")).strip(), password_hash=password_hash, role=role, team=str(d.get("team", "default")))
                 if not row.username: return _error("username required", "invalid_user", 422)
                 s.add(row)
-                try: s.commit()
+                try: s.commit(); s.refresh(row)
                 except Exception: s.rollback(); return _error("username already exists", "duplicate_user", 409)
             self.db.audit(identity.actor, identity.role, "user.create", row.username)
         with self.db.session() as s:
@@ -908,7 +908,7 @@ class ControlPlane:
             with self.db.session() as s:
                 row = Policy(name=str(d.get("name", "policy")).strip(), enabled=bool(d.get("enabled", True)), priority=int(d.get("priority", 100)), rule_json=json.dumps(d.get("rule") or {}), action_json=json.dumps(d.get("action") or {}))
                 s.add(row)
-                try: s.commit()
+                try: s.commit(); s.refresh(row)
                 except Exception: s.rollback(); return _error("policy name already exists", "duplicate_policy", 409)
             self.db.audit(identity.actor, identity.role, "policy.create", row.name)
         with self.db.session() as s: rows = list(s.scalars(select(Policy).order_by(Policy.priority, Policy.id)))
@@ -1180,7 +1180,7 @@ class ControlPlane:
             with self.db.session() as s:
                 row = Plugin(name=str(d.get("name", "plugin")).strip(), kind=str(d.get("kind", "mcp")), description=str(d.get("description", "")), endpoint=str(d.get("endpoint", "")), manifest_json=json.dumps(d.get("manifest") or {}), risk=str(d.get("risk", "medium")), enabled=bool(d.get("enabled", False)))
                 s.add(row)
-                try: s.commit()
+                try: s.commit(); s.refresh(row)
                 except Exception: s.rollback(); return _error("plugin name already exists", "duplicate_plugin", 409)
             self.db.audit(identity.actor, identity.role, "plugin.create", row.name)
         with self.db.session() as s: rows = list(s.scalars(select(Plugin).order_by(Plugin.id)))

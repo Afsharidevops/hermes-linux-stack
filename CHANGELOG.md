@@ -7,6 +7,8 @@ The active runtime release remains **v0.5.8** while v0.5.9 is under development.
 
 ## Unreleased — v0.5.9 preparation
 
+- Fixed direct Users, Policies, and Plugins create APIs returning HTTP 500 after commit because audit logging dereferenced expired SQLAlchemy rows outside their sessions.
+
 - Added the v0.5.9 visual-flow implementation plan without changing the runtime release version.
 - Updated Hermes stack plugins for the current plugin registration API.
 - Persist Telegram enablement for `stack-execution-policy` and `stack-package-policy` during installation.
