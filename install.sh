@@ -239,6 +239,30 @@ PY
   mv "$tmp" "$file"
 }
 
+enable_hermes_telegram_policy_toolsets() {
+  [[ "${install_hermes:-false}" == true && -n "${telegram_token:-}" ]] || return 0
+
+  info "Enabling stack policy toolsets for Telegram..."
+  local attempt
+  for attempt in {1..30}; do
+    if "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" exec -T hermes sh -lc '
+      cd /opt/hermes
+      /opt/hermes/.venv/bin/hermes tools enable stack-execution-policy --platform telegram >/dev/null \
+        && /opt/hermes/.venv/bin/hermes tools enable stack-package-policy --platform telegram >/dev/null \
+        && tools="$(/opt/hermes/.venv/bin/hermes tools list --platform telegram 2>/dev/null)" \
+        && printf "%s\\n" "$tools" | grep -Eq "enabled[[:space:]]+stack-execution-policy([[:space:]]|$)" \
+        && printf "%s\\n" "$tools" | grep -Eq "enabled[[:space:]]+stack-package-policy([[:space:]]|$)"
+    ' >/dev/null 2>&1; then
+      "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" restart hermes >/dev/null
+      ok "Hermes Telegram stack policy toolsets enabled."
+      return 0
+    fi
+    sleep 2
+  done
+
+  die "Could not enable stack-execution-policy and stack-package-policy for Telegram."
+}
+
 valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && (( 1 <= 10#$1 && 10#$1 <= 65535 ))
 }
@@ -1453,6 +1477,8 @@ fi
 
 info "Starting selected services..."
 "${DOCKER[@]}" compose -f "$ROOT_DIR/docker-compose.yml" --env-file "$ENV_FILE" up -d --build --remove-orphans
+
+enable_hermes_telegram_policy_toolsets
 
 if [[ "$install_smart_router" == true ]]; then
   info "Waiting for the Hermes Smart Router to become ready..."

@@ -1576,23 +1576,39 @@ case "$command" in
       fi
       if compose exec -T hermes sh -lc '
         cd /opt/hermes
-        /opt/hermes/.venv/bin/hermes tools list --platform telegram 2>/dev/null \
-          | grep -Eq "enabled[[:space:]]+stack_packages([[:space:]]|$)"
+        /opt/hermes/.venv/bin/hermes plugins list --enabled --user --plain 2>/dev/null \
+          | grep -Eq "enabled[[:space:]]+user[[:space:]]+[^[:space:]]+[[:space:]]+stack-execution-policy"
       '; then
-        printf 'Hermes package broker: enabled\n'
+        printf 'Hermes execution policy plugin: registered at runtime\n'
       else
-        printf 'WARNING: the stack package broker is not enabled in the tool registry.\n'
+        printf 'WARNING: stack-execution-policy is not registered as an enabled user plugin.\n'
+      fi
+      telegram_tools="$(compose exec -T hermes sh -lc '
+        cd /opt/hermes
+        /opt/hermes/.venv/bin/hermes tools list --platform telegram 2>/dev/null
+      ' 2>/dev/null || true)"
+      if grep -Eq "enabled[[:space:]]+stack-package-policy([[:space:]]|$)" <<< "$telegram_tools"; then
+        printf 'Hermes package policy toolset: enabled for Telegram\n'
+      else
+        printf 'WARNING: stack-package-policy is not enabled for Telegram.\n'
+      fi
+      if grep -Eq "enabled[[:space:]]+stack-execution-policy([[:space:]]|$)" <<< "$telegram_tools"; then
+        printf 'Hermes execution policy toolset: enabled for Telegram\n'
+      else
+        printf 'WARNING: stack-execution-policy is not enabled for Telegram.\n'
       fi
       # Upstream terminal/code_execution are a local decision, so report their
       # real state rather than asserting one. Enabled means an approved command
       # runs as the gateway uid, which can read /opt/data/.env.
-      upstream_terminal="$(compose exec -T hermes sh -lc '
-        cd /opt/hermes
-        tools="$(/opt/hermes/.venv/bin/hermes tools list --platform telegram 2>/dev/null)"
-        printf "%s\n" "$tools" | grep -Eq "disabled[[:space:]]+terminal([[:space:]]|$)" \
-          && printf "%s\n" "$tools" | grep -Eq "disabled[[:space:]]+code_execution([[:space:]]|$)" \
-          && printf disabled || printf enabled
-      ' 2>/dev/null || printf unknown)"
+      upstream_terminal=unknown
+      if [[ -n "$telegram_tools" ]]; then
+        if grep -Eq "disabled[[:space:]]+terminal([[:space:]]|$)" <<< "$telegram_tools" \
+          && grep -Eq "disabled[[:space:]]+code_execution([[:space:]]|$)" <<< "$telegram_tools"; then
+          upstream_terminal=disabled
+        else
+          upstream_terminal=enabled
+        fi
+      fi
       if [[ "$upstream_terminal" == disabled ]]; then
         printf 'Upstream terminal/code execution: disabled (isolated stack tools only)\n'
       elif [[ "$upstream_terminal" == enabled ]]; then
