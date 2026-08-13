@@ -11,10 +11,11 @@ A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent
 ## Project documentation
 
 - [Canonical changelog](CHANGELOG.md)
-- [v0.5.9 visual-flow plan](docs/HERMES-LINUX-STACK-v0.5.9-PLAN.md)
-- [Current Operations Center user guide](docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.9.md)
-- [Current release process](docs/RELEASE-PROCESS.md)
-- [Archived historical release documents](docs/archive/README.md)
+- [Operations Center user guide](docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.9.md)
+- [Release process](docs/RELEASE-PROCESS.md)
+- [Smart Router client API](docs/SMART-ROUTER-CLIENT-API.md)
+- [Smart Router Docker Hub notes](docs/publishing/SMART-ROUTER-DOCKERHUB.md)
+- [Execution Broker Docker Hub notes](docs/publishing/EXECUTION-BROKER-DOCKERHUB.md)
 
 ## Architecture
 
@@ -924,40 +925,6 @@ See `LICENSE`.
 Third-party images and upstream projects retain their respective licenses.
 
 
-<!-- smart-router-v0.4.0-release -->
-## Previous release: Smart Router v0.4.0 benchmarking
-
-Smart Router v0.4.0 adds RouteLLM-style cost/quality benchmarking with Pareto plots, fixed baselines, tier distribution, confusion matrix, confidence-risk analysis, machine-readable summaries, and CI release gates. Synthetic example figures are explicitly watermarked and are not performance claims. See [`docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md`](docs/SMART-ROUTER-v0.4.0-BENCHMARKING.md).
-
-Client tier forcing is disabled by default, approximate context counts receive a configurable 15% safety margin, and the unused `SMART_ROUTER_FAIL_OPEN_MODEL` knob has been removed. The shared Docker image is released canonically from `main` only after `smart-router/` is identical on `main` and `hermes-omniroute-linux-stack`.
-
-The v0.4.0 benchmark artifacts are retained as historical, reproducible validation evidence. They are synthetic results and are not production-cost claims.
-
-
-<!-- smart-router-v0.5.0-release -->
-## Smart Router v0.5.0 — measured cost, preferences, and a built-in dashboard
-
-Smart Router v0.5.0 adds a lightweight dashboard directly to the router at **`/dashboard`**. It records measured upstream token usage to a local SQLite ledger and, when real tier prices are configured, shows measured USD cost, a same-token strong-only counterfactual, savings percentage, usage/pricing coverage, tier mix, and output-budget-cap reduction. Missing usage is never silently converted into fake savings.
-
-Configure real prices by copying `smart-router/policy/pricing-v0.5.example.json` to `pricing-v0.5.json`. See [`docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md`](docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md) and [`docs/SMART-ROUTER-v0.5.0-DASHBOARD.md`](docs/SMART-ROUTER-v0.5.0-DASHBOARD.md).
-
-### Evidence figures
-
-The following v0.4 benchmark figures remain **synthetic examples, not production performance claims**:
-
-![Synthetic quality vs cost](docs/smart-router-v0.4.0/synthetic-benchmark/quality_vs_cost.png)
-
-![Synthetic tier distribution](docs/smart-router-v0.4.0/synthetic-benchmark/tier_distribution.png)
-
-The v0.5 target scorecard is a roadmap figure, not measured performance:
-
-![v0.5 improvement targets](docs/smart-router-v0.5.0/figures/v050-improvement-scorecard.png)
-
-![v0.5 dashboard measurement funnel](docs/smart-router-v0.5.0/figures/v050-dashboard-measurement-funnel.png)
-
-
----
-
 ## Smart Router v0.5.9 Flight Deck and Operations Center
 
 Smart Router v0.5.9 keeps the built-in measured telemetry dashboard at `/dashboard` and the authenticated Operations Center at `/control/`, while preserving 9router as this branch's provider gateway. The Operations Center covers RBAC/users, virtual API keys and quotas, route profiles (fast/standard/strong/coding/vision), provider discovery and provider-health/circuit state, budgets, policies, knowledge/memory, agents/teams, plugins, ACLs, audit events, outcomes, and system state. OIDC and Redis-backed HA are optional advanced settings.
@@ -966,7 +933,7 @@ The easy installer now configures the v0.5.9 core switches instead of silently r
 
 Routing semantics are important: Smart Router policy applies to `model=auto`; `auto-fast`/`auto-standard`/`auto-strong` are available only when tier overrides are enabled. Explicit upstream model names pass through without automatic tier selection. `observe` evaluates/logs automatic requests but dispatches them through `SMART_ROUTER_OBSERVE_MODEL`; `route` applies the selected route profile.
 
-Default local URLs are `http://127.0.0.1:8787/v1`, `http://127.0.0.1:8787/dashboard`, and `http://127.0.0.1:8787/control/`. See `smart-router/V0.5.1-CONTROL-PLANE.md` and `smart-router/V0.5.2-RELEASE-NOTES.md` before enabling production authentication, OIDC, or HA mode.
+Default local URLs are `http://127.0.0.1:8787/v1`, `http://127.0.0.1:8787/dashboard`, and `http://127.0.0.1:8787/control/`. See `docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.9.md`, `docs/RELEASE-PROCESS.md`, and `smart-router/V0.5.9-RELEASE-NOTES.md` for current authentication, OIDC, HA, and release guidance.
 
 Default Smart Router image: `afsharidevops/hermes-smart-router:latest`; pin `SMART_ROUTER_IMAGE_TAG` in `.env` when you want a stable release.
 

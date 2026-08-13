@@ -18,7 +18,7 @@ Automated candidate, API/persistence, regression, Compose, manifest, and full Sm
 
 - Fixed direct Users, Policies, and Plugins create APIs returning HTTP 500 after commit because audit logging dereferenced expired SQLAlchemy rows outside their sessions.
 
-- Added the v0.5.9 visual-flow implementation plan without changing the runtime release version.
+- Added the v0.5.9 visual-flow implementation work without changing the runtime release version.
 - Updated Hermes stack plugins for the current plugin registration API.
 - Persist Telegram enablement for `stack-execution-policy` and `stack-package-policy` during installation.
 - Updated `manage.sh` runtime diagnostics to verify the current stack plugin toolset names.
@@ -324,5 +324,5 @@ See `docs/HERMES-SMART-ROUTER-v0.5.2-IMPLEMENTATION-STATUS.md` for items still o
 - Replaced the Docker execution GID 0 fallback with fail-closed sentinel GID 65534; `install.sh` still detects the actual Docker socket GID when available.
 - Removed a dead duplicate `/router/info` handler definition.
 - Deduplicated Redis/Authlib dependency constraints to their prior effective versions.
-- Removed the duplicate root `plan5.2.md`; the canonical roadmap is `docs/HERMES-SMART-ROUTER-v0.5.2-PLAN.md`.
+- Removed duplicate long-range planning documentation from the active release tree.
 - Updated smoke validation for configurable Smart Router image tags (`latest` by default, pinnable via `.env`).
