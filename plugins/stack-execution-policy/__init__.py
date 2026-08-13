@@ -28,7 +28,6 @@ _CONTROL_SECRET_FILE = Path(os.getenv("EXECUTION_CONTROL_SECRET_FILE", "/run/sec
 _DOCKER_BROKER = os.getenv("EXECUTION_DOCKER_BROKER_URL", "http://hermes-execution-docker-broker:8750")
 _SSH_BROKER = os.getenv("EXECUTION_SSH_BROKER_URL", "http://hermes-execution-ssh-broker:8750")
 _USERS_FILE = Path(os.getenv("EXECUTION_USERS_FILE", "/run/secrets/execution-users"))
-_runtime_context: Any = None
 _pending: dict[str, dict[str, Any]] = {}
 
 
@@ -40,49 +39,32 @@ def _error(message: str) -> str:
     return _json({"error": message})
 
 
-def _ctx_value(*names: str, default: Any = None) -> Any:
-    ctx = _runtime_context
-    if ctx is None:
-        return default
-    for name in names:
-        value = getattr(ctx, name, None)
-        if callable(value):
-            try:
-                return value()
-            except TypeError:
-                continue
-        if value is not None:
-            return value
-    return default
+def _session_env(name: str, default: str = "") -> str:
+    """Read task-local gateway session state, with legacy env fallback."""
+    try:
+        from gateway.session_context import get_session_env
+        return str(get_session_env(name, default) or "")
+    except Exception:
+        return str(os.getenv(name, default) or "")
+
+
+def _truthy(value: str) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _current_session_key() -> str:
-    return str(_ctx_value("current_session_key", "session_key", default=os.getenv("HERMES_SESSION_KEY", "")) or "")
+    return _session_env("HERMES_SESSION_KEY", "")
 
 
 def _session_platform() -> str:
-    value = _ctx_value("session_platform", "platform")
-    if value:
-        return str(value)
-    key = _current_session_key()
-    return key.split(":", 1)[0] if ":" in key else ""
+    return _session_env("HERMES_SESSION_PLATFORM", "")
 
 
 def _session_user_id() -> str:
-    value = _ctx_value("session_user_id", "user_id")
-    if value is not None:
-        return str(value)
-    key = _current_session_key()
-    return key.rsplit(":", 1)[-1] if ":" in key else ""
+    return _session_env("HERMES_SESSION_USER_ID", "")
 
 
 def _execution_users() -> frozenset[str]:
-    value = _ctx_value("execution_users")
-    if value is not None:
-        try:
-            return frozenset(str(x) for x in value)
-        except TypeError:
-            return frozenset()
     try:
         return frozenset(x.strip() for x in _USERS_FILE.read_text(encoding="utf-8").replace(",", "\n").splitlines() if x.strip().isdigit())
     except OSError:
@@ -90,16 +72,30 @@ def _execution_users() -> frozenset[str]:
 
 
 def _cron_context() -> bool:
-    return bool(_ctx_value("cron_context", "is_cron", default=False))
+    return _truthy(_session_env("HERMES_CRON_SESSION", ""))
 
 
 def _approval_bypass_active() -> bool:
-    return bool(_ctx_value("approval_bypass_active", "approval_bypass", default=False))
+    # Fail closed if Hermes cannot tell us whether approval bypass is active.
+    try:
+        from tools.approval import is_approval_bypass_active
+        return bool(is_approval_bypass_active())
+    except Exception:
+        return True
 
 
 def _manual_approval_mode() -> bool:
-    # Fail closed if the host runtime does not explicitly expose manual approval.
-    return bool(_ctx_value("manual_approval_mode", "is_manual_approval", default=False))
+    # Execution deliberately requires Hermes's human/manual gate as defense in depth.
+    try:
+        from hermes_cli.config import load_config_readonly
+        config = load_config_readonly() or {}
+        approvals = config.get("approvals") or {}
+        mode = approvals.get("mode", "manual") if isinstance(approvals, dict) else "manual"
+        if mode is False:  # YAML 1.1 may parse bare `off` as False.
+            return False
+        return str(mode).strip().lower() == "manual"
+    except Exception:
+        return False
 
 
 def _read_secret() -> str:
@@ -191,12 +187,12 @@ def _execute(feature: str, payload: dict[str, Any]) -> str:
     return _json(result)
 
 
-def _prepare_local(payload: dict[str, Any]) -> str: return _prepare("local", payload)
-def _execute_local(payload: dict[str, Any]) -> str: return _execute("local", payload)
-def _prepare_ssh(payload: dict[str, Any]) -> str: return _prepare("ssh", payload)
-def _execute_ssh(payload: dict[str, Any]) -> str: return _execute("ssh", payload)
-def _prepare_docker(payload: dict[str, Any]) -> str: return _prepare("docker", payload)
-def _execute_docker(payload: dict[str, Any]) -> str: return _execute("docker", payload)
+def _prepare_local(payload: dict[str, Any], **_: Any) -> str: return _prepare("local", payload)
+def _execute_local(payload: dict[str, Any], **_: Any) -> str: return _execute("local", payload)
+def _prepare_ssh(payload: dict[str, Any], **_: Any) -> str: return _prepare("ssh", payload)
+def _execute_ssh(payload: dict[str, Any], **_: Any) -> str: return _execute("ssh", payload)
+def _prepare_docker(payload: dict[str, Any], **_: Any) -> str: return _prepare("docker", payload)
+def _execute_docker(payload: dict[str, Any], **_: Any) -> str: return _execute("docker", payload)
 
 
 def _discover(feature: str, kind: str) -> str:
@@ -204,12 +200,12 @@ def _discover(feature: str, kind: str) -> str:
     return _json(_broker_call(feature, "/discover", {"kind": kind}, 30))
 
 
-def _list_ssh_profiles(payload: dict[str, Any] | None = None) -> str: return _discover("ssh", "ssh_profiles")
-def _list_docker_containers(payload: dict[str, Any] | None = None) -> str: return _discover("docker", "docker_containers")
+def _list_ssh_profiles(payload: dict[str, Any] | None = None, **_: Any) -> str: return _discover("ssh", "ssh_profiles")
+def _list_docker_containers(payload: dict[str, Any] | None = None, **_: Any) -> str: return _discover("docker", "docker_containers")
 
 
-def _pre_tool_call(tool_name: str, arguments: dict[str, Any] | None = None):
-    arguments = arguments or {}
+def _pre_tool_call(tool_name: str, args: dict[str, Any] | None = None, **_: Any):
+    arguments = args or {}
     mapping = {
         "stack_execute_local_command": "local",
         "stack_execute_ssh_command": "ssh",
@@ -220,14 +216,14 @@ def _pre_tool_call(tool_name: str, arguments: dict[str, Any] | None = None):
         return None
     pending_id = str(arguments.get("pending_id", "")); item = _pending.get(pending_id)
     if not item or item.get("feature") != feature or item.get("state") != "prepared":
-        return {"action": "block", "reason": "Execution requires a matching prepared one-time operation."}
+        return {"action": "block", "message": "Execution requires a matching prepared one-time operation."}
     if item["session"] != _current_session_key() or item["user_id"] != _session_user_id():
-        return {"action": "block", "reason": "Prepared execution belongs to another session."}
+        return {"action": "block", "message": "Prepared execution belongs to another session."}
     # Mark approval as requested so the same pending operation cannot create two approval prompts.
     item["state"] = "approval_pending"
     rule_key = f"stack-execution:{feature}:{pending_id}"
     item["rule_key"] = rule_key
-    return {"action": "approve", "rule_key": rule_key, "description": "Approve the exact sealed execution operation once."}
+    return {"action": "approve", "rule_key": rule_key, "message": "Approve the exact sealed execution operation once."}
 
 
 def _post_approval_response(pattern_key: str, choice: str, **_: Any):
@@ -244,12 +240,10 @@ def _post_approval_response(pattern_key: str, choice: str, **_: Any):
 
 
 def _tool(name: str, description: str, handler, properties: dict[str, Any], required: list[str]):
-    return dict(name=name, description=description, handler=handler, schema={"parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}})
+    return dict(name=name, description=description, handler=handler, schema={"name": name, "description": description, "parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": False}})
 
 
 def register(context):
-    global _runtime_context
-    _runtime_context = context
     definitions = [
         _tool("stack_prepare_local_command", "Prepare a sealed local sandbox command for approval.", _prepare_local, {"command": {"type": "string"}, "workdir": {"type": "string"}, "timeout": {"type": "integer"}, "network": {"type": "string"}, "net_raw": {"type": "boolean"}}, ["command"]),
         _tool("stack_execute_local_command", "Execute a previously prepared and one-time-approved local command.", _execute_local, {"pending_id": {"type": "string"}}, ["pending_id"]),
@@ -261,6 +255,6 @@ def register(context):
         _tool("stack_list_docker_containers", "List broker-visible Docker container metadata.", _list_docker_containers, {}, []),
     ]
     for definition in definitions:
-        context.register_tool(**definition)
+        context.register_tool(toolset="stack-execution-policy", **definition)
     context.register_hook("pre_tool_call", _pre_tool_call)
     context.register_hook("post_approval_response", _post_approval_response)

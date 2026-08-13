@@ -102,9 +102,9 @@ e4588c4de01326680af7d689db69bd6e4f0cd3e719da77a62ac71f14d5e5c3d0  ./HOTFIX-v0.5.
 ecafcebc0f616dba3be7e6262e8764f76b7e5b5d10f9b89f9034198c2f882645  ./LICENSE
 40eb768515b64e4dcf857bfacc58693666f04887274d9a35f1fe250a9029658b  ./manage.sh
 9b51b12ec221abf192b1a58765d1528a14daf676dec1e4169898488f2de089a7  ./PACKAGE_SCOPE.md
-556f0e4a903c3e5127d20e3d18cf75ad464123f10cad27e582759a4dd116a1b0  ./plugins/stack-execution-policy/__init__.py
+37a4106e8e076d9a4d6bd677861a66e64f79bba3bff41554d3825ae5a86bf04d  ./plugins/stack-execution-policy/__init__.py
 5544b17cc4cc7190d2c20ab35f5ec5336df7ab5211a5bdcfa61997236afed473  ./plugins/stack-execution-policy/plugin.yaml
-fed4f1621a4e0edc091ae80a03415c3c9da0dde29e1ae6c9397a1994834705fa  ./plugins/stack-package-policy/__init__.py
+be5783b80a6bc1bee47684aa9aa683b65d8d5ba6d1f8da41a6357293f91e0909  ./plugins/stack-package-policy/__init__.py
 388a4cd42bb75569afc7feaa316d55824dcd9052bda347454791c02161a64d68  ./plugins/stack-package-policy/npm-global.npmrc
 ffa1a7a51fcf8b4b247e03d765ae02b2ff4e3b254a278bcf17c7d5b15d0c4d7c  ./plugins/stack-package-policy/npm-user.npmrc
 440b142962d4d82d6cc7976a640d4ce7cd99ee1e9d62d3c406b6b2a8bdcd5a0e  ./plugins/stack-package-policy/plugin.yaml
@@ -244,7 +244,7 @@ e28d5ffa225e1ca92656dec2205ec80030b1a34cf54e6928f809ef821bb5c315  ./smart-router
 1cc74ae8f887b090c030a2e8f4ddb6761ca875cf055ca798371264ca14daeb34  ./tests/test-manage-n8n.sh
 0232a8dad594442416421429d47a484275a3770edac96794825605b8167913ab  ./tests/test-manage-ux.sh
 799f04ff73e1a2647fa8566310f518a148addec919678de84d1511777181d10c  ./tests/test-ssh-profiles.sh
-d2b727ca5707f8406dea33c56d32aa24196a66a116a772e8d1b61c5578b6308f  ./tests/test_stack_execution_policy.py
-f179579909e61810ef93b1f16399b6dfabcbec3d53a354f47e09a5922b9379a7  ./tests/test_stack_package_policy.py
+6424b1abdf953c32a3ebd3fe1255c599bf0f495cab193d65fb94f48a023f3ffe  ./tests/test_stack_execution_policy.py
+7885d0f234069b201916456f0deb79bc83db9bbf11d6504bd1122e68e09f6301  ./tests/test_stack_package_policy.py
 1947d9ac761787e3723c449d003fa1f5debc9cb58b8f01c0b6dbadc2381a7392  ./tests/test-verify-n8n.mjs
 a1b673b99e58bf43ed12acef82a7d38e4761a9d7be814be99ac0f96d3e9d5932  ./VERSION
