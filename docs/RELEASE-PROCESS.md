@@ -23,13 +23,14 @@ This document is the current generic release checklist. Historical version-speci
 
 Do not bump `VERSION`, Smart Router package/image versions, or Execution Broker versions merely because development work has started.
 
-For the current preparation state:
+Current release state:
 
-- stack/runtime release: `v0.5.8`
-- Smart Router image: `afsharidevops/hermes-smart-router:0.5.8`
+- stack/runtime release: `v0.5.9`
+- Smart Router image: `afsharidevops/hermes-smart-router:0.5.9`
+- Smart Router mutable current tag: `afsharidevops/hermes-smart-router:latest`
 - Execution Broker image: `afsharidevops/hermes-execution-broker:0.1.3`
 
-The v0.5.9 version bump belongs in the actual v0.5.9 release commit after its acceptance criteria pass.
+For v0.5.9, automated acceptance passed and the release owner explicitly waived the remaining manual browser light/dark and mouse/trackpad interaction gate in order to finalize early. Record such waivers explicitly; never mark an unperformed check as passed.
 
 ## 4. Docker publishing policy
 

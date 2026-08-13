@@ -3,7 +3,7 @@
 **Planned release:** `0.5.9`
 **Primary focus:** n8n-style drag-to-connect visual graph editing
 **Target studios:** Workflow Studio, Agent Studio, Router Pipeline Studio, Knowledge Pipeline Studio
-**Status:** Feature-complete development candidate — automated validation complete; manual browser/server acceptance pending
+**Status:** Released — 2026-08-13; automated validation complete; remaining manual browser light/dark and mouse/trackpad gate explicitly waived by release owner
 
 ---
 
@@ -956,7 +956,7 @@ Reject invalid reversed connections.
 
 v0.5.9 is ready when all of the following are true:
 
-Automated implementation checks are marked complete below. Light/dark rendering and real mouse/trackpad interaction remain manual release-gate checks and must be exercised before changing `VERSION` or publishing the final `0.5.9`/`latest` image.
+Automated implementation checks are marked complete below. The release owner explicitly requested early finalization and waived the remaining light/dark rendering and real mouse/trackpad interaction checks. Those checks remain unperformed/waived rather than passed.
 
 - [x] Users can drag from an output handle to an input handle.
 - [x] A live connection preview is shown.

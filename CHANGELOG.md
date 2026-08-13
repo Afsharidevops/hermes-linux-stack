@@ -3,9 +3,18 @@
 This file is the canonical Hermes Linux Stack release history from v0.5.2 onward.
 Older component-specific history remains in the component release-note files and Git history.
 
-The active runtime release remains **v0.5.8** while v0.5.9 is under development.
+The current runtime release is **v0.5.9**.
 
-## Unreleased — v0.5.9 preparation
+## Hermes Linux Stack — v0.5.9 Changelog — 2026-08-13
+
+### v0.5.9 release focus
+
+Visual Flow Connections across Workflow, Agent, Router Pipeline, and Knowledge Pipeline studios, while preserving Hermes execution trust boundaries.
+
+### v0.5.9 release acceptance
+
+Automated candidate, API/persistence, regression, Compose, manifest, and full Smart Router smoke validation passed during release preparation. The release owner explicitly requested early finalization and waived the remaining manual browser light/dark rendering and mouse/trackpad interaction gate. The waived checks are not represented as passed.
+
 
 - Fixed direct Users, Policies, and Plugins create APIs returning HTTP 500 after commit because audit logging dereferenced expired SQLAlchemy rows outside their sessions.
 

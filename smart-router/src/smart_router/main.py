@@ -83,7 +83,7 @@ def create_app(
     policy_runtime = build_policy_runtime(settings)
     observations = ObservationWriter(settings.observation_file)
     cost_ledger = CostLedger.from_env(default_database_path=settings.database_path)
-    control_plane = ControlPlane(settings)  # Hermes Smart Router v0.5.8 Operations Center hook
+    control_plane = ControlPlane(settings)  # Hermes Smart Router v0.5.9 Operations Center hook
     timeout = httpx.Timeout(
         connect=settings.connect_timeout_seconds,
         read=settings.read_timeout_seconds,
