@@ -1029,7 +1029,7 @@ repair_accidental_execution_policy_directory() {
 }
 
 ensure_execution_paths() {
-  local root file hermes_uid
+  local root file hermes_uid file_mode
   ensure_stack_secrets_dir || return 1
   hermes_uid="$(execution_hermes_uid)" || return 1
   root="$(execution_root)"
@@ -1046,15 +1046,19 @@ ensure_execution_paths() {
     [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
       printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
     }
+    case "${file##*/}" in
+      control-secret|users) file_mode=0640 ;;
+      features|policy-generation) file_mode=0660 ;;
+    esac
     if [[ ! -e "$file" ]]; then
-      install -o "$hermes_uid" -g 10003 -m 0660 /dev/null "$file"
+      install -o "$hermes_uid" -g 10003 -m "$file_mode" /dev/null "$file"
       case "${file##*/}" in
         features) printf '%s\n' "$(env_value "$ENV_FILE" EXECUTION_FEATURES)" > "$file" ;;
         policy-generation) printf '%s\n' "$(env_value "$ENV_FILE" EXECUTION_POLICY_GENERATION | sed 's/^$/0/')" > "$file" ;;
       esac
     fi
     chown "$hermes_uid:10003" "$file"
-    chmod 660 "$file"
+    chmod "$file_mode" "$file"
   done
   for file in "$root/approval-request-secret" "$root/approval-signing-key.pem" \
     "$root/approval-public-key.pem" "$root/approval-bot-token" \
