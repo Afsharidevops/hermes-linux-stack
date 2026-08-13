@@ -55,7 +55,7 @@ def test_knowledge_pipeline_crud_and_validation(tmp_path, monkeypatch):
         created = client.post("/api/knowledge-pipelines", headers=_headers(), json={"name": "docs", "graph": graph})
         assert created.status_code == 200
         row = next(x for x in created.json() if x["name"] == "docs")
-        assert row["graph"]["version"] == 1
+        assert row["graph"]["version"] == 2
         assert row["graph"]["nodes"][2]["ref_id"] == 7
 
         updated = client.put(f"/api/knowledge-pipelines/{row['id']}", headers=_headers(), json={"active": False, "description": "ingestion flow"})
