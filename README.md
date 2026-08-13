@@ -8,6 +8,14 @@ A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent
 >
 > Do not add 9router to this stack.
 
+## Project documentation
+
+- [Canonical changelog](CHANGELOG.md)
+- [v0.5.9 visual-flow plan](docs/HERMES-LINUX-STACK-v0.5.9-PLAN.md)
+- [Current Operations Center user guide](docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.8.md)
+- [Current release process](docs/RELEASE-PROCESS.md)
+- [Archived historical release documents](docs/archive/README.md)
+
 ## Architecture
 
 ```text

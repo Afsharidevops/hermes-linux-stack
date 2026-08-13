@@ -3,6 +3,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n "$ROOT/install.sh" "$ROOT/manage.sh"
 python3 -m unittest -v "$ROOT/tests/test_hermes_telegram_toolsets.py"
+python3 -m unittest -v "$ROOT/tests/test_repository_layout.py"
 python3 -m compileall -q "$ROOT/smart-router/src" "$ROOT/smart-router/tests"
 PYTHONPATH="$ROOT/smart-router/src" pytest -q "$ROOT/smart-router/tests"
 python3 - "$ROOT/docker-compose.yml" <<'PY'
