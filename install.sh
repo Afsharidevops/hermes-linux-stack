@@ -632,6 +632,38 @@ for execution_file in control-secret users; do
   chown "$execution_gateway_uid:$execution_runtime_gid" "$execution_path"
   chmod 640 "$execution_path"
 done
+# These are bind-mounted as files by Hermes/execution services. Create them
+# before the first Compose startup so Docker never materializes a missing host
+# source path as a directory. Safely repair only the known empty-directory form
+# left by older installs; refuse symlinks and non-empty directories.
+for execution_file in features policy-generation; do
+  execution_path="$ROOT_DIR/data/stack-secrets/execution/$execution_file"
+  if [[ -d "$execution_path" && ! -L "$execution_path" ]]; then
+    if command -v mountpoint >/dev/null 2>&1 && mountpoint -q "$execution_path"; then
+      die "Refusing mounted execution policy directory: $execution_path"
+    fi
+    execution_first_entry="$(find "$execution_path" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)"
+    [[ -z "$execution_first_entry" ]] \
+      || die "Refusing non-empty execution policy directory: $execution_path"
+    rmdir -- "$execution_path" \
+      || die "Could not repair accidental execution policy directory: $execution_path"
+  fi
+  [[ ! -L "$execution_path" && ( ! -e "$execution_path" || -f "$execution_path" ) ]] \
+    || die "Refusing unsafe execution policy path: $execution_path"
+  if [[ ! -e "$execution_path" ]]; then
+    install -m 0660 -o "$execution_gateway_uid" -g "$execution_runtime_gid" \
+      /dev/null "$execution_path"
+    case "$execution_file" in
+      features) printf '%s\n' "$(existing_env_value EXECUTION_FEATURES)" > "$execution_path" ;;
+      policy-generation)
+        execution_initial_generation="$(existing_env_value EXECUTION_POLICY_GENERATION)"
+        printf '%s\n' "${execution_initial_generation:-0}" > "$execution_path"
+        ;;
+    esac
+  fi
+  chown "$execution_gateway_uid:$execution_runtime_gid" "$execution_path"
+  chmod 660 "$execution_path"
+done
 for execution_file in approval-request-secret approval-signing-key.pem approval-public-key.pem approval-bot-token ssh-profile-integrity-secret; do
   execution_path="$ROOT_DIR/data/stack-secrets/execution/$execution_file"
   [[ -e "$execution_path" ]] \

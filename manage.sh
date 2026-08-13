@@ -128,7 +128,7 @@ uninstall_stack() {
   if [[ "$purge" == true ]]; then
     rm -f -- "$ENV_FILE"
 
-    for dir in 9router caddy hermes n8n open-webui stack-secrets; do
+    for dir in omniroute caddy hermes n8n open-webui stack-secrets; do
       if [[ -d "$ROOT_DIR/data/$dir" ]]; then
         find "$ROOT_DIR/data/$dir" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf -- {} +
       fi
@@ -1008,6 +1008,26 @@ execution_hermes_uid() {
   printf '%s' "$uid"
 }
 
+repair_accidental_execution_policy_directory() {
+  local path="$1" first_entry
+  if [[ -d "$path" && ! -L "$path" ]]; then
+    if command -v mountpoint >/dev/null 2>&1 && mountpoint -q "$path"; then
+      printf 'Refusing unsafe execution policy path mounted as a directory: %s\n' "$path" >&2
+      return 1
+    fi
+    first_entry="$(find "$path" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)"
+    if [[ -n "$first_entry" ]]; then
+      printf 'Refusing unsafe execution policy path; expected a file but found a non-empty directory: %s\n' "$path" >&2
+      return 1
+    fi
+    rmdir -- "$path" || {
+      printf 'Could not repair accidental empty execution policy directory: %s\n' "$path" >&2
+      return 1
+    }
+    printf 'Repaired accidental empty execution policy directory: %s\n' "$path" >&2
+  fi
+}
+
 ensure_execution_paths() {
   local root file hermes_uid
   ensure_stack_secrets_dir || return 1
@@ -1022,6 +1042,7 @@ ensure_execution_paths() {
     chmod 700 "$file"
   done
   for file in "$root/control-secret" "$root/users" "$root/features" "$root/policy-generation"; do
+    repair_accidental_execution_policy_directory "$file" || return 1
     [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || {
       printf 'Refusing unsafe execution policy path: %s\n' "$file" >&2; return 1;
     }
@@ -1620,7 +1641,7 @@ case "$command" in
     case "${2:-}" in
       "") compose logs -f --tail=100 ;;
       hermes) compose logs -f --tail=100 hermes ;;
-      omniroute|omniroute) compose logs -f --tail=100 omniroute ;;
+      omniroute|omni) compose logs -f --tail=100 omniroute ;;
       smart-router|router) compose logs -f --tail=100 smart-router ;;
       webui|open-webui) compose logs -f --tail=100 open-webui ;;
       n8n) compose logs -f --tail=100 n8n ;;

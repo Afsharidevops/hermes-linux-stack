@@ -71,8 +71,8 @@ a3f25da07bbd442da7699f8de1a01d3cbd7b2742f855c64cf6e5f7b21f1f21f5  ./execution-br
 8712b285c9d4a75b7f24f0f31bcc7f241e7da3e84a7b470a56d2015c60224ed3  ./execution-broker/src/broker/ssh.py
 6b7ea776e22ebe10e6c40491d1aac4cda271f6c19afe4617cad978e9d8fc8724  ./execution-broker/src/broker/store.py
 66211081a60ab4390bf2073b09461e0798f924f3552383dff7bcd06cf45e7575  ./execution-broker/ssh-askpass.py
-b0fd9a2b6fd67290e754840f766aa086fa5c70d68bc459d596f1f6cc55198c13  ./install.sh
-7d630d42aa3cdd6d05e4fb81fe1b54dc364c987d5d77b1d85e7daec177016d99  ./manage.sh
+4f55e28f2bb9b30bccc0ea020c2b3b1178bc076a59d28f7b525c55b6a6029854  ./install.sh
+0f3f36e8bc11e7d1c4c8d2bc89145b2531e02e3e7a6ab54e11367be2e04198b7  ./manage.sh
 37a4106e8e076d9a4d6bd677861a66e64f79bba3bff41554d3825ae5a86bf04d  ./plugins/stack-execution-policy/__init__.py
 5544b17cc4cc7190d2c20ab35f5ec5336df7ab5211a5bdcfa61997236afed473  ./plugins/stack-execution-policy/plugin.yaml
 be5783b80a6bc1bee47684aa9aa683b65d8d5ba6d1f8da41a6357293f91e0909  ./plugins/stack-package-policy/__init__.py
