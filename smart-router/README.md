@@ -154,11 +154,11 @@ smart-router-preference-build outcomes.jsonl \
 
 Input rows must contain the **existing complete privacy-safe feature schema** plus measured `quality_by_tier`. The builder emits the existing `schema_version` + `features` + `label` training shape. The format example in `examples/preference-outcomes-format-v0.5.example.jsonl` is illustrative; replace its placeholder features with real Smart Router feature objects before training.
 
-See `../docs/HERMES-SMART-ROUTER-v0.5.0-PLAN.md` for evidence gates and the research roadmap.
+Use the current Operations Center guide and release notes for supported behavior and operational validation.
 
 
 ---
 
 ## v0.5.1 control plane
 
-v0.5.1 adds dynamic `fast`/`standard`/`strong`/`coding`/`vision` profiles, the `/control/` operations panel, RBAC, virtual keys and quotas, scoped budgets, policies, knowledge/RAG, persistent memory, agents and teams, plugin registry, audit telemetry, PostgreSQL-ready shared state and a v0.5.1 benchmark reporter. See `V0.5.1-CONTROL-PLANE.md`.
+v0.5.1 adds dynamic `fast`/`standard`/`strong`/`coding`/`vision` profiles, the `/control/` operations panel, RBAC, virtual keys and quotas, scoped budgets, policies, knowledge/RAG, persistent memory, agents and teams, plugin registry, audit telemetry, PostgreSQL-ready shared state and a v0.5.1 benchmark reporter. See `../docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.9.md` for the current control-plane/operator guide.
