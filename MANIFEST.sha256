@@ -99,9 +99,9 @@ dc861e40ecd4787ad75d11a6cd7bb67f2d4631982dcc805e0b7cdaf2cd4818e6  ./HERMES-SMART
 1a2b347a743136c4bf0d194b9560d1ce456cbb60451c1551cdafac6fcdcece7c  ./HERMES-SMART-ROUTER-DOCKERHUB-v0.5.8.md
 e4588c4de01326680af7d689db69bd6e4f0cd3e719da77a62ac71f14d5e5c3d0  ./HOTFIX-v0.5.8-EXECUTION-ADMIN-INGRESS.md
 5dc4b92cef61bfb62a087fc24acd809cc078f94ad748e21e217e57eb0503d776  ./IMPLEMENTATION.md
-78e8d11535747dd68bd94ea1f953cd7cecb4ba02f10741af83e32b2c11b53b52  ./install.sh
+0a44cceafa3fa331bc4964316ff4a2f1f3822ccc66b4560654b84e9d1ada4227  ./install.sh
 ecafcebc0f616dba3be7e6262e8764f76b7e5b5d10f9b89f9034198c2f882645  ./LICENSE
-42b99ebe89c2474d8f9b8404e8bf73c07b5a435553725a27d0091edf5b9204fb  ./manage.sh
+6d620ed8522d51479e8941f7816c40dc418dbd8227553d8a0c6b5e405e4bb65a  ./manage.sh
 20ce9a5ed6c15ba38a3780e1b587dfaed92d711a2b98f4b29047dbde7434bae8  ./PACKAGE_SCOPE.md
 37a4106e8e076d9a4d6bd677861a66e64f79bba3bff41554d3825ae5a86bf04d  ./plugins/stack-execution-policy/__init__.py
 5544b17cc4cc7190d2c20ab35f5ec5336df7ab5211a5bdcfa61997236afed473  ./plugins/stack-execution-policy/plugin.yaml
@@ -241,7 +241,7 @@ aa7ef0b3bdd115ae3fb55a34bee76e1fcfa649fbada9c46aa118601d3fe4d456  ./smart-router
 e28d5ffa225e1ca92656dec2205ec80030b1a34cf54e6928f809ef821bb5c315  ./smart-router/V0.5.7-RELEASE-NOTES.md
 3ca84c4351c282b82048f98b7b4e919de7a166afd72a85d54ed820160b75fb82  ./smart-router/V0.5.8-RELEASE-NOTES.md
 b24929d0097be3fd4bee66d28f798e4b3b386b1fea3ef6e4a9fa6719c145923d  ./templates/hermes-config.yaml.template
-8540f0355cd0bc9e110e707ba1ef2f4a3102bf46e92ea9b75461ec7267f14dd5  ./tests/smoke.sh
+84bac2466c0366495d3ae1cc17cb268c7f4217ec0928cb1c8b520130d3df1c16  ./tests/smoke.sh
 92af20d6e029acd9da7170e6ef5fb4ac93f43def58bd95826c260e1f2de6891f  ./tests/test-bootstrap-n8n.mjs
 99c77fde39f0ee3077168f38282b39188a712dff67f25519b6c866025641ffe3  ./tests/test_execution_admin_v058.py
 925b3fd627b2b6fca2328f95cc6eebdb96267733a5beaee7d927341a50a791d7  ./tests/test_execution_broker.py
@@ -253,3 +253,5 @@ d9c4a79b42c9c1addbc5931dd9e9ce11aafd952344fa7507a13e19adc6292219  ./tests/test-m
 7885d0f234069b201916456f0deb79bc83db9bbf11d6504bd1122e68e09f6301  ./tests/test_stack_package_policy.py
 3aa99a5bdf4bb71afc2a568eb544698fe41486f8886c3f9845434d39632c21bf  ./tests/test-verify-n8n.mjs
 a1b673b99e58bf43ed12acef82a7d38e4761a9d7be814be99ac0f96d3e9d5932  ./VERSION
+cee25bc7ecdd66486b8bc6365789d01e71846679f0490a73f2646df2853443f5  ./tests/test_hermes_telegram_toolsets.py
+eab8005dfd5a339d56f89772d706afb2e006584f0947cdfa18ef59a543a71d37  ./docs/HERMES-LINUX-STACK-v0.5.9-PLAN.md
