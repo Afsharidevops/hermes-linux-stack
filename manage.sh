@@ -7,6 +7,7 @@ HERMES_ENV="$ROOT_DIR/data/hermes/.env"
 STACK_SECRETS_DIR="$ROOT_DIR/data/stack-secrets"
 N8N_BOOTSTRAP_ENV="$STACK_SECRETS_DIR/n8n-bootstrap.env"
 N8N_BOOTSTRAP_STATE="$STACK_SECRETS_DIR/n8n-bootstrap-state.json"
+OMNIROUTE_N8N_KEY_ENV="$STACK_SECRETS_DIR/omniroute-n8n-router.env"
 TEMP_SECRET_FILES=()
 
 cleanup_temp_secrets() {
@@ -1291,19 +1292,117 @@ n8n_instance_mcp_check() {
   return "$status"
 }
 
+write_omniroute_n8n_router_key() {
+  local key="$1" id="$2" tmp
+  ensure_stack_secrets_dir || return 1
+  tmp="$(mktemp "$STACK_SECRETS_DIR/omniroute-n8n-router.env.tmp.XXXXXX")"
+  TEMP_SECRET_FILES+=("$tmp")
+  chmod 600 "$tmp"
+  {
+    printf 'OMNIROUTE_N8N_API_KEY=%s\n' "$key"
+    printf 'OMNIROUTE_N8N_API_KEY_ID=%s\n' "$id"
+  } > "$tmp"
+  mv "$tmp" "$OMNIROUTE_N8N_KEY_ENV"
+  chmod 600 "$OMNIROUTE_N8N_KEY_ENV"
+}
+
+stored_omniroute_n8n_router_key() {
+  [[ -f "$OMNIROUTE_N8N_KEY_ENV" && ! -L "$OMNIROUTE_N8N_KEY_ENV" ]] || return 0
+  chmod 600 "$OMNIROUTE_N8N_KEY_ENV"
+  env_value "$OMNIROUTE_N8N_KEY_ENV" OMNIROUTE_N8N_API_KEY
+}
+
+validate_omniroute_n8n_router_key() {
+  local key="$1"
+  [[ -n "$key" ]] || return 1
+  if printf '%s' "$key" | compose exec -T omniroute node -e '
+    let key="";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", chunk => key += chunk);
+    process.stdin.on("end", async () => {
+      try {
+        const response = await fetch("http://127.0.0.1:20129/v1/models", {
+          headers: {Authorization: `Bearer ${key}`},
+          signal: AbortSignal.timeout(10000),
+        });
+        process.exit(response.ok ? 0 : 1);
+      } catch {
+        process.exit(1);
+      }
+    });'; then
+    return 0
+  fi
+  return 1
+}
+
+create_omniroute_n8n_router_key() {
+  local output key id
+  output="$(compose exec -T \
+    -e 'HERMES_N8N_SERVICE_KEY_NAME=n8n (hermes-linux-stack)' \
+    omniroute node -e '
+      (async () => {
+        const managementKey = process.env.OMNIROUTE_API_KEY || "";
+        if (!managementKey) {
+          throw new Error("OMNIROUTE_API_KEY management bootstrap credential is missing");
+        }
+        const response = await fetch("http://127.0.0.1:20128/api/keys", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${managementKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({name: process.env.HERMES_N8N_SERVICE_KEY_NAME}),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.key || !data.id) {
+          throw new Error(`OmniRoute key provisioning returned HTTP ${response.status}`);
+        }
+        process.stdout.write(`OMNIROUTE_N8N_API_KEY=${data.key}\n`);
+        process.stdout.write(`OMNIROUTE_N8N_API_KEY_ID=${data.id}\n`);
+      })().catch(error => {
+        console.error(error.message);
+        process.exit(1);
+      });
+    ')" || {
+      printf '%s\n' \
+        'OmniRoute could not auto-provision the dedicated n8n API key.' \
+        'Ensure the current OmniRoute image supports management POST /api/keys and OMNIROUTE_MANAGEMENT_API_KEY is configured.' >&2
+      return 1
+    }
+
+  key="$(sed -n 's/^OMNIROUTE_N8N_API_KEY=//p' <<< "$output" | tail -n1)"
+  id="$(sed -n 's/^OMNIROUTE_N8N_API_KEY_ID=//p' <<< "$output" | tail -n1)"
+  [[ -n "$key" && -n "$id" ]] || {
+    printf 'OmniRoute did not return the dedicated n8n API key.\n' >&2
+    return 1
+  }
+
+  write_omniroute_n8n_router_key "$key" "$id" || return 1
+  printf '%s' "$key"
+}
+
 provision_n8n_router_key() {
   local profiles key
   profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
+
   if [[ ",$profiles," == *,smart-router,* ]]; then
     key="$(env_value "$ENV_FILE" SMART_ROUTER_CLIENT_API_KEY)"
-  else
-    key="$(env_value "$HERMES_ENV" OMNIROUTE_API_KEY)"
-    if [[ -z "$key" && "$(env_value "$ENV_FILE" OMNIROUTE_REQUIRE_API_KEY)" != true ]]; then
-      key="local-no-auth"
-    fi
+    [[ -n "$key" ]] || {
+      printf 'SMART_ROUTER_CLIENT_API_KEY is missing.\n' >&2
+      return 1
+    }
+    printf '%s' "$key"
+    return 0
   fi
-  [[ -n "$key" ]] || { printf 'No OmniRoute/Smart Router client API key is configured.\n' >&2; return 1; }
-  printf '%s' "$key"
+
+  key="$(stored_omniroute_n8n_router_key)"
+  if [[ -n "$key" ]] && validate_omniroute_n8n_router_key "$key"; then
+    printf '%s' "$key"
+    return 0
+  fi
+
+  create_omniroute_n8n_router_key
 }
 
 run_n8n_reconciler_with_token() {
@@ -1322,7 +1421,7 @@ run_n8n_reconciler_with_token() {
     router_model="auto"
   else
     router_base_url="http://omniroute:20129/v1"
-    router_model="ai"
+    router_model="auto"
   fi
   previous_router_base_url="$router_base_url"
   if [[ -f "$N8N_BOOTSTRAP_STATE" ]]; then

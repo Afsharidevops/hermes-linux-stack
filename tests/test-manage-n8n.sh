@@ -25,8 +25,9 @@ if [[ "$1" == compose ]]; then
   done
   case "${1:-}" in
     exec)
-      if [[ " $* " == *" PROVISION_N8N=true "* ]]; then
-        printf 'N8N_API_KEY=fixture-router-key\n'
+      if [[ " $* " == *" HERMES_N8N_SERVICE_KEY_NAME=n8n (hermes-linux-stack) "* ]]; then
+        printf 'OMNIROUTE_N8N_API_KEY=fixture-router-key\n'
+        printf 'OMNIROUTE_N8N_API_KEY_ID=fixture-router-id\n'
       fi
       ;;
     up|config|ps|run|logs|pull|stop|restart) ;;
@@ -93,6 +94,7 @@ new_fixture() {
 COMPOSE_PROFILES=omniroute,hermes,n8n
 N8N_MCP_MODE=$mode
 N8N_IMAGE=n8nio/n8n:latest
+OMNIROUTE_MANAGEMENT_API_KEY=fixture-management-key
 EOF
   cat > "$stack/data/hermes/.env" <<'EOF'
 N8N_TRIGGER_MCP_TOKEN=valid-trigger-token
@@ -202,7 +204,10 @@ grep -q '^  n8n:$' "$stack/data/hermes/config.yaml"
 grep -q 'N8N_INSTANCE_MCP_URL' "$stack/data/hermes/config.yaml"
 grep -q '^N8N_TRIGGER_MCP_TOKEN=valid-trigger-token$' "$stack/data/hermes/.env"
 grep -q '^N8N_INSTANCE_MCP_TOKEN=eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature$' "$stack/data/hermes/.env"
-grep -q 'reconcile mode=instance router=http://omniroute:20129/v1 model=ai' "$stack/fake-docker.log"
+grep -q 'reconcile mode=instance router=http://omniroute:20129/v1 model=auto' "$stack/fake-docker.log"
+grep -q '^OMNIROUTE_N8N_API_KEY=fixture-router-key$' "$stack/data/stack-secrets/omniroute-n8n-router.env"
+grep -q '^OMNIROUTE_N8N_API_KEY_ID=fixture-router-id$' "$stack/data/stack-secrets/omniroute-n8n-router.env"
+test "$(stat -c '%a' "$stack/data/stack-secrets/omniroute-n8n-router.env")" = 600
 run_manage "$stack" "$stack/trigger.out" set-n8n-mcp-mode trigger
 grep -q '^N8N_MCP_MODE=trigger$' "$stack/.env"
 grep -q 'N8N_TRIGGER_MCP_URL' "$stack/data/hermes/config.yaml"

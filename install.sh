@@ -720,6 +720,10 @@ smart_router_provider_health_enabled="$(existing_env_value SMART_ROUTER_PROVIDER
 smart_router_coding_model="$(existing_env_value SMART_ROUTER_CODING_MODEL)"
 smart_router_vision_model="$(existing_env_value SMART_ROUTER_VISION_MODEL)"
 smart_router_secret="$(existing_env_value SMART_ROUTER_HMAC_SECRET)"; smart_router_secret="${smart_router_secret:-$(random_hex 32)}"
+client_key="$(existing_env_value SMART_ROUTER_CLIENT_API_KEY)"
+if [[ -z "$client_key" || "$client_key" == CHANGE_ME* ]]; then
+  client_key="$(random_hex 32)"
+fi
 smart_router_fast_model="$(existing_env_value SMART_ROUTER_FAST_MODEL)"; smart_router_fast_model="${smart_router_fast_model:-auto}"
 smart_router_standard_model="$(existing_env_value SMART_ROUTER_STANDARD_MODEL)"; smart_router_standard_model="${smart_router_standard_model:-auto}"
 smart_router_strong_model="$(existing_env_value SMART_ROUTER_STRONG_MODEL)"; smart_router_strong_model="${smart_router_strong_model:-auto}"
@@ -1141,6 +1145,7 @@ replace_env_value "$tmp_env" OMNIROUTE_API_PORT "$omni_api_port"
 replace_env_value "$tmp_env" OMNIROUTE_INITIAL_PASSWORD "$(dotenv_quote "$omni_password")"
 replace_env_value "$tmp_env" OMNIROUTE_JWT_SECRET "$omni_jwt"
 replace_env_value "$tmp_env" OMNIROUTE_API_KEY_SECRET "$omni_key_secret"
+replace_env_value "$tmp_env" OMNIROUTE_MANAGEMENT_API_KEY "$(existing_env_value OMNIROUTE_MANAGEMENT_API_KEY)"
 replace_env_value "$tmp_env" OMNIROUTE_MACHINE_ID_SALT "$omni_salt"
 replace_env_value "$tmp_env" OMNIROUTE_REQUIRE_API_KEY "$omni_require_key"
 replace_env_value "$tmp_env" OMNIROUTE_AUTH_COOKIE_SECURE "$omni_cookie_secure"
@@ -1159,6 +1164,7 @@ replace_env_value "$tmp_env" EXECUTION_SANDBOX_IMAGE "$execution_sandbox_image"
 replace_env_value "$tmp_env" EXECUTION_RUN_AS "$execution_run_as"
 replace_env_value "$tmp_env" EXECUTION_DOCKER_GID "$execution_docker_gid"
 replace_env_value "$tmp_env" EXECUTION_WORKSPACE_HOST_PATH "$execution_workspace"
+replace_env_value "$tmp_env" SMART_ROUTER_CLIENT_API_KEY "$client_key"
 replace_env_value "$tmp_env" SMART_ROUTER_IMAGE_REPOSITORY "$smart_router_image_repository"
 replace_env_value "$tmp_env" SMART_ROUTER_IMAGE_TAG "$smart_router_image_tag"
 replace_env_value "$tmp_env" SMART_ROUTER_BIND_IP "$smart_router_bind"
@@ -1201,7 +1207,7 @@ python3 - "$ENV_FILE" <<'PYV052'
 import secrets, sys
 p=sys.argv[1]
 lines=open(p,encoding='utf-8').read().splitlines(); out=[]
-force={'SMART_ROUTER_HMAC_SECRET','SMART_ROUTER_ADMIN_API_KEY','SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD','SMART_ROUTER_PG_PASSWORD','SMART_ROUTER_CLIENT_API_KEY','OPENWEBUI_SECRET_KEY','N8N_ENCRYPTION_KEY'}
+force={'OMNIROUTE_MANAGEMENT_API_KEY','SMART_ROUTER_HMAC_SECRET','SMART_ROUTER_ADMIN_API_KEY','SMART_ROUTER_BOOTSTRAP_ADMIN_PASSWORD','SMART_ROUTER_PG_PASSWORD','SMART_ROUTER_CLIENT_API_KEY','OPENWEBUI_SECRET_KEY','N8N_ENCRYPTION_KEY'}
 for line in lines:
     if '=' not in line or line.lstrip().startswith('#'):
         out.append(line); continue
