@@ -62,6 +62,7 @@ from .panel_v58 import PANEL_HTML
 from .policy_v51 import PolicyEngine, TIER_ORDER
 from .security_v51 import Identity, ROLE_PERMISSIONS, SecurityManager, bearer
 from .guardrails_v56 import GuardrailEngine
+from .graph_v59 import normalize_graph
 
 
 @dataclass
@@ -1927,52 +1928,17 @@ def _validate_pipeline_definition(value: Any) -> dict[str, Any]:
 
 
 def _validate_workflow_graph(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict): raise ValueError("workflow graph must be an object")
-    nodes=value.get("nodes", []); edges=value.get("edges", [])
-    if not isinstance(nodes, list) or not isinstance(edges, list): raise ValueError("workflow nodes and edges must be lists")
-    if len(nodes)>200 or len(edges)>500: raise ValueError("workflow graph is too large")
-    allowed={"agent","team","skill","knowledge","plugin","approval","branch","parallel","input","output"}
-    clean_nodes=[]; ids=set()
-    for node in nodes:
-        if not isinstance(node, dict): raise ValueError("workflow node must be an object")
-        nid=str(node.get("id", "")).strip()[:80]; kind=str(node.get("type", "")).strip()
-        if not nid or nid in ids: raise ValueError("workflow node IDs must be unique")
-        if kind not in allowed: raise ValueError(f"unsupported workflow node type: {kind}")
-        ids.add(nid); clean_nodes.append({"id":nid,"type":kind,"label":str(node.get("label", nid))[:160],"ref_id":node.get("ref_id"),"config":node.get("config") if isinstance(node.get("config"),dict) else {}})
-    clean_edges=[]
-    for edge in edges:
-        if not isinstance(edge, dict): raise ValueError("workflow edge must be an object")
-        src=str(edge.get("from", "")); dst=str(edge.get("to", ""))
-        if src not in ids or dst not in ids: raise ValueError("workflow edge references an unknown node")
-        clean_edges.append({"from":src,"to":dst,"condition":str(edge.get("condition", ""))[:500]})
-    return {"nodes":clean_nodes,"edges":clean_edges}
+    return normalize_graph(value, studio="workflow", max_nodes=200, max_edges=500)
 
 
 def _validate_knowledge_pipeline_graph(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict): raise ValueError("knowledge pipeline graph must be an object")
-    nodes=value.get("nodes", []); edges=value.get("edges", [])
-    if not isinstance(nodes, list) or not isinstance(edges, list): raise ValueError("knowledge pipeline nodes and edges must be lists")
-    if len(nodes)>160 or len(edges)>400: raise ValueError("knowledge pipeline graph is too large")
-    allowed={"data_source","extract","transform","chunk","embed","index","knowledge_base","qa","output"}
-    clean_nodes=[]; ids=set()
-    for node in nodes:
-        if not isinstance(node, dict): raise ValueError("knowledge pipeline node must be an object")
-        nid=str(node.get("id", "")).strip()[:80]; kind=str(node.get("type", "")).strip()
-        if not nid or nid in ids: raise ValueError("knowledge pipeline node IDs must be unique")
-        if kind not in allowed: raise ValueError(f"unsupported knowledge pipeline node type: {kind}")
-        ids.add(nid)
-        ref_id=node.get("ref_id")
-        if ref_id is not None:
-            try: ref_id=int(ref_id)
-            except (TypeError,ValueError): raise ValueError("knowledge pipeline ref_id must be numeric when provided")
-        clean_nodes.append({"id":nid,"type":kind,"label":str(node.get("label", nid))[:160],"ref_id":ref_id,"config":node.get("config") if isinstance(node.get("config"),dict) else {}})
-    clean_edges=[]
-    for edge in edges:
-        if not isinstance(edge, dict): raise ValueError("knowledge pipeline edge must be an object")
-        src=str(edge.get("from", "")); dst=str(edge.get("to", ""))
-        if src not in ids or dst not in ids: raise ValueError("knowledge pipeline edge references an unknown node")
-        clean_edges.append({"from":src,"to":dst,"condition":str(edge.get("condition", ""))[:500]})
-    return {"nodes":clean_nodes,"edges":clean_edges,"version":1}
+    return normalize_graph(
+        value,
+        studio="knowledge",
+        max_nodes=160,
+        max_edges=400,
+        numeric_ref_id=True,
+    )
 
 
 def _trace_safe(value: Any) -> Any:

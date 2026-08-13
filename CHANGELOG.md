@@ -12,6 +12,7 @@ The active runtime release remains **v0.5.8** while v0.5.9 is under development.
 - Persist Telegram enablement for `stack-execution-policy` and `stack-package-policy` during installation.
 - Updated `manage.sh` runtime diagnostics to verify the current stack plugin toolset names.
 - Added regression coverage for Telegram plugin-toolset persistence and runtime registration.
+- Implemented v0.5.9 Phase 1 shared graph contract for Workflow and Knowledge studios: port-aware edges, legacy graph normalization, typed compatibility, named outputs, drag-to-connect preview/target validation, selectable/deletable edges, dirty state, and server-side duplicate/self/cycle checks.
 - Preserved the execution trust boundary: visual orchestration and Telegram UX do not grant Docker, SSH, signing-key, or Execution Admin authority.
 
 ---
