@@ -1,4 +1,4 @@
-name: v0.5.8 Platform CI
+name: v0.5.9 Platform CI
 on:
   push:
     branches: [main, hermes-omniroute-linux-stack]
@@ -23,6 +23,6 @@ jobs:
         run: pytest -q
       - name: Compile and shell validation
         run: |
-          python -m compileall -q smart-router/src/smart_router scripts/load-test-v0.5.8.py
-          bash -n install.sh manage.sh scripts/ha-smoke-v0.5.8.sh
-          python scripts/load-test-v0.5.8.py --help >/dev/null
+          python -m compileall -q smart-router/src/smart_router scripts/load-test-v0.5.9.py
+          bash -n install.sh manage.sh scripts/ha-smoke-v0.5.9.sh
+          python scripts/load-test-v0.5.9.py --help >/dev/null

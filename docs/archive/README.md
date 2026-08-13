@@ -14,3 +14,6 @@ For current information use:
 - [`../HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.8.md`](../HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.8.md)
 - [`../HERMES-LINUX-STACK-v0.5.9-PLAN.md`](../HERMES-LINUX-STACK-v0.5.9-PLAN.md)
 - [`../RELEASE-PROCESS.md`](../RELEASE-PROCESS.md)
+
+- `user-guides/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.8.md` — superseded by the v0.5.9 Operations Center guide.
+- `publishing/HERMES-SMART-ROUTER-DOCKERHUB-v0.5.8.md` — superseded by the v0.5.9 Smart Router publishing page.
