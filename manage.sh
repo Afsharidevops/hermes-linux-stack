@@ -1421,7 +1421,7 @@ run_n8n_reconciler_with_token() {
     router_model="auto"
   else
     router_base_url="http://omniroute:20129/v1"
-    router_model="auto"
+    router_model="auto/best-chat"
   fi
   previous_router_base_url="$router_base_url"
   if [[ -f "$N8N_BOOTSTRAP_STATE" ]]; then

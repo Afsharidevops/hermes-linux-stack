@@ -204,7 +204,7 @@ grep -q '^  n8n:$' "$stack/data/hermes/config.yaml"
 grep -q 'N8N_INSTANCE_MCP_URL' "$stack/data/hermes/config.yaml"
 grep -q '^N8N_TRIGGER_MCP_TOKEN=valid-trigger-token$' "$stack/data/hermes/.env"
 grep -q '^N8N_INSTANCE_MCP_TOKEN=eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJtY3Atc2VydmVyLWFwaSJ9.fixture-signature$' "$stack/data/hermes/.env"
-grep -q 'reconcile mode=instance router=http://omniroute:20129/v1 model=auto' "$stack/fake-docker.log"
+grep -q 'reconcile mode=instance router=http://omniroute:20129/v1 model=auto/best-chat' "$stack/fake-docker.log"
 grep -q '^OMNIROUTE_N8N_API_KEY=fixture-router-key$' "$stack/data/stack-secrets/omniroute-n8n-router.env"
 grep -q '^OMNIROUTE_N8N_API_KEY_ID=fixture-router-id$' "$stack/data/stack-secrets/omniroute-n8n-router.env"
 test "$(stat -c '%a' "$stack/data/stack-secrets/omniroute-n8n-router.env")" = 600

@@ -45,7 +45,7 @@ class OmniRouteN8nProvisioningTest(unittest.TestCase):
         self.assertIn("HERMES_N8N_SERVICE_KEY_NAME=n8n (hermes-linux-stack)", text)
         self.assertIn('fetch("http://127.0.0.1:20128/api/keys"', text)
         self.assertIn('router_base_url="http://omniroute:20129/v1"', text)
-        self.assertIn('router_model="auto"', text)
+        self.assertIn('router_model="auto/best-chat"', text)
         self.assertIn("omniroute-n8n-router.env", text)
 
 

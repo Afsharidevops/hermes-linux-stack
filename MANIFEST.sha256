@@ -1,4 +1,4 @@
-3f62b797f942dda1f7e5c2159d31034ed36b6844b0739d68f0a5500272b0f9fd  ./.env.example
+a77561adc0ebad04a63b6b993ae3170e6957091847b95c1c854bebff36abc6ad  ./.env.example
 a5fa233f70defa3ce07a1ec3308d700cb104a57e3b9b233ed43076b69435bab1  ./.github/workflows/platform-v0.5.6.yml
 5dcfba8f9b6c735c817c6601dd276541a097a040d84dfd469e349d9ffbf89aa9  ./.github/workflows/platform-v0.5.7.yml
 149f16e73d431fffb87f52dc7a3264bc75237c85a5eb0e7d50eaa8037ef256f0  ./.github/workflows/platform-v0.5.9.yml
@@ -36,7 +36,7 @@ fe5ebbc8aed343cfb068cb026856456fdd542b6d2fdc40346907c70bed1dfaa4  ./deploy/helm/
 a265c720a6eb212b44185755a1c90a97d80d5dde7451ad463820bc5da18acf5c  ./deploy/helm/hermes-linux-stack/templates/router.yaml
 f123278b4c0cb59bcf3bd2294bac94b497a98ee9fde6dbf703137e3cc89be5e7  ./deploy/helm/hermes-linux-stack/templates/serviceaccount.yaml
 381b5038c13d687e696f752a0be6a8e972bda5abd3eee760e08fe2c7a743e6b1  ./deploy/helm/hermes-linux-stack/values.yaml
-bb065e81aa5b84bc289f8ecaa739be381d9e3d2942190db122e80f72e6f4ca76  ./docker-compose.yml
+410d92f64f19211c0ca94ebce0b76348e6aaaa4cfedf4f6632ac795a042b5353  ./docker-compose.yml
 7027090985c6b7cef4bd12666014abde4cf194b8c945b067ea5b1de11d3bb522  ./docs-site/assets/flight-deck-v0.5.6.png
 02f9a764b15b9c21db2c800c2826aee5fc2519c6a3160f27e7a6c823424a5d1a  ./docs-site/assets/operations-center-v0.5.6.png
 0649430d5d8cc4abccd2aa9ef134736da7da9364b056c63a9cf00af201a957d8  ./docs-site/index.html
@@ -71,8 +71,8 @@ a3f25da07bbd442da7699f8de1a01d3cbd7b2742f855c64cf6e5f7b21f1f21f5  ./execution-br
 8712b285c9d4a75b7f24f0f31bcc7f241e7da3e84a7b470a56d2015c60224ed3  ./execution-broker/src/broker/ssh.py
 6b7ea776e22ebe10e6c40491d1aac4cda271f6c19afe4617cad978e9d8fc8724  ./execution-broker/src/broker/store.py
 66211081a60ab4390bf2073b09461e0798f924f3552383dff7bcd06cf45e7575  ./execution-broker/ssh-askpass.py
-1e6de582fb1b69b23fe73684d1237fc1a5ea7418a44eb8581f599a8c8b8ce612  ./install.sh
-989c27894a32bc45021e9d5d6d64bb9661d0a136c1140c880de5f46050aed891  ./manage.sh
+b0fd9a2b6fd67290e754840f766aa086fa5c70d68bc459d596f1f6cc55198c13  ./install.sh
+7d630d42aa3cdd6d05e4fb81fe1b54dc364c987d5d77b1d85e7daec177016d99  ./manage.sh
 37a4106e8e076d9a4d6bd677861a66e64f79bba3bff41554d3825ae5a86bf04d  ./plugins/stack-execution-policy/__init__.py
 5544b17cc4cc7190d2c20ab35f5ec5336df7ab5211a5bdcfa61997236afed473  ./plugins/stack-execution-policy/plugin.yaml
 be5783b80a6bc1bee47684aa9aa683b65d8d5ba6d1f8da41a6357293f91e0909  ./plugins/stack-package-policy/__init__.py
@@ -199,14 +199,15 @@ bc2eb29aff1e4b058e48d824365a0eda826a56505ae21a919efb1916875cf06a  ./smart-router
 511d32f355305f89c786b797663d1dd511db97145acf1310b37a3cc4e95492ff  ./templates/hermes-config.yaml.template
 109e144677829b8997c3ab1a0f30e306a97309ac62efed99752aa2513c9a30dc  ./tests/smoke.sh
 00814596bb6ac1f2d4d6e166ac6855b13a6cdd49c6f56d027fba8b2fccabd82f  ./tests/test-bootstrap-n8n.mjs
-092a64041aadc5eb6e519c6143aaa4d47b9445bf24281e9984e7b8ca6ceeed9f  ./tests/test-manage-n8n.sh
+cd9d12ee6ba2df661c3d1950b172704ed17beefcbfa31c0585764b0b4335e1d5  ./tests/test-manage-n8n.sh
 049fd8c19abefe77a2f94e987ada3944ffbbb9c50019026e1b5b15dbe061fdc2  ./tests/test-manage-ux.sh
 799f04ff73e1a2647fa8566310f518a148addec919678de84d1511777181d10c  ./tests/test-ssh-profiles.sh
 1947d9ac761787e3723c449d003fa1f5debc9cb58b8f01c0b6dbadc2381a7392  ./tests/test-verify-n8n.mjs
 99c77fde39f0ee3077168f38282b39188a712dff67f25519b6c866025641ffe3  ./tests/test_execution_admin_v058.py
 925b3fd627b2b6fca2328f95cc6eebdb96267733a5beaee7d927341a50a791d7  ./tests/test_execution_broker.py
 cee25bc7ecdd66486b8bc6365789d01e71846679f0490a73f2646df2853443f5  ./tests/test_hermes_telegram_toolsets.py
-d574ca8dc16953fea21eb435ead1503178ef4ead24bc91f8eef4df3393b8ae03  ./tests/test_omniroute_n8n_provisioning.py
+0b8742cb27222077cc42ab48bb113dcafbf95a5661026409219dd606aaff28fc  ./tests/test_omniroute_model_mapping.py
+67b1cf7be0d6b0e136e52c0ded2a7eda34ab314583f5883316ee863dab43f21a  ./tests/test_omniroute_n8n_provisioning.py
 15186b5ffa0ebef4d53699bbe9010f15a223525d25750d1717fa716d41205bb6  ./tests/test_repository_layout.py
 6424b1abdf953c32a3ebd3fe1255c599bf0f495cab193d65fb94f48a023f3ffe  ./tests/test_stack_execution_policy.py
 7885d0f234069b201916456f0deb79bc83db9bbf11d6504bd1122e68e09f6301  ./tests/test_stack_package_policy.py
