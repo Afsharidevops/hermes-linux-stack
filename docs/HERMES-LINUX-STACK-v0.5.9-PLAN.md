@@ -3,7 +3,7 @@
 **Planned release:** `0.5.9`
 **Primary focus:** n8n-style drag-to-connect visual graph editing
 **Target studios:** Workflow Studio, Agent Studio, Router Pipeline Studio, Knowledge Pipeline Studio
-**Status:** Planning
+**Status:** Feature-complete development candidate — automated validation complete; manual browser/server acceptance pending
 
 ---
 
@@ -956,28 +956,30 @@ Reject invalid reversed connections.
 
 v0.5.9 is ready when all of the following are true:
 
-- [ ] Users can drag from an output handle to an input handle.
-- [ ] A live connection preview is shown.
-- [ ] Valid targets are highlighted.
-- [ ] Invalid targets are rejected with a reason.
-- [ ] Connections can be selected and deleted.
-- [ ] Existing edges can be reconnected.
-- [ ] Named branch outputs work.
-- [ ] Workflow Studio uses the shared connection component.
-- [ ] Agent Studio uses the shared connection component.
-- [ ] Router Pipeline Studio uses the shared connection component.
-- [ ] Knowledge Pipeline Studio uses the shared connection component.
-- [ ] Drop-on-empty can open an Add Next Node menu.
-- [ ] New nodes created from quick-add are automatically connected.
-- [ ] Edges persist after save/reload.
-- [ ] Existing v0.5.8 graphs remain compatible.
-- [ ] Knowledge Pipeline invalid directions are blocked.
-- [ ] Router branch semantics persist correctly.
+Automated implementation checks are marked complete below. Light/dark rendering and real mouse/trackpad interaction remain manual release-gate checks and must be exercised before changing `VERSION` or publishing the final `0.5.9`/`latest` image.
+
+- [x] Users can drag from an output handle to an input handle.
+- [x] A live connection preview is shown.
+- [x] Valid targets are highlighted.
+- [x] Invalid targets are rejected with a reason.
+- [x] Connections can be selected and deleted.
+- [x] Existing edges can be reconnected.
+- [x] Named branch outputs work.
+- [x] Workflow Studio uses the shared connection component.
+- [x] Agent Studio uses the shared connection component.
+- [x] Router Pipeline Studio uses the shared connection component.
+- [x] Knowledge Pipeline Studio uses the shared connection component.
+- [x] Drop-on-empty can open an Add Next Node menu.
+- [x] New nodes created from quick-add are automatically connected.
+- [x] Edges persist after save/reload.
+- [x] Existing v0.5.8 graphs remain compatible.
+- [x] Knowledge Pipeline invalid directions are blocked.
+- [x] Router branch semantics persist correctly.
 - [ ] Light mode is visually correct.
 - [ ] Dark mode is visually correct.
 - [ ] Mouse/trackpad interaction is reliable.
-- [ ] Execution security boundaries remain unchanged.
-- [ ] Graph connections alone cannot grant privileged execution.
+- [x] Execution security boundaries remain unchanged.
+- [x] Graph connections alone cannot grant privileged execution.
 
 ---
 

@@ -13,6 +13,7 @@ The active runtime release remains **v0.5.8** while v0.5.9 is under development.
 - Updated `manage.sh` runtime diagnostics to verify the current stack plugin toolset names.
 - Added regression coverage for Telegram plugin-toolset persistence and runtime registration.
 - Implemented v0.5.9 Phase 1 shared graph contract for Workflow and Knowledge studios: port-aware edges, legacy graph normalization, typed compatibility, named outputs, drag-to-connect preview/target validation, selectable/deletable edges, dirty state, and server-side duplicate/self/cycle checks.
+- Completed the v0.5.9 visual-flow development candidate across all four studios: Agent and Router shared-canvas integration, persisted agent composition graphs, legacy graph synthesis, named Router branch outputs (classifier/condition/capability/health/approval), branch-aware runtime traversal, edge reconnection, drop-on-empty quick add, undo/redo, pan/zoom/fit controls, keyboard/pointer accessibility, explicit save states, and backward-compatible port-aware persistence.
 - Preserved the execution trust boundary: visual orchestration and Telegram UX do not grant Docker, SSH, signing-key, or Execution Admin authority.
 
 ---

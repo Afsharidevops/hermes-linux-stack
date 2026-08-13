@@ -21,6 +21,7 @@ from starlette.routing import Route
 from . import __version__
 from .control_db import (
     Agent,
+    AgentGraph,
     ApiKey,
     AuditEvent,
     Budget,
@@ -62,7 +63,7 @@ from .panel_v58 import PANEL_HTML
 from .policy_v51 import PolicyEngine, TIER_ORDER
 from .security_v51 import Identity, ROLE_PERMISSIONS, SecurityManager, bearer
 from .guardrails_v56 import GuardrailEngine
-from .graph_v59 import normalize_graph
+from .graph_v59 import normalize_graph, router_graph_plan
 
 
 @dataclass
@@ -352,17 +353,45 @@ class ControlPlane:
         for row in rows:
             definition = _loads(row.definition_json, {})
             stages = definition.get("stages", []) if isinstance(definition, dict) else []
-            active = True
+            by_id = {str(stage.get("id")): stage for stage in stages if isinstance(stage, dict)}
+            transitions = definition.get("transitions") if isinstance(definition, dict) else None
+            entry = definition.get("entry") if isinstance(definition, dict) else None
             applied: list[str] = []
-            for stage in stages:
-                if not isinstance(stage, dict): continue
+
+            def apply_stage(stage: dict[str, Any]) -> str:
+                nonlocal profile, model, retry_count, fallbacks
                 kind = stage.get("type")
-                if kind == "condition":
-                    active = active and _pipeline_when_matches(stage.get("when"), body, identity, tier, profile)
-                    applied.append(f"condition:{'match' if active else 'skip'}")
-                    continue
-                if not active: continue
-                if kind == "route":
+                output_port = "default"
+                if kind == "classifier":
+                    text = _last_user_text(body).lower()
+                    if profile == "vision" or any(word in text for word in ("image", "photo", "vision", "screenshot")):
+                        output_port = "vision"
+                    elif profile == "coding" or any(word in text for word in ("code", "python", "javascript", "typescript", "debug")):
+                        output_port = "coding"
+                    applied.append(f"classifier:{output_port}")
+                elif kind == "condition":
+                    matched = _pipeline_when_matches(stage.get("when"), body, identity, tier, profile)
+                    output_port = "true" if matched else "false"
+                    applied.append(f"condition:{output_port}")
+                elif kind == "capability_filter":
+                    required = {str(x).lower() for x in (stage.get("require") or [])}
+                    text = _last_user_text(body).lower()
+                    available = set()
+                    if any(x in text for x in ("image", "photo", "vision", "screenshot")): available.add("vision")
+                    if any(x in text for x in ("tool", "function", "execute", "terminal", "shell")): available.add("tools")
+                    matched = required.issubset(available) if required else True
+                    output_port = "matched" if matched else "unmatched"
+                    applied.append(f"capability_filter:{output_port}")
+                elif kind == "health_filter":
+                    healthy = self.provider_health.available(model) if model else True
+                    output_port = "healthy" if healthy else "unhealthy"
+                    applied.append(f"health_filter:{output_port}")
+                elif kind == "approval":
+                    # A visual Approval node never grants authority. Runtime approval remains
+                    # enforced by Hermes execution policy/approver/broker boundaries.
+                    output_port = "default"
+                    applied.append("approval:structural")
+                elif kind == "route":
                     requested_profile = str(stage.get("profile", "")).lower()
                     if requested_profile in {"fast", "standard", "strong", "coding", "vision"}:
                         candidate = self.profile_model(requested_profile)
@@ -376,7 +405,7 @@ class ControlPlane:
                     candidates = [str(x) for x in (stage.get("candidates") or []) if str(x).strip()]
                     if candidates:
                         model = self._best_candidate(candidates, strategy=str(stage.get("strategy", "health_latency")), weights=stage.get("weights"))
-                        applied.append(f"load_balance:{model}")
+                    applied.append(f"load_balance:{model}")
                 elif kind == "retry":
                     retry_count = max(retry_count, max(0, min(5, int(stage.get("retries", 0) or 0))))
                     applied.append(f"retry:{retry_count}")
@@ -386,8 +415,29 @@ class ControlPlane:
                         mapped = self.profile_model(candidate) if candidate in {"fast", "standard", "strong", "coding", "vision"} else candidate
                         if mapped and mapped != model and mapped not in fallbacks: fallbacks.append(mapped)
                     applied.append(f"fallback:{len(fallbacks)}")
+                return output_port
+
+            if isinstance(transitions, dict) and entry in by_id:
+                current = str(entry)
+                visited: set[str] = set()
+                while current in by_id and current not in visited:
+                    visited.add(current)
+                    port = apply_stage(by_id[current])
+                    choices = transitions.get(current) if isinstance(transitions.get(current), dict) else {}
+                    current = str(choices.get(port) or choices.get("default") or "")
+            else:
+                active = True
+                for stage in stages:
+                    if not isinstance(stage, dict):
+                        continue
+                    if stage.get("type") == "condition":
+                        active = active and _pipeline_when_matches(stage.get("when"), body, identity, tier, profile)
+                        applied.append(f"condition:{'match' if active else 'skip'}")
+                        continue
+                    if active:
+                        apply_stage(stage)
             if applied:
-                self.trace(request, "router_pipeline", "applied" if active else "skipped", {"pipeline": row.name, "stages": applied, "retry_count": retry_count, "fallback_models": fallbacks})
+                self.trace(request, "router_pipeline", "applied", {"pipeline": row.name, "stages": applied, "retry_count": retry_count, "fallback_models": fallbacks})
         return profile, model, retry_count, fallbacks
 
     def _best_candidate(self, candidates: list[str], strategy: str = "health_latency", weights: Any = None) -> str:
@@ -955,10 +1005,36 @@ class ControlPlane:
         with self.db.session() as session:
             rows = list(session.scalars(select(Agent).order_by(Agent.id)))
             links = list(session.scalars(select(AgentSkillLink)))
+            graph_rows = list(session.scalars(select(AgentGraph)))
+            kbs = {row.id: row.name for row in session.scalars(select(KnowledgeBase))}
+            plugins = {row.id: row.name for row in session.scalars(select(Plugin))}
+            skills = {row.id: row.name for row in session.scalars(select(Skill))}
         by_agent: dict[int, list[int]] = {}
         for link in links:
             by_agent.setdefault(link.agent_id, []).append(link.skill_id)
-        return JSONResponse([_agent_dict(row) | {"skills": sorted(by_agent.get(row.id, []))} for row in rows])
+        saved_graphs = {row.agent_id: row.graph_json for row in graph_rows}
+        labels = {
+            **{("knowledge", key): value for key, value in kbs.items()},
+            **{("plugin", key): value for key, value in plugins.items()},
+            **{("skill", key): value for key, value in skills.items()},
+        }
+        result = []
+        for row in rows:
+            skill_ids = sorted(by_agent.get(row.id, []))
+            raw_graph = saved_graphs.get(row.id)
+            if raw_graph:
+                try:
+                    graph = _validate_agent_graph(_loads(raw_graph, {}), row.id)
+                except ValueError:
+                    graph = _agent_default_graph(
+                        row.id, row.name, _loads(row.knowledge_json, []), _loads(row.plugins_json, []), skill_ids, labels
+                    )
+            else:
+                graph = _agent_default_graph(
+                    row.id, row.name, _loads(row.knowledge_json, []), _loads(row.plugins_json, []), skill_ids, labels
+                )
+            result.append(_agent_dict(row) | {"skills": skill_ids, "graph": graph})
+        return JSONResponse(result)
 
     async def agent_api(self, request: Request) -> Response:
         identity = self._admin_identity(request, "agents.manage")
@@ -971,6 +1047,9 @@ class ControlPlane:
                 if request.query_params.get("purge", "").lower() in {"1", "true", "yes"}:
                     for link in list(session.scalars(select(AgentSkillLink).where(AgentSkillLink.agent_id == aid))):
                         session.delete(link)
+                    graph_row = session.get(AgentGraph, aid)
+                    if graph_row is not None:
+                        session.delete(graph_row)
                     session.delete(row)
                     action = "agent.delete"
                 else:
@@ -980,11 +1059,31 @@ class ControlPlane:
                 d = await _json(request)
                 merged = _agent_dict(row)
                 merged.update({k: v for k, v in d.items() if k in {"name","description","system_prompt","tier","profile","knowledge","plugins","permissions","active","skills"}})
+                graph = None
+                if "graph" in d:
+                    try:
+                        graph = _validate_agent_graph(d["graph"], aid)
+                    except ValueError as exc:
+                        return _error(str(exc), "invalid_agent_graph", 422)
+                    graph_knowledge, graph_plugins, graph_skills = _agent_graph_resource_ids(graph)
+                    merged.update({"knowledge": graph_knowledge, "plugins": graph_plugins, "skills": graph_skills})
                 validated = self._validated_agent_payload(merged, existing_id=aid)
                 if isinstance(validated, Response): return validated
                 for key, value in validated["agent_fields"].items(): setattr(row, key, value)
                 for link in list(session.scalars(select(AgentSkillLink).where(AgentSkillLink.agent_id == aid))): session.delete(link)
                 for skill_id in validated["skill_ids"]: session.add(AgentSkillLink(agent_id=aid, skill_id=skill_id))
+                if graph is not None:
+                    graph_row = session.get(AgentGraph, aid)
+                    if graph_row is None:
+                        graph_row = AgentGraph(agent_id=aid)
+                        session.add(graph_row)
+                    graph_row.graph_json = json.dumps(graph, separators=(",", ":"))
+                    graph_row.updated_at = datetime.now(timezone.utc).isoformat()
+                elif any(key in d for key in {"knowledge", "plugins", "skills"}):
+                    # Non-Studio edits remain authoritative; regenerate the visual graph on next read.
+                    graph_row = session.get(AgentGraph, aid)
+                    if graph_row is not None:
+                        session.delete(graph_row)
                 action = "agent.update"
             try:
                 session.commit()
@@ -1913,18 +2012,168 @@ def _pipeline_when_matches(value: Any, body: dict[str, Any], identity: Identity,
     return True
 
 
+def _agent_default_graph(
+    agent_id: int,
+    agent_name: str,
+    knowledge_ids: list[int],
+    plugin_ids: list[int],
+    skill_ids: list[int],
+    labels: dict[tuple[str, int], str] | None = None,
+) -> dict[str, Any]:
+    labels = labels or {}
+    nodes: list[dict[str, Any]] = [
+        {"id": "input", "type": "input", "label": "Input", "config": {"ui": {"x": 60, "y": 250}}},
+        {"id": f"agent-{agent_id}", "type": "agent", "label": agent_name, "ref_id": agent_id, "config": {"ui": {"x": 540, "y": 250}}},
+        {"id": "output", "type": "output", "label": "Answer", "config": {"ui": {"x": 980, "y": 250}}},
+    ]
+    edges: list[dict[str, Any]] = [
+        {"from": "input", "to": f"agent-{agent_id}", "source_port": "default", "target_port": "default"},
+        {"from": f"agent-{agent_id}", "to": "output", "source_port": "result", "target_port": "answer"},
+    ]
+    rows = [
+        ("knowledge", sorted(set(knowledge_ids)), 60, "context", "context"),
+        ("skill", sorted(set(skill_ids)), 300, "tools", "tools"),
+        ("plugin", sorted(set(plugin_ids)), 300, "tools", "tools"),
+    ]
+    y_slots = {"knowledge": 60, "skill": 430, "plugin": 590}
+    for kind, ids, x, source_port, target_port in rows:
+        for offset, ref_id in enumerate(ids):
+            node_id = f"{kind}-{ref_id}"
+            label = labels.get((kind, ref_id), f"{kind.replace('_', ' ').title()} #{ref_id}")
+            nodes.append(
+                {
+                    "id": node_id,
+                    "type": kind,
+                    "label": label,
+                    "ref_id": ref_id,
+                    "config": {"ui": {"x": x, "y": y_slots[kind] + offset * 115}},
+                }
+            )
+            edges.append(
+                {
+                    "from": node_id,
+                    "to": f"agent-{agent_id}",
+                    "source_port": source_port,
+                    "target_port": target_port,
+                }
+            )
+    return normalize_graph(
+        {"nodes": nodes, "edges": edges},
+        studio="agent",
+        max_nodes=220,
+        max_edges=500,
+        numeric_ref_id=True,
+    )
+
+
+def _validate_agent_graph(value: Any, agent_id: int | None = None) -> dict[str, Any]:
+    graph = normalize_graph(
+        value,
+        studio="agent",
+        max_nodes=220,
+        max_edges=500,
+        numeric_ref_id=True,
+    )
+    by_type: dict[str, list[dict[str, Any]]] = {}
+    for node in graph["nodes"]:
+        by_type.setdefault(node["type"], []).append(node)
+    for required in ("input", "agent", "output"):
+        if len(by_type.get(required, [])) != 1:
+            raise ValueError(f"agent graph must contain exactly one {required} node")
+    agent_node = by_type["agent"][0]
+    if agent_id is not None and int(agent_node.get("ref_id") or 0) != agent_id:
+        raise ValueError("agent graph agent node must reference the edited agent")
+
+    edge_pairs = {
+        (
+            str(edge.get("source_node", edge.get("from", ""))),
+            str(edge.get("source_port", "default")),
+            str(edge.get("target_node", edge.get("to", ""))),
+            str(edge.get("target_port", "default")),
+        )
+        for edge in graph["edges"]
+    }
+    input_id = by_type["input"][0]["id"]
+    agent_node_id = agent_node["id"]
+    output_id = by_type["output"][0]["id"]
+    if (input_id, "default", agent_node_id, "default") not in edge_pairs:
+        raise ValueError("agent graph must connect Input to Agent")
+    if (agent_node_id, "result", output_id, "answer") not in edge_pairs:
+        raise ValueError("agent graph must connect Agent.result to Answer")
+
+    connected_sources = {pair[0] for pair in edge_pairs if pair[2] == agent_node_id}
+    for kind in ("knowledge", "skill", "plugin"):
+        seen_refs: set[int] = set()
+        for node in by_type.get(kind, []):
+            if node.get("ref_id") is None:
+                raise ValueError(f"agent {kind} nodes must reference an installed resource")
+            ref_id = int(node["ref_id"])
+            if ref_id in seen_refs:
+                raise ValueError(f"agent graph cannot contain duplicate {kind} references")
+            seen_refs.add(ref_id)
+            if node["id"] not in connected_sources:
+                raise ValueError(f"agent {kind} nodes must connect to the Agent node")
+    return graph
+
+
+def _agent_graph_resource_ids(graph: dict[str, Any]) -> tuple[list[int], list[int], list[int]]:
+    values: dict[str, set[int]] = {"knowledge": set(), "plugin": set(), "skill": set()}
+    for node in graph.get("nodes", []):
+        kind = str(node.get("type", ""))
+        if kind in values and node.get("ref_id") is not None:
+            values[kind].add(int(node["ref_id"]))
+    return sorted(values["knowledge"]), sorted(values["plugin"]), sorted(values["skill"])
+
+
+def _sanitize_pipeline_stage(stage: dict[str, Any], index: int) -> dict[str, Any]:
+    allowed = {"classifier", "condition", "capability_filter", "health_filter", "cost_latency_score", "load_balance", "route", "retry", "fallback", "approval"}
+    kind = str(stage.get("type", "")).strip()
+    if kind not in allowed:
+        raise ValueError(f"unsupported pipeline stage type: {kind or '<empty>'}")
+    result = {
+        k: v
+        for k, v in stage.items()
+        if k in {"id", "type", "when", "candidates", "profile", "retries", "fallback", "strategy", "weights", "require", "approve", "labels", "default", "decision"}
+    }
+    result["id"] = str(result.get("id") or f"{kind}_{index + 1}")[:80]
+    result["type"] = kind
+    return result
+
+
 def _validate_pipeline_definition(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict): raise ValueError("pipeline definition must be an object")
+    if not isinstance(value, dict):
+        raise ValueError("pipeline definition must be an object")
+    description = str(value.get("description", ""))[:2000]
+
+    if "graph" in value:
+        graph = normalize_graph(value.get("graph"), studio="router", max_nodes=100, max_edges=200)
+        plan = router_graph_plan(graph)
+        nodes = {node["id"]: node for node in graph["nodes"]}
+        stages: list[dict[str, Any]] = []
+        for index, node_id in enumerate(plan["order"]):
+            node = nodes[node_id]
+            config = node.get("config") if isinstance(node.get("config"), dict) else {}
+            stage = {"id": node_id, "type": node["type"]}
+            stage.update({k: v for k, v in config.items() if k != "ui"})
+            stages.append(_sanitize_pipeline_stage(stage, index))
+        return {
+            "stages": stages,
+            "graph": graph,
+            "entry": plan["entry"],
+            "transitions": plan["transitions"],
+            "version": 3,
+            "description": description,
+        }
+
     stages = value.get("stages", [])
-    if not isinstance(stages, list) or len(stages) > 100: raise ValueError("pipeline stages must be a list with at most 100 entries")
-    allowed = {"condition", "capability_filter", "health_filter", "cost_latency_score", "load_balance", "route", "retry", "fallback", "approval"}
-    normalized=[]
+    if not isinstance(stages, list) or len(stages) > 100:
+        raise ValueError("pipeline stages must be a list with at most 100 entries")
+    normalized = []
     for index, stage in enumerate(stages):
-        if not isinstance(stage, dict): raise ValueError(f"pipeline stage {index} must be an object")
-        kind=str(stage.get("type", "")).strip()
-        if kind not in allowed: raise ValueError(f"unsupported pipeline stage type: {kind or '<empty>'}")
-        normalized.append({k:v for k,v in stage.items() if k in {"id","type","when","candidates","profile","retries","fallback","strategy","weights","require","approve"}})
-    return {"stages": normalized, "version": 1, "description": str(value.get("description", ""))[:2000]}
+        if not isinstance(stage, dict):
+            raise ValueError(f"pipeline stage {index} must be an object")
+        normalized.append(_sanitize_pipeline_stage(stage, index))
+    return {"stages": normalized, "version": 1, "description": description}
 
 
 def _validate_workflow_graph(value: Any) -> dict[str, Any]:
