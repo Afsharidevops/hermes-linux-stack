@@ -27,6 +27,7 @@ manage = (root / "manage.sh").read_text(encoding="utf-8")
 
 assert "  hermes-init:\n" in compose
 assert "- ./data/hermes/logs:/logs" in compose
+assert "touch /logs/agent.log /logs/errors.log" in compose
 assert "condition: service_completed_successfully" in compose
 assert "compose up -d --force-recreate hermes" in manage
 assert "compose up -d --no-deps --force-recreate hermes" not in manage
