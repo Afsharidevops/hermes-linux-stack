@@ -185,12 +185,44 @@ services:
       retries: 5
       start_period: 10s
 
+  # Repairs ownership of the Hermes logs subtree before the gateway starts.
+  # On a warm volume, the upstream image's own UID-remap chown is skipped
+  # whenever the top-level data directory already belongs to the Hermes uid,
+  # so any previously root-created log files (e.g. from a manual `docker exec`
+  # run as root) stay root-owned forever and crash the gateway with
+  # PermissionError on every subsequent start. This stays scoped to
+  # data/hermes/logs only; it never touches the rest of the Hermes data mount.
+  hermes-init:
+    profiles: ["hermes"]
+    image: alpine:3.22
+    container_name: hermes-init
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        find /logs -type d -exec chown "${HERMES_UID:-10000}:${HERMES_GID:-10000}" {} +
+        find /logs -type f -exec chown "${HERMES_UID:-10000}:${HERMES_GID:-10000}" {} +
+        find /logs -type d -exec chmod 0700 {} +
+        find /logs -type f -exec chmod 0600 {} +
+    volumes:
+      - ./data/hermes/logs:/logs
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+    security_opt:
+      - no-new-privileges:true
+    networks: [agent-net]
+
   hermes:
     profiles: ["hermes"]
     image: ${HERMES_IMAGE_REPOSITORY:-nousresearch/hermes-agent}:${HERMES_IMAGE_TAG:-latest}
     container_name: hermes-agent
     restart: unless-stopped
     command: gateway run
+    depends_on:
+      hermes-init:
+        condition: service_completed_successfully
     shm_size: "1gb"
     ports:
       - "${HERMES_BIND_IP:-127.0.0.1}:${HERMES_API_PORT:-8642}:8642"

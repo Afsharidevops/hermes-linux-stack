@@ -39,6 +39,9 @@ Common direct commands:
   status                      Show container status
   health [--json]             Show per-service health
   logs [SERVICE]              Follow logs (hermes/9router/smart-router/webui/n8n/caddy)
+  doctor                      Run diagnostics and hardening checks
+  migrate-hermes-permissions [--dry-run]
+                              Repair Hermes log ownership/mode under data/hermes/logs
   configure                   Re-run the interactive installer
   uninstall [--purge]         Remove containers; --purge also removes local runtime data
 
@@ -82,7 +85,10 @@ esac
   exit 1
 }
 
-if docker info >/dev/null 2>&1; then
+if [[ "${1:-}" == migrate-hermes-permissions ]]; then
+  # This host-side recovery must remain usable while Docker or Hermes is down.
+  DOCKER=(docker)
+elif docker info >/dev/null 2>&1; then
   DOCKER=(docker)
 elif command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
   DOCKER=(sudo docker)
@@ -715,7 +721,129 @@ PY
 }
 
 restart_hermes() {
-  compose up -d --no-deps --force-recreate hermes
+  compose up -d --force-recreate hermes
+}
+
+hermes_uid_gid() {
+  local uid gid
+  uid="$(env_value "$ENV_FILE" HERMES_UID)"
+  gid="$(env_value "$ENV_FILE" HERMES_GID)"
+  uid="${uid:-10000}"
+  gid="${gid:-10000}"
+  [[ "$uid" =~ ^[1-9][0-9]*$ ]] || {
+    printf 'HERMES_UID must be a non-root numeric uid in %s.\n' "$ENV_FILE" >&2
+    return 1
+  }
+  [[ "$gid" =~ ^[1-9][0-9]*$ ]] || {
+    printf 'HERMES_GID must be a non-root numeric gid in %s.\n' "$ENV_FILE" >&2
+    return 1
+  }
+  printf '%s:%s' "$uid" "$gid"
+}
+
+hermes_permission_error() {
+  printf 'Could not repair data/hermes/logs for the Hermes gateway uid.\n' >&2
+  if [[ "$(id -u)" != 0 ]]; then
+    printf 'Rerun with: sudo ./manage.sh migrate-hermes-permissions\n' >&2
+  fi
+  return 1
+}
+
+migrate_hermes_permissions() {
+  local dry_run="$1" logs_dir desired uid gid changed=false path owner mode target_mode label
+  logs_dir="$ROOT_DIR/data/hermes/logs"
+  desired="$(hermes_uid_gid)" || return 1
+  uid="${desired%%:*}"
+  gid="${desired##*:}"
+
+  if [[ -L "$logs_dir" ]]; then
+    printf 'Refusing unsafe Hermes logs symlink: %s\n' "$logs_dir" >&2
+    return 1
+  fi
+
+  if [[ ! -d "$logs_dir" ]]; then
+    if [[ "$dry_run" == true ]]; then
+      printf '[dry-run] would create %s with owner %s and mode 0700\n' "$logs_dir" "$desired"
+      return 0
+    fi
+    install -d -m 0700 "$logs_dir" || hermes_permission_error
+    chown "$uid:$gid" "$logs_dir" || hermes_permission_error
+    changed=true
+  fi
+
+  while IFS= read -r -d '' path; do
+    if [[ -d "$path" ]]; then
+      target_mode=700
+      label=directory
+    else
+      target_mode=600
+      label=file
+    fi
+    owner="$(stat -c '%u:%g' "$path")"
+    mode="$(stat -c '%a' "$path")"
+    if [[ "$owner" != "$desired" ]]; then
+      if [[ "$dry_run" == true ]]; then
+        printf '[dry-run] would chown %s to %s (current %s)\n' "${path#$ROOT_DIR/}" "$desired" "$owner"
+      else
+        chown "$uid:$gid" "$path" || hermes_permission_error
+        changed=true
+      fi
+    fi
+    if [[ "$mode" != "$target_mode" ]]; then
+      if [[ "$dry_run" == true ]]; then
+        printf '[dry-run] would chmod %s %s to 0%s (current %s)\n' \
+          "$label" "${path#$ROOT_DIR/}" "$target_mode" "$mode"
+      else
+        chmod "$target_mode" "$path" || hermes_permission_error
+        changed=true
+      fi
+    fi
+  done < <(find "$logs_dir" \( -type d -o -type f \) -print0)
+
+  if [[ "$dry_run" == true ]]; then
+    printf '[dry-run] checked %s for owner %s and restrictive modes\n' "$logs_dir" "$desired"
+  elif [[ "$changed" == true ]]; then
+    printf 'Hermes log permissions repaired under %s (owner %s, directories 0700, files 0600).\n' \
+      "$logs_dir" "$desired"
+  else
+    printf 'Hermes log permissions already correct under %s.\n' "$logs_dir"
+  fi
+}
+
+check_hermes_log_permissions() {
+  local logs_dir="$ROOT_DIR/data/hermes/logs" desired issue_count=0 path owner mode expected_mode
+  desired="$(hermes_uid_gid)" || return 1
+
+  if [[ -L "$logs_dir" ]]; then
+    printf 'WARNING: data/hermes/logs is an unsafe symlink. Replace it with a directory.\n'
+    return 0
+  fi
+  if [[ ! -e "$logs_dir" ]]; then
+    printf 'Hermes logs: not created yet (hermes-init will prepare it on startup)\n'
+    return 0
+  fi
+  if [[ ! -d "$logs_dir" ]]; then
+    printf 'WARNING: data/hermes/logs is not a directory.\n'
+    printf '         Remove or relocate it, then run ./manage.sh migrate-hermes-permissions.\n'
+    return 0
+  fi
+
+  while IFS= read -r -d '' path; do
+    if [[ -d "$path" ]]; then expected_mode=700; else expected_mode=600; fi
+    owner="$(stat -c '%u:%g' "$path")"
+    mode="$(stat -c '%a' "$path")"
+    if [[ "$owner" != "$desired" || "$mode" != "$expected_mode" ]]; then
+      printf 'WARNING: %s has owner/mode %s/%s; expected %s/%s.\n' \
+        "${path#$ROOT_DIR/}" "$owner" "$mode" "$desired" "$expected_mode"
+      issue_count=$((issue_count + 1))
+    fi
+  done < <(find "$logs_dir" \( -type d -o -type f \) -print0)
+
+  if (( issue_count > 0 )); then
+    printf '         Run ./manage.sh migrate-hermes-permissions to repair data/hermes/logs.\n'
+  else
+    printf 'Hermes logs: owner/mode is compatible with Hermes gateway uid %s\n' "$desired"
+  fi
 }
 
 # agent.max_turns in config.yaml is authoritative: the gateway bridges it into
@@ -1531,6 +1659,15 @@ case "$command" in
       *) printf 'Choose hermes, 9router, smart-router, webui, n8n, or caddy.\n' >&2; exit 2 ;;
     esac
     ;;
+  migrate-hermes-permissions)
+    shift
+    case "$#:${1:-}" in
+      0:) dry_run=false ;;
+      1:--dry-run) dry_run=true ;;
+      *) printf 'Usage: ./manage.sh migrate-hermes-permissions [--dry-run]\n' >&2; exit 2 ;;
+    esac
+    migrate_hermes_permissions "$dry_run"
+    ;;
   doctor)
     compose config --quiet
     printf 'Compose configuration: valid\n'
@@ -1544,6 +1681,7 @@ case "$command" in
     if [[ "$profiles" == *hermes* ]]; then
       check_hermes_file "$ROOT_DIR/data/hermes/config.yaml" "Hermes config"
       check_hermes_file "$HERMES_ENV" "Hermes secret file"
+      check_hermes_log_permissions
       if compose exec -T hermes sh -c \
         'test -f /opt/data/plugins/stack-package-policy/plugin.yaml && test ! -w /opt/data/plugins/stack-package-policy/plugin.yaml' \
         >/dev/null 2>&1; then

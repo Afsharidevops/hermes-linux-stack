@@ -683,7 +683,10 @@ openwebui_api_url="$(existing_env_value OPENWEBUI_OPENAI_BASE_URL)"; openwebui_a
 openwebui_api_key="$(existing_env_value OPENWEBUI_OPENAI_API_KEY)"; openwebui_api_key="${openwebui_api_key:-local-no-auth}"
 openwebui_signup="$(existing_env_value OPENWEBUI_ENABLE_SIGNUP)"; openwebui_signup="${openwebui_signup:-true}"
 
-hermes_bind="$(existing_env_value HERMES_BIND_IP)"; hermes_bind="${hermes_bind:-${lan_ip:-127.0.0.1}}"
+# The built-in Hermes dashboard has no username/password setting. New installs
+# therefore default the shared API/dashboard publication to loopback; upgrades
+# preserve the operator's existing bind address.
+hermes_bind="$(existing_env_value HERMES_BIND_IP)"; hermes_bind="${hermes_bind:-127.0.0.1}"
 hermes_api_port="$(existing_env_value HERMES_API_PORT)"; hermes_api_port="${hermes_api_port:-8642}"
 hermes_dashboard_port="$(existing_env_value HERMES_DASHBOARD_PORT)"; hermes_dashboard_port="${hermes_dashboard_port:-9119}"
 hermes_dashboard="$(existing_env_value HERMES_DASHBOARD)"; hermes_dashboard="${hermes_dashboard:-0}"
@@ -976,10 +979,18 @@ if [[ "$configure_hermes" == true ]]; then
     telegram_home="$(prompt_optional_integer "Optional Telegram home chat ID for cron results (Enter to skip)")"
   fi
 
-  if confirm "Enable the Hermes web dashboard?" n; then
+  dashboard_default=n
+  [[ "$hermes_dashboard" == 1 ]] && dashboard_default=y
+  if confirm "Enable the built-in Hermes dashboard (no username/password; localhost recommended)?" "$dashboard_default"; then
     hermes_dashboard="1"
-    hermes_dashboard_port="$(prompt_port "Hermes dashboard port" "9119")"
-    warn "The dashboard binds to localhost by default. Use an authenticated HTTPS reverse proxy for public access."
+    hermes_dashboard_port="$(prompt_port "Hermes dashboard port" "$hermes_dashboard_port")"
+    if [[ "$hermes_bind" == 127.0.0.1 ]]; then
+      info "The Hermes dashboard will be localhost-only. From another machine, use: ssh -L ${hermes_dashboard_port}:127.0.0.1:${hermes_dashboard_port} USER@SERVER"
+    else
+      warn "The built-in Hermes dashboard has no username/password. Do not expose it directly; use firewall restrictions and a reverse proxy that adds authentication."
+    fi
+  else
+    hermes_dashboard="0"
   fi
 
   if confirm "Enable the Hermes OpenAI-compatible API?" n; then
@@ -1194,7 +1205,9 @@ for line in lines:
     raw=v.strip().strip('"')
     if k.endswith('_FILE'):
         out.append(line); continue
-    if raw.startswith('CHANGE_ME') or (k in force and not raw):
+    if k == 'SMART_ROUTER_BOOTSTRAP_ADMIN_USER' and raw == 'admin':
+        v=secrets.token_urlsafe(16).replace('-','_').replace('_','')[:20]
+    elif raw.startswith('CHANGE_ME') or (k in force and not raw):
         n=24 if k.endswith('INITIAL_PASSWORD') or k.endswith('ADMIN_PASSWORD') else 48
         v=secrets.token_urlsafe(n)
     out.append(f'{k}={v}')
@@ -1643,7 +1656,16 @@ fi
 if [[ "$install_hermes" == true && -n "$telegram_token" ]]; then
   printf '%s\n' 'Telegram: open your bot and send /start'
 fi
-[[ "$hermes_dashboard" == 1 ]] && printf 'Hermes dashboard: http://%s:%s\n' "$hermes_bind" "$hermes_dashboard_port"
+if [[ "$hermes_dashboard" == 1 ]]; then
+  printf 'Hermes dashboard: http://%s:%s\n' "$(service_url_host "$hermes_bind")" "$hermes_dashboard_port"
+  printf '%s\n' 'Hermes dashboard authentication: none (this is not the Smart Router Operations Center login).'
+  if [[ "$hermes_bind" == 127.0.0.1 ]]; then
+    printf 'Remote access tunnel: ssh -L %s:127.0.0.1:%s USER@SERVER\n' \
+      "$hermes_dashboard_port" "$hermes_dashboard_port"
+  else
+    warn "The Hermes dashboard is not loopback-only and has no built-in login. Restrict access before using it."
+  fi
+fi
 [[ "$configure_hermes" == true && "$api_enabled" == true ]] && printf 'Hermes API key (save now): %s\n' "$api_key"
 if [[ "$install_webui" == true ]]; then
   printf 'Open WebUI: %s\n' "$openwebui_url"
