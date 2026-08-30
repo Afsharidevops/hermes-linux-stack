@@ -7,6 +7,7 @@ HERMES_ENV="$ROOT_DIR/data/hermes/.env"
 STACK_SECRETS_DIR="$ROOT_DIR/data/stack-secrets"
 N8N_BOOTSTRAP_ENV="$STACK_SECRETS_DIR/n8n-bootstrap.env"
 N8N_BOOTSTRAP_STATE="$STACK_SECRETS_DIR/n8n-bootstrap-state.json"
+HERMES_DASHBOARD_ACCESS_FILE="$STACK_SECRETS_DIR/hermes-dashboard-access.env"
 TEMP_SECRET_FILES=()
 
 cleanup_temp_secrets() {
@@ -42,6 +43,8 @@ Common direct commands:
   doctor                      Run diagnostics and hardening checks
   migrate-hermes-permissions [--dry-run]
                               Repair Hermes log ownership/mode under data/hermes/logs
+  dashboard-access [--show-password]
+                              Hermes dashboard URL, username and optional password
   configure                   Re-run the interactive installer
   uninstall [--purge]         Remove containers; --purge also removes local runtime data
 
@@ -365,6 +368,9 @@ hermes_menu() {
     printf '%s\n' '  5) Show allowed users'
     printf '%s\n' '  6) Add allowed user'
     printf '%s\n' '  7) Replace allowed users'
+    printf '%s\n' 'Dashboard'
+    printf '%s\n' '  8) Show dashboard access      URL and username'
+    printf '%s\n' '  9) Reveal dashboard password Trusted terminal confirmation required'
     printf '%s\n' '0) Back'
     read -r -p 'Choose [0]: ' choice
     case "${choice:-0}" in
@@ -384,6 +390,8 @@ hermes_menu() {
       5) "$ROOT_DIR/manage.sh" show-telegram-users; menu_pause ;;
       6) read -r -p 'Numeric Telegram user ID: ' value; "$ROOT_DIR/manage.sh" add-telegram-user "$value"; menu_pause ;;
       7) read -r -p 'Complete comma-separated ID list: ' value; "$ROOT_DIR/manage.sh" set-telegram-users "$value"; menu_pause ;;
+      8) "$ROOT_DIR/manage.sh" dashboard-access; menu_pause ;;
+      9) "$ROOT_DIR/manage.sh" dashboard-access --show-password; menu_pause ;;
       0) return 0 ;;
       *) printf 'Unknown Hermes choice.\n' >&2 ;;
     esac
@@ -724,6 +732,52 @@ restart_hermes() {
   compose up -d --force-recreate hermes
 }
 
+hermes_dashboard_url() {
+  local bind port
+  bind="$(env_value "$ENV_FILE" HERMES_BIND_IP)"; bind="${bind:-127.0.0.1}"
+  port="$(env_value "$ENV_FILE" HERMES_DASHBOARD_PORT)"; port="${port:-9119}"
+  [[ "$bind" != 0.0.0.0 ]] || bind=127.0.0.1
+  printf 'http://%s:%s' "$bind" "$port"
+}
+
+hermes_dashboard_access() {
+  local show_password="${1:-}" enabled username password answer mode
+  [[ -z "$show_password" || "$show_password" == --show-password ]] || {
+    printf 'Usage: ./manage.sh dashboard-access [--show-password]\n' >&2
+    return 2
+  }
+  enabled="$(env_value "$ENV_FILE" HERMES_DASHBOARD)"
+  [[ "$enabled" == 1 ]] || {
+    printf 'Hermes dashboard is disabled. Run ./manage.sh configure to enable it.\n' >&2
+    return 1
+  }
+  username="$(env_value "$ENV_FILE" HERMES_DASHBOARD_BASIC_AUTH_USERNAME)"
+  printf 'Dashboard: %s\n' "$(hermes_dashboard_url)"
+  printf 'Username:  %s\n' "${username:-NOT CONFIGURED}"
+  if [[ -z "$show_password" ]]; then
+    printf 'Use ./manage.sh dashboard-access --show-password only on a trusted terminal.\n'
+    return 0
+  fi
+  [[ -r /dev/tty && -w /dev/tty ]] || {
+    printf 'A controlling terminal is required to reveal the dashboard password.\n' >&2
+    return 1
+  }
+  [[ -f "$HERMES_DASHBOARD_ACCESS_FILE" && ! -L "$HERMES_DASHBOARD_ACCESS_FILE" ]] || {
+    printf 'Dashboard credential file is missing or unsafe; reconfigure Hermes to rotate credentials.\n' >&2
+    return 1
+  }
+  mode="$(stat -c '%a' "$HERMES_DASHBOARD_ACCESS_FILE")"
+  [[ "$mode" == 600 ]] || {
+    printf 'Refusing to read dashboard credentials with unsafe mode %s; expected 600.\n' "$mode" >&2
+    return 1
+  }
+  read -r -p 'Reveal the Hermes dashboard password on this terminal? [y/N]: ' answer </dev/tty
+  [[ "$answer" =~ ^[Yy]$ ]] || { printf 'Password not shown.\n'; return 0; }
+  password="$(env_value "$HERMES_DASHBOARD_ACCESS_FILE" HERMES_DASHBOARD_PASSWORD)"
+  [[ -n "$password" ]] || { printf 'Dashboard password is missing; reconfigure Hermes to rotate credentials.\n' >&2; return 1; }
+  printf 'Password:  %s\n' "$password"
+}
+
 hermes_uid_gid() {
   local uid gid
   uid="$(env_value "$ENV_FILE" HERMES_UID)"
@@ -984,7 +1038,9 @@ env_value() {
     return 1
   fi
   value="$(sed -n "s/^${key}=//p" "$file")"
-  value="${value#\"}"; value="${value%\"}"
+  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
   printf '%s' "$value"
 }
 
@@ -1659,6 +1715,10 @@ case "$command" in
       *) printf 'Choose hermes, 9router, smart-router, webui, n8n, or caddy.\n' >&2; exit 2 ;;
     esac
     ;;
+  dashboard-access)
+    shift
+    hermes_dashboard_access "${1:-}"
+    ;;
   migrate-hermes-permissions)
     shift
     case "$#:${1:-}" in
@@ -1699,6 +1759,23 @@ case "$command" in
       fi
       if [[ -n "$configured_turns" && -n "$effective_turns" && "$configured_turns" != "$effective_turns" ]]; then
         printf 'WARNING: the running gateway budget does not match config.yaml; recreate Hermes.\n'
+      fi
+      dashboard_enabled="$(env_value "$ENV_FILE" HERMES_DASHBOARD)"
+      if [[ "$dashboard_enabled" == 1 ]]; then
+        dashboard_user="$(env_value "$ENV_FILE" HERMES_DASHBOARD_BASIC_AUTH_USERNAME)"
+        dashboard_hash="$(env_value "$ENV_FILE" HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH)"
+        dashboard_secret="$(env_value "$ENV_FILE" HERMES_DASHBOARD_BASIC_AUTH_SECRET)"
+        if [[ -z "$dashboard_user" || -z "$dashboard_hash" || -z "$dashboard_secret" ]]; then
+          printf 'WARNING: HERMES_DASHBOARD is enabled but Basic Auth credentials are incomplete. The gateway refuses to bind a non-loopback dashboard without an auth provider. Run ./manage.sh configure to provision credentials.\n'
+        else
+          printf 'Hermes dashboard: Basic Auth configured (user %s)\n' "$dashboard_user"
+        fi
+        if [[ -f "$HERMES_DASHBOARD_ACCESS_FILE" ]]; then
+          dashboard_access_mode="$(stat -c '%a' "$HERMES_DASHBOARD_ACCESS_FILE")"
+          [[ "$dashboard_access_mode" == 600 ]] || printf 'WARNING: expected %s mode 600, found %s\n' "$HERMES_DASHBOARD_ACCESS_FILE" "$dashboard_access_mode"
+        elif [[ -n "$dashboard_user" ]]; then
+          printf 'WARNING: %s is missing; dashboard-access --show-password will not work until Hermes is reconfigured.\n' "$HERMES_DASHBOARD_ACCESS_FILE"
+        fi
       fi
       if grep -q '^[[:space:]]*- stack-package-policy[[:space:]]*$' "$ROOT_DIR/data/hermes/config.yaml"; then
         printf 'Hermes package policy plugin: enabled in config\n'

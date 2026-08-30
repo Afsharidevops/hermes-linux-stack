@@ -30,9 +30,16 @@ assert "- ./data/hermes/logs:/logs" in compose
 assert "condition: service_completed_successfully" in compose
 assert "compose up -d --force-recreate hermes" in manage
 assert "compose up -d --no-deps --force-recreate hermes" not in manage
-assert "built-in Hermes dashboard (no username/password; localhost recommended)" in install
-assert "Hermes dashboard authentication: none" in install
-assert "ssh -L %s:127.0.0.1:%s USER@SERVER" in install
+assert "Enable the built-in Hermes dashboard with generated username/password authentication?" in install
+assert "Hermes dashboard username:" in install
+assert "Hermes dashboard password" in install
+assert "./manage.sh dashboard-access" in install
+assert "Basic Auth" in install
+assert "ssh -L" in install
+assert "hash_hermes_dashboard_password()" in install
+assert "dotenv_literal_quote()" in install
+assert "dashboard-access)" in manage
+assert "hermes_dashboard_access()" in manage
 PY
 if (( $? == 0 )); then
   ok "compose lifecycle and dashboard access model"
@@ -94,6 +101,19 @@ elif grep -q 'Refusing unsafe Hermes logs symlink' "$TMP/symlink.out"; then
   ok "migration rejects a symlinked logs root"
 else
   not_ok "migration rejects a symlinked logs root"
+fi
+
+# Test doctor check for incomplete dashboard auth
+rm -rf "$FIX"
+mkdir -p "$FIX/data/hermes/logs"
+printf '%s\n' 'COMPOSE_PROFILES=hermes' 'HERMES_DASHBOARD=1' > "$FIX/.env"
+cp "$SOURCE_ROOT/manage.sh" "$FIX/manage.sh"
+chmod +x "$FIX/manage.sh"
+if doctor_out="$("$FIX/manage.sh" doctor 2>&1)" \
+  && grep -q 'HERMES_DASHBOARD is enabled but Basic Auth credentials are incomplete' <<<"$doctor_out"; then
+  ok "doctor warns about incomplete dashboard auth"
+else
+  not_ok "doctor warns about incomplete dashboard auth"
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

@@ -46,6 +46,7 @@ OPENWEBUI_DIR="$ROOT_DIR/data/open-webui"
 SMART_ROUTER_DIR="$ROOT_DIR/data/smart-router"
 N8N_DIR="$ROOT_DIR/data/n8n"
 CADDY_DIR="$ROOT_DIR/data/caddy"
+HERMES_DASHBOARD_ACCESS_FILE="$ROOT_DIR/data/stack-secrets/hermes-dashboard-access.env"
 DRY_RUN=false
 NO_START=false
 
@@ -106,12 +107,31 @@ random_hex() {
   fi
 }
 
+hash_hermes_dashboard_password() {
+  python3 -c '
+import base64, hashlib, secrets, sys
+password = sys.stdin.read().encode()
+salt = secrets.token_bytes(16)
+digest = hashlib.scrypt(password, salt=salt, n=2**14, r=8, p=1, dklen=32, maxmem=0)
+print("scrypt$16384$8$1$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(digest).decode())
+'
+}
+
 dotenv_quote() {
   local value="$1"
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
   value="${value//\$/\$\$}"
   printf '"%s"' "$value"
+}
+
+# Compose treats single-quoted .env values literally. The dashboard scrypt hash
+# contains dollar separators, so this avoids interpolation without multiplying
+# escapes every time the installer preserves an existing hash.
+dotenv_literal_quote() {
+  local value="$1"
+  [[ "$value" != *"'"* ]] || die "A literal .env value contains an unsupported single quote."
+  printf "'%s'" "$value"
 }
 
 yaml_quote() {
@@ -447,8 +467,9 @@ read_unique_env_value() {
   count="$(grep -c "^${key}=" "$file" || true)"
   (( count <= 1 )) || die "Duplicate ${key} entries in ${file#$ROOT_DIR/} are unsafe; restore the backup and keep one value."
   value="$(sed -n "s/^${key}=//p" "$file")"
-  value="${value#\"}"
-  value="${value%\"}"
+  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
   printf '%s' "$value"
 }
 
@@ -683,13 +704,21 @@ openwebui_api_url="$(existing_env_value OPENWEBUI_OPENAI_BASE_URL)"; openwebui_a
 openwebui_api_key="$(existing_env_value OPENWEBUI_OPENAI_API_KEY)"; openwebui_api_key="${openwebui_api_key:-local-no-auth}"
 openwebui_signup="$(existing_env_value OPENWEBUI_ENABLE_SIGNUP)"; openwebui_signup="${openwebui_signup:-true}"
 
-# The built-in Hermes dashboard has no username/password setting. New installs
-# therefore default the shared API/dashboard publication to loopback; upgrades
-# preserve the operator's existing bind address.
+# The current Hermes image requires an auth provider for non-loopback dashboard
+# binds. The installer always provisions Basic Auth when the dashboard is enabled,
+# so the same configuration works safely on localhost, a trusted LAN, or Caddy.
 hermes_bind="$(existing_env_value HERMES_BIND_IP)"; hermes_bind="${hermes_bind:-127.0.0.1}"
 hermes_api_port="$(existing_env_value HERMES_API_PORT)"; hermes_api_port="${hermes_api_port:-8642}"
 hermes_dashboard_port="$(existing_env_value HERMES_DASHBOARD_PORT)"; hermes_dashboard_port="${hermes_dashboard_port:-9119}"
 hermes_dashboard="$(existing_env_value HERMES_DASHBOARD)"; hermes_dashboard="${hermes_dashboard:-0}"
+hermes_dashboard_username="$(existing_env_value HERMES_DASHBOARD_BASIC_AUTH_USERNAME)"
+hermes_dashboard_password_hash="$(existing_env_value HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH)"
+hermes_dashboard_secret="$(existing_env_value HERMES_DASHBOARD_BASIC_AUTH_SECRET)"
+hermes_dashboard_password=""
+hermes_dashboard_credentials_created=false
+if [[ -f "$HERMES_DASHBOARD_ACCESS_FILE" ]]; then
+  hermes_dashboard_password="$(read_unique_env_value "$HERMES_DASHBOARD_ACCESS_FILE" HERMES_DASHBOARD_PASSWORD)"
+fi
 provider_name="9router"
 provider_url="http://nine-router:20128/v1"
 provider_key="local-no-auth"
@@ -981,13 +1010,24 @@ if [[ "$configure_hermes" == true ]]; then
 
   dashboard_default=n
   [[ "$hermes_dashboard" == 1 ]] && dashboard_default=y
-  if confirm "Enable the built-in Hermes dashboard (no username/password; localhost recommended)?" "$dashboard_default"; then
+  if confirm "Enable the built-in Hermes dashboard with generated username/password authentication?" "$dashboard_default"; then
     hermes_dashboard="1"
     hermes_dashboard_port="$(prompt_port "Hermes dashboard port" "$hermes_dashboard_port")"
-    if [[ "$hermes_bind" == 127.0.0.1 ]]; then
-      info "The Hermes dashboard will be localhost-only. From another machine, use: ssh -L ${hermes_dashboard_port}:127.0.0.1:${hermes_dashboard_port} USER@SERVER"
+    if [[ -n "$hermes_dashboard_username" && -n "$hermes_dashboard_password_hash" \
+      && -n "$hermes_dashboard_secret" && -n "$hermes_dashboard_password" ]]; then
+      info "Reusing the existing Hermes dashboard credentials."
     else
-      warn "The built-in Hermes dashboard has no username/password. Do not expose it directly; use firewall restrictions and a reverse proxy that adds authentication."
+      hermes_dashboard_username="hermes_$(random_hex 6)"
+      hermes_dashboard_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+      hermes_dashboard_secret="$(random_hex 32)"
+      hermes_dashboard_password_hash=""
+      hermes_dashboard_credentials_created=true
+      info "Generated a new Hermes dashboard username and password."
+    fi
+    if [[ "$hermes_bind" == 127.0.0.1 ]]; then
+      info "The dashboard will be localhost-only. From another machine, use: ssh -L ${hermes_dashboard_port}:127.0.0.1:${hermes_dashboard_port} USER@SERVER"
+    else
+      info "Hermes Basic Auth will protect the dashboard on ${hermes_bind}:${hermes_dashboard_port}."
     fi
   else
     hermes_dashboard="0"
@@ -1123,6 +1163,27 @@ else
   hermes_uid="$invoking_uid"
   hermes_gid="$invoking_gid"
 fi
+
+if [[ "$hermes_dashboard" == 1 ]]; then
+  [[ -n "$hermes_dashboard_username" && -n "$hermes_dashboard_password" \
+    && -n "$hermes_dashboard_secret" ]] \
+    || die "Hermes dashboard authentication is incomplete; reconfigure Hermes to provision credentials."
+  if [[ -z "$hermes_dashboard_password_hash" || "$hermes_dashboard_credentials_created" == true ]]; then
+    hermes_dashboard_password_hash="$(printf '%s' "$hermes_dashboard_password" | hash_hermes_dashboard_password)"
+  fi
+  [[ "$hermes_dashboard_password_hash" == scrypt\$* ]] \
+    || die "Hermes dashboard password hash is invalid; reconfigure Hermes to rotate credentials."
+
+  dashboard_access_tmp="$(mktemp "$ROOT_DIR/data/stack-secrets/hermes-dashboard-access.env.tmp.XXXXXX")"
+  {
+    printf 'HERMES_DASHBOARD_USERNAME=%s\n' "$(dotenv_quote "$hermes_dashboard_username")"
+    printf 'HERMES_DASHBOARD_PASSWORD=%s\n' "$(dotenv_quote "$hermes_dashboard_password")"
+  } > "$dashboard_access_tmp"
+  chmod 600 "$dashboard_access_tmp"
+  chown "$execution_owner_uid:$execution_owner_gid" "$dashboard_access_tmp"
+  mv "$dashboard_access_tmp" "$HERMES_DASHBOARD_ACCESS_FILE"
+fi
+
 tmp_env="$(mktemp "$ROOT_DIR/.env.tmp.XXXXXX")"
 if [[ -f "$ENV_FILE" ]]; then
   cp "$ENV_FILE" "$tmp_env"
@@ -1145,6 +1206,9 @@ replace_env_value "$tmp_env" HERMES_BIND_IP "$hermes_bind"
 replace_env_value "$tmp_env" HERMES_API_PORT "$hermes_api_port"
 replace_env_value "$tmp_env" HERMES_DASHBOARD_PORT "$hermes_dashboard_port"
 replace_env_value "$tmp_env" HERMES_DASHBOARD "$hermes_dashboard"
+replace_env_value "$tmp_env" HERMES_DASHBOARD_BASIC_AUTH_USERNAME "$(dotenv_quote "$hermes_dashboard_username")"
+replace_env_value "$tmp_env" HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH "$(dotenv_literal_quote "$hermes_dashboard_password_hash")"
+replace_env_value "$tmp_env" HERMES_DASHBOARD_BASIC_AUTH_SECRET "$(dotenv_quote "$hermes_dashboard_secret")"
 replace_env_value "$tmp_env" HERMES_UID "$hermes_uid"
 replace_env_value "$tmp_env" HERMES_GID "$hermes_gid"
 replace_env_value "$tmp_env" EXECUTION_FEATURES "$execution_features"
@@ -1658,12 +1722,18 @@ if [[ "$install_hermes" == true && -n "$telegram_token" ]]; then
 fi
 if [[ "$hermes_dashboard" == 1 ]]; then
   printf 'Hermes dashboard: http://%s:%s\n' "$(service_url_host "$hermes_bind")" "$hermes_dashboard_port"
-  printf '%s\n' 'Hermes dashboard authentication: none (this is not the Smart Router Operations Center login).'
+  printf 'Hermes dashboard username: %s\n' "$hermes_dashboard_username"
+  if [[ "$hermes_dashboard_credentials_created" == true ]]; then
+    printf 'Hermes dashboard password (save now): %s\n' "$hermes_dashboard_password"
+  else
+    printf '%s\n' 'Hermes dashboard password: preserved (not printed again)'
+  fi
+  printf '%s\n' 'Later access: ./manage.sh dashboard-access (add --show-password on a trusted terminal)'
   if [[ "$hermes_bind" == 127.0.0.1 ]]; then
     printf 'Remote access tunnel: ssh -L %s:127.0.0.1:%s USER@SERVER\n' \
       "$hermes_dashboard_port" "$hermes_dashboard_port"
   else
-    warn "The Hermes dashboard is not loopback-only and has no built-in login. Restrict access before using it."
+    warn "Basic Auth protects the dashboard, but plain HTTP does not encrypt credentials. Prefer HTTPS through Caddy or restrict access to a trusted LAN."
   fi
 fi
 [[ "$configure_hermes" == true && "$api_enabled" == true ]] && printf 'Hermes API key (save now): %s\n' "$api_key"
