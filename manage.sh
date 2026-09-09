@@ -7,6 +7,7 @@ HERMES_ENV="$ROOT_DIR/data/hermes/.env"
 STACK_SECRETS_DIR="$ROOT_DIR/data/stack-secrets"
 N8N_BOOTSTRAP_ENV="$STACK_SECRETS_DIR/n8n-bootstrap.env"
 N8N_BOOTSTRAP_STATE="$STACK_SECRETS_DIR/n8n-bootstrap-state.json"
+OMNIROUTE_N8N_KEY_ENV="$STACK_SECRETS_DIR/omniroute-n8n-router.env"
 HERMES_DASHBOARD_ACCESS_FILE="$STACK_SECRETS_DIR/hermes-dashboard-access.env"
 TEMP_SECRET_FILES=()
 
@@ -39,7 +40,7 @@ Interactive groups:
 Common direct commands:
   status                      Show container status
   health [--json]             Show per-service health
-  logs [SERVICE]              Follow logs (hermes/9router/smart-router/webui/n8n/caddy)
+  logs [SERVICE]              Follow logs (hermes/9router/omniroute/smart-router/webui/n8n/caddy)
   doctor                      Run diagnostics and hardening checks
   migrate-hermes-permissions [--dry-run]
                               Repair Hermes log ownership/mode under data/hermes/logs
@@ -136,7 +137,7 @@ uninstall_stack() {
   if [[ "$purge" == true ]]; then
     rm -f -- "$ENV_FILE"
 
-    for dir in 9router caddy hermes n8n open-webui stack-secrets; do
+    for dir in 9router omniroute caddy hermes n8n open-webui stack-secrets; do
       if [[ -d "$ROOT_DIR/data/$dir" ]]; then
         find "$ROOT_DIR/data/$dir" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf -- {} +
       fi
@@ -268,7 +269,13 @@ services_menu() {
         case "${service:-1}" in
           1) "$ROOT_DIR/manage.sh" logs || true ;;
           2) "$ROOT_DIR/manage.sh" logs hermes || true ;;
-          3) "$ROOT_DIR/manage.sh" logs 9router || true ;;
+          3)
+            if [[ ",$(env_value "$ENV_FILE" COMPOSE_PROFILES)," == *,omniroute,* ]]; then
+              "$ROOT_DIR/manage.sh" logs omniroute || true
+            else
+              "$ROOT_DIR/manage.sh" logs 9router || true
+            fi
+            ;;
           4) "$ROOT_DIR/manage.sh" logs smart-router || true ;;
           5) "$ROOT_DIR/manage.sh" logs webui || true ;;
           6) "$ROOT_DIR/manage.sh" logs n8n || true ;;
@@ -1146,6 +1153,15 @@ require_profiles() {
   done
 }
 
+require_router_backend() {
+  local profiles
+  profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
+  if [[ ",$profiles," != *,9router,* && ",$profiles," != *,omniroute,* ]]; then
+    printf 'This command requires a router backend (9router or OmniRoute). Run ./manage.sh configure first.\n' >&2
+    exit 1
+  fi
+}
+
 random_hex() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex "${1:-32}"
@@ -1475,6 +1491,96 @@ n8n_instance_mcp_check() {
   return "$status"
 }
 
+write_omniroute_n8n_router_key() {
+  local key="$1" id="$2" tmp
+  ensure_stack_secrets_dir || return 1
+  tmp="$(mktemp "$STACK_SECRETS_DIR/omniroute-n8n-router.env.tmp.XXXXXX")"
+  TEMP_SECRET_FILES+=("$tmp")
+  chmod 600 "$tmp"
+  {
+    printf 'OMNIROUTE_N8N_API_KEY=%s\n' "$key"
+    printf 'OMNIROUTE_N8N_API_KEY_ID=%s\n' "$id"
+  } > "$tmp"
+  mv "$tmp" "$OMNIROUTE_N8N_KEY_ENV"
+  chmod 600 "$OMNIROUTE_N8N_KEY_ENV"
+}
+
+stored_omniroute_n8n_router_key() {
+  [[ -f "$OMNIROUTE_N8N_KEY_ENV" && ! -L "$OMNIROUTE_N8N_KEY_ENV" ]] || return 0
+  chmod 600 "$OMNIROUTE_N8N_KEY_ENV"
+  env_value "$OMNIROUTE_N8N_KEY_ENV" OMNIROUTE_N8N_API_KEY
+}
+
+validate_omniroute_n8n_router_key() {
+  local key="$1"
+  [[ -n "$key" ]] || return 1
+  if printf '%s' "$key" | compose exec -T omniroute node -e '
+    let key="";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", chunk => key += chunk);
+    process.stdin.on("end", async () => {
+      try {
+        const response = await fetch("http://127.0.0.1:20129/v1/models", {
+          headers: {Authorization: `Bearer ${key}`},
+          signal: AbortSignal.timeout(10000),
+        });
+        process.exit(response.ok ? 0 : 1);
+      } catch {
+        process.exit(1);
+      }
+    });'; then
+    return 0
+  fi
+  return 1
+}
+
+create_omniroute_n8n_router_key() {
+  local output key id
+  output="$(compose exec -T \
+    -e 'HERMES_N8N_SERVICE_KEY_NAME=n8n (content-manager stack)' \
+    omniroute node -e '
+      (async () => {
+        const managementKey = process.env.OMNIROUTE_API_KEY || "";
+        if (!managementKey) {
+          throw new Error("OMNIROUTE_API_KEY management bootstrap credential is missing");
+        }
+        const response = await fetch("http://127.0.0.1:20128/api/keys", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${managementKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({name: process.env.HERMES_N8N_SERVICE_KEY_NAME}),
+          signal: AbortSignal.timeout(15000),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.key || !data.id) {
+          throw new Error(`OmniRoute key provisioning returned HTTP ${response.status}`);
+        }
+        process.stdout.write(`OMNIROUTE_N8N_API_KEY=${data.key}\n`);
+        process.stdout.write(`OMNIROUTE_N8N_API_KEY_ID=${data.id}\n`);
+      })().catch(error => {
+        console.error(error.message);
+        process.exit(1);
+      });
+    ')" || {
+      printf '%s\n' \
+        'OmniRoute could not auto-provision the dedicated n8n API key.' \
+        'Ensure the current OmniRoute image supports management POST /api/keys and OMNIROUTE_MANAGEMENT_API_KEY is configured.' >&2
+      return 1
+    }
+
+  key="$(sed -n 's/^OMNIROUTE_N8N_API_KEY=//p' <<< "$output" | tail -n1)"
+  id="$(sed -n 's/^OMNIROUTE_N8N_API_KEY_ID=//p' <<< "$output" | tail -n1)"
+  [[ -n "$key" && -n "$id" ]] || {
+    printf 'OmniRoute did not return the dedicated n8n API key.\n' >&2
+    return 1
+  }
+
+  write_omniroute_n8n_router_key "$key" "$id" || return 1
+  printf '%s' "$key"
+}
+
 provision_n8n_router_key() {
   local profiles output key
   profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
@@ -1483,6 +1589,15 @@ provision_n8n_router_key() {
     [[ -n "$key" ]] || { printf 'SMART_ROUTER_CLIENT_API_KEY is missing.\n' >&2; return 1; }
     printf '%s' "$key"
     return 0
+  fi
+  if [[ ",$profiles," == *,omniroute,* ]]; then
+    key="$(stored_omniroute_n8n_router_key)"
+    if [[ -n "$key" ]] && validate_omniroute_n8n_router_key "$key"; then
+      printf '%s' "$key"
+      return 0
+    fi
+    create_omniroute_n8n_router_key
+    return $?
   fi
   output="$(compose exec -T -e PROVISION_HERMES=false -e PROVISION_OPENWEBUI=false \
     -e PROVISION_SMART_ROUTER=false -e PROVISION_N8N=true nine-router \
@@ -1506,6 +1621,9 @@ run_n8n_reconciler_with_token() {
   if [[ ",$profiles," == *,smart-router,* ]]; then
     router_base_url="http://smart-router:8080/v1"
     router_model="auto"
+  elif [[ ",$profiles," == *,omniroute,* ]]; then
+    router_base_url="http://omniroute:20129/v1"
+    router_model="auto/best-chat"
   else
     router_base_url="http://nine-router:20128/v1"
     router_model="ai"
@@ -1619,6 +1737,8 @@ run_n8n_verifier() {
   profiles="$(env_value "$ENV_FILE" COMPOSE_PROFILES)"
   if [[ ",$profiles," == *,smart-router,* ]]; then
     router_health_url="http://smart-router:8080/ready"
+  elif [[ ",$profiles," == *,omniroute,* ]]; then
+    router_health_url="http://omniroute:20128/api/monitoring/health"
   else
     router_health_url="http://nine-router:20128/api/health"
   fi
@@ -1708,11 +1828,12 @@ case "$command" in
       "") compose logs -f --tail=100 ;;
       hermes) compose logs -f --tail=100 hermes ;;
       9router|nine-router) compose logs -f --tail=100 nine-router ;;
+      omniroute|omni) compose logs -f --tail=100 omniroute ;;
       smart-router|router) compose logs -f --tail=100 smart-router ;;
       webui|open-webui) compose logs -f --tail=100 open-webui ;;
       n8n) compose logs -f --tail=100 n8n ;;
       caddy) compose logs -f --tail=100 caddy ;;
-      *) printf 'Choose hermes, 9router, smart-router, webui, n8n, or caddy.\n' >&2; exit 2 ;;
+      *) printf 'Choose hermes, 9router, omniroute, smart-router, webui, n8n, or caddy.\n' >&2; exit 2 ;;
     esac
     ;;
   dashboard-access)
@@ -2013,7 +2134,11 @@ for name, service in (data.get("services") or {}).items():
       exit 1
     }
     replace_env_value "$ENV_FILE" SMART_ROUTER_MODE "$mode"
-    compose up -d nine-router smart-router
+    if [[ ",$profiles," == *,omniroute,* ]]; then
+      compose up -d omniroute smart-router
+    else
+      compose up -d nine-router smart-router
+    fi
     ready=false
     for _ in {1..60}; do
       if compose exec -T smart-router python -c \
@@ -2113,7 +2238,7 @@ for name, service in (data.get("services") or {}).items():
     if [[ "$state" == enabled ]]; then
       printf 'Enabling upstream terminal and code_execution.\n'
       printf 'They run as the gateway uid inside hermes-agent, which owns /opt/data/.env:\n'
-      printf '  the Telegram bot token, 9router key, API server key, and n8n Instance token.\n'
+      printf '  the Telegram bot token, router backend key, API server key, and n8n Instance token.\n'
       printf 'Every call still passes the hardline floor and a manual approval prompt, but an\n'
       printf 'approved command can read those secrets, and prompt injection reaching the model\n'
       printf 'can request one. Rotating afterwards does not undo an exfiltration.\n'
@@ -2568,7 +2693,8 @@ PY
     printf 'n8n bootstrap API key validated and stored with mode 0600.\n'
     ;;
   set-n8n-instance-mcp-token)
-    require_profiles 9router hermes n8n
+    require_router_backend
+    require_profiles hermes n8n
     if [[ -n "${2:-}" ]]; then
       printf 'For safety, do not pass the Instance MCP token in argv. Run without an argument.\n' >&2
       exit 2
@@ -2641,7 +2767,8 @@ PY
     fi
     ;;
   set-n8n-mcp-mode)
-    require_profiles 9router hermes n8n
+    require_router_backend
+    require_profiles hermes n8n
     target_mode="${2:-}"
     [[ -z "${3:-}" && ( "$target_mode" == instance || "$target_mode" == trigger || "$target_mode" == off ) ]] || {
       printf 'Usage: ./manage.sh set-n8n-mcp-mode instance|trigger|off\n' >&2
@@ -2717,7 +2844,8 @@ PY
     fi
     ;;
   bootstrap-n8n|reconcile-n8n)
-    require_profiles 9router hermes n8n
+    require_router_backend
+    require_profiles hermes n8n
     run_n8n_reconciler
     restart_hermes
     "$ROOT_DIR/manage.sh" verify-n8n
@@ -2727,7 +2855,8 @@ PY
     run_n8n_verifier
     ;;
   rotate-n8n-trigger-token|rotate-n8n-token)
-    require_profiles 9router hermes n8n
+    require_router_backend
+    require_profiles hermes n8n
     [[ -f "$HERMES_ENV" ]] || { printf 'Hermes is not configured.\n' >&2; exit 1; }
     migrate_legacy_trigger_env
     old_token="$(env_value "$HERMES_ENV" N8N_TRIGGER_MCP_TOKEN)"
@@ -2779,17 +2908,31 @@ PY
     if [[ ",$profiles," == *,smart-router,* ]]; then
       replace_env_value "$ENV_FILE" SMART_ROUTER_UPSTREAM_API_KEY "$new_key"
       compose up -d --no-deps --force-recreate smart-router
-      printf '9router upstream API key updated for Smart Router.
-'
-    elif [[ "$profiles" == *hermes* && -f "$HERMES_ENV" ]]; then
-      replace_env_value "$HERMES_ENV" NINEROUTER_API_KEY "$new_key"
-      restart_hermes
-      printf 'Hermes direct 9router API key updated.
+      printf 'Router backend upstream API key updated for Smart Router.
 '
     else
-      printf 'Neither Smart Router nor Hermes direct backend is selected.
+      updated=false
+      if [[ ",$profiles," == *,hermes,* && -f "$HERMES_ENV" ]]; then
+        replace_env_value "$HERMES_ENV" NINEROUTER_API_KEY "$new_key"
+        [[ -n "$(env_value "$HERMES_ENV" NINEROUTER_KEY)" ]] \
+          && replace_env_value "$HERMES_ENV" NINEROUTER_KEY "$new_key"
+        updated=true
+      fi
+      if [[ ",$profiles," == *,open-webui,* ]]; then
+        replace_env_value "$ENV_FILE" OPENWEBUI_OPENAI_API_KEY "$new_key"
+        compose up -d --no-deps --force-recreate open-webui
+        updated=true
+      fi
+      if [[ "$updated" != true ]]; then
+        printf 'Neither Smart Router nor a direct backend consumer (Hermes/Open WebUI) is selected.
 ' >&2
-      exit 1
+        exit 1
+      fi
+      if [[ ",$profiles," == *,hermes,* && -f "$HERMES_ENV" ]]; then
+        restart_hermes
+      fi
+      printf 'Direct backend API key updated for local consumers.
+'
     fi
     ;;
   health) shift; ops health "$@" ;;

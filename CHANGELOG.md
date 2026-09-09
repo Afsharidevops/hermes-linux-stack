@@ -5,6 +5,25 @@ Older component-specific history remains in the component release-note files and
 
 The current runtime release is **v0.5.9**.
 
+## Hermes Linux Stack — selectable router backend (2026-09-09)
+
+- `install.sh` now asks on fresh installs whether to use the `9router` or the
+  `omniroute` backend profile and can switch an existing install between them
+  without losing data; the `hermes-omniroute-linux-stack` branch is obsolete.
+- Added the OmniRoute Compose service (dashboard on 20128, OpenAI-compatible
+  API on 20129, profile `omniroute`) and a backend-agnostic
+  `router-upstream-probe` one-shot that waits for the selected backend before
+  the Smart Router starts.
+- OmniRoute installs default the Smart Router route profiles, observe model,
+  n8n hosted-chat model, Hermes provider, and Open WebUI connection to the
+  `auto/best-*` aliases (`http://omniroute:20129/v1`); 9router installs keep
+  the `combo-*` defaults. Switching backends resets Smart Router upstream
+  URLs, route profiles, and stale upstream keys.
+- `manage.sh` n8n provisioning now creates, stores, and validates a dedicated
+  OmniRoute API key for the hosted-chat router credential; `set-router-mode`,
+  `set-backend-api-key`, `verify-n8n`, `reconcile-n8n`, and the n8n MCP
+  commands all work with either backend.
+
 ## Hermes Linux Stack — v0.5.9 Changelog — 2026-08-13
 
 ### v0.5.9 release focus

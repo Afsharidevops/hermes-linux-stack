@@ -1,12 +1,12 @@
-# Hermes Linux Stack — 9router + Smart Router v0.5.9
+# Hermes Linux Stack — 9router / OmniRoute + Smart Router v0.5.9
 
 > **v0.5.9 UX release:** this package includes the interactive v0.1-style install/management flow while keeping the v0.5.9 Smart Router and 9router architecture. Run `./install.sh`, use `./install.sh --dry-run` to preview, `./install.sh --no-start` to configure without starting containers, and `./manage.sh menu` for interactive management. n8n MCP provisioning/verification and token-management commands are available through `./manage.sh help`.
 
-A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.9** and **9router**.
+A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent**, **Open WebUI**, optional **n8n**, and secure execution tooling behind **Hermes Smart Router v0.5.9** and a selectable router backend (**9router** or **OmniRoute**).
 
-> This is the **9router branch**.
->
-> `main` must not contain OmniRoute runtime configuration.
+> **Router backend:** `./install.sh` installs either the `9router` or the
+> `omniroute` backend profile on `main`; the legacy
+> `hermes-omniroute-linux-stack` branch is obsolete.
 
 ## Project documentation
 
@@ -32,12 +32,12 @@ Hermes Agent ───────────────┐
 Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.9
                             │              │
 n8n / other clients ────────┘              │
-                                           ├─ fast     → combo-fast
-                                           ├─ standard → combo-standard
-                                           └─ strong   → combo-strong
+                                           ├─ fast     → backend tier default
+                                           ├─ standard → backend tier default
+                                           └─ strong   → backend tier default
                                                   │
                                                   ▼
-                                               9router
+                                       9router / OmniRoute
                                                   │
                                                   ▼
                                          Providers / Models
@@ -45,26 +45,11 @@ n8n / other clients ────────┘              │
 
 Telegram is handled by the Hermes gateway. It is not a separate Docker service: Hermes polls the Telegram Bot API and serves allowed Telegram users through the same agent/runtime used by the rest of the stack.
 
-## Branch policy
+## Router backend policy
 
-The repository intentionally keeps its routing backends separate.
-
-### `main`
-
-```text
-Hermes / Telegram / Open WebUI / n8n
-                  │
-                  ▼
-          Smart Router v0.5.9
-                  │
-                  ▼
-               9router
-                  │
-                  ▼
-              Providers
-```
-
-### `hermes-omniroute-linux-stack`
+`main` supports both router backends behind Compose profiles. Install chooses
+one backend, and the selected profile drives the Smart Router upstream, the
+route-profile aliases, and the Hermes/Open WebUI/n8n client connections.
 
 ```text
 Hermes / Telegram / Open WebUI / n8n
@@ -73,13 +58,22 @@ Hermes / Telegram / Open WebUI / n8n
           Smart Router v0.5.9
                   │
                   ▼
-              OmniRoute
+        9router / OmniRoute
                   │
                   ▼
               Providers
 ```
 
-Do not add OmniRoute to `main`, and do not add 9router to the OmniRoute branch.
+- `9router` (profile `9router`) is the single-port OpenAI-compatible gateway
+  on 20128 with automatic key provisioning.
+- `omniroute` (profile `omniroute`) exposes the dashboard on 20128 and its
+  OpenAI-compatible API on 20129.
+- `./install.sh` chooses one backend on fresh installs and can switch an
+  existing install between them without losing data; `COMPOSE_PROFILES`
+  records the selection. Hermes, Open WebUI, n8n, and the Smart Router behave
+  identically for both backends.
+- The legacy `hermes-omniroute-linux-stack` branch is obsolete; its OmniRoute
+  configuration now lives in `main` behind the `omniroute` profile.
 
 ---
 
@@ -336,7 +330,11 @@ Applications can simply request:
 }
 ```
 
-## Default 9router tier mappings
+## Default router-backend tier mappings
+
+The Smart Router route-profile defaults depend on the selected backend.
+
+9router (profile `9router`):
 
 ```env
 SMART_ROUTER_FAST_MODEL=combo-fast
@@ -344,7 +342,15 @@ SMART_ROUTER_STANDARD_MODEL=combo-standard
 SMART_ROUTER_STRONG_MODEL=combo-strong
 ```
 
-These mappings are intentionally different from the OmniRoute branch.
+OmniRoute (profile `omniroute`) uses its `auto/best-*` aliases instead:
+
+```env
+SMART_ROUTER_FAST_MODEL=auto/best-fast
+SMART_ROUTER_STANDARD_MODEL=auto/best-chat
+SMART_ROUTER_STRONG_MODEL=auto/best-reasoning
+SMART_ROUTER_CODING_MODEL=auto/best-coding
+SMART_ROUTER_VISION_MODEL=auto/best-vision
+```
 
 ## Routing modes
 
@@ -707,6 +713,7 @@ Important locations include:
 
 ```text
 data/9router/
+data/omniroute/
 data/hermes/
 data/open-webui/
 data/n8n/
@@ -870,28 +877,29 @@ OCI release digest:
 
 1. Telegram is a first-class Hermes interface.
 2. Smart Router decides request capability tier.
-3. 9router handles provider/model delivery.
+3. The selected router backend (9router or OmniRoute) handles provider/model delivery.
 4. No extra routing LLM call is required.
 5. Capability requirements override normal tier scoring.
 6. Explicit model requests stay explicit.
-7. Automatic routing uses `combo-fast`, `combo-standard`, and `combo-strong`.
+7. Automatic routing uses the selected backend's tier defaults (`combo-*` for
+   9router, `auto/best-*` aliases for OmniRoute).
 8. Runtime secrets stay outside Git.
 9. Privileged execution requires explicit enablement and approval.
-10. 9router and OmniRoute remain in separate branches.
+10. The router backend is a profile choice; both backends are maintained on `main`.
 
 ---
 
-# Current Branch State
+# Current Router State
 
 ```text
 Branch: main
-    Smart Router: v0.5.1
-Backend: 9router
-Smart Router upstream: http://nine-router:20128/v1
+    Smart Router: v0.5.9
+Backend: selected by COMPOSE_PROFILES (9router or omniroute)
+9router upstream:  http://nine-router:20128/v1
+OmniRoute upstream: http://omniroute:20129/v1
+OmniRoute health:   http://omniroute:20128/api/monitoring/health
 
-Fast:     combo-fast
-Standard: combo-standard
-Strong:   combo-strong
+Fast/standard/strong: combo-* (9router) or auto/best-* (OmniRoute)
 
 Recommended initial router mode: observe
 ```
