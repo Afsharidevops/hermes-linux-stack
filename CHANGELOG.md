@@ -5,6 +5,21 @@ Older component-specific history remains in the component release-note files and
 
 The current runtime release is **v0.5.9**.
 
+## Hermes Linux Stack — Smart Router synced with the client protocol work (2026-09-12)
+
+- `smart-router` gains the Responses and Anthropic Messages protocols so Codex
+  (`wire_api = "responses"`) and Claude Code (`ANTHROPIC_BASE_URL`) can use the
+  router with their full tool loops. `POST /v1/responses`, `POST /v1/messages`,
+  `POST /v1/messages/count_tokens`, the Anthropic-shaped `GET /v1/models`, and
+  the `GET /v1/tools` registry endpoint are the same code as in the Content
+  Manager tree, so both stacks serve one identical router image.
+- `examples/clients/` ships a ready-to-copy Codex `config.toml`, a Claude Code
+  environment file, and a verification checklist.
+- `publish-smart-router.yml` now also triggers on pushes that touch
+  `smart-router/**` or the workflow file, and derives the image version from
+  `smart-router/pyproject.toml` when no manual version is given, so a merged
+  router change reaches Docker Hub without a manual dispatch.
+
 ## Hermes Linux Stack — selectable router backend (2026-09-09)
 
 - `install.sh` now asks on fresh installs whether to use the `9router` or the
