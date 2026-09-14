@@ -5,13 +5,68 @@ image:
   tag: "0.6.1"
   pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+
 service:
   type: ClusterIP
   port: 8080
 
 upstream:
-  baseUrl: http://nine-router:20128/v1
-  healthUrl: http://nine-router:20128/api/health
+  # Leave both empty to let the chart point the router at the optional
+  # in-cluster upstream (9router or OmniRoute). Set them explicitly for an
+  # external gateway.
+  baseUrl: ""
+  healthUrl: ""
+
+# Optional in-cluster model gateway. When enabled together with
+# upstreamServer.backend, the chart deploys 9router or OmniRoute and points the
+# Smart Router at it. Disable it and set upstream.baseUrl/healthUrl for an
+# external gateway.
+upstreamServer:
+  enabled: false
+  backend: 9router  # 9router | omniroute
+  nineRouter:
+    image:
+      repository: decolua/9router
+      tag: latest
+      pullPolicy: IfNotPresent
+    port: 20128
+    # The gateway needs JWT_SECRET, INITIAL_PASSWORD, API_KEY_SECRET, and
+    # MACHINE_ID_SALT (plus REQUIRE_API_KEY/AUTH_COOKIE_SECURE when used).
+    # Point existingSecret at a Secret whose keys are exactly those env names.
+    existingSecret: ""
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  omniRoute:
+    image:
+      repository: diegosouzapw/omniroute
+      tag: latest
+      pullPolicy: IfNotPresent
+    dashboardPort: 20128
+    apiPort: 20129
+    # OmniRoute also needs OMNIROUTE_API_KEY, STORAGE_ENCRYPTION_KEY,
+    # MACHINE_ID_SALT, and OMNIROUTE_WS_BRIDGE_SECRET.
+    existingSecret: ""
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 384Mi
+      limits:
+        cpu: "1"
+        memory: 1536Mi
 
 router:
   mode: observe

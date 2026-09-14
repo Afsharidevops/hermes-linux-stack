@@ -17,6 +17,7 @@ spec:
     spec:
       serviceAccountName: {{ include "hermes.name" . }}
       automountServiceAccountToken: false
+      {{- include "hermes.imagePullSecrets" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -39,8 +40,8 @@ spec:
             - {name: SMART_ROUTER_MODE, value: {{ .Values.router.mode | quote }}}
             - {name: SMART_ROUTER_POLICY, value: {{ .Values.router.policy | quote }}}
             - {name: SMART_ROUTER_REQUIRE_AUTH, value: {{ .Values.router.requireAuth | quote }}}
-            - {name: SMART_ROUTER_UPSTREAM_BASE_URL, value: {{ .Values.upstream.baseUrl | quote }}}
-            - {name: SMART_ROUTER_UPSTREAM_HEALTH_URL, value: {{ .Values.upstream.healthUrl | quote }}}
+            - {name: SMART_ROUTER_UPSTREAM_BASE_URL, value: {{ include "hermes.upstreamBaseUrl" . | quote }}}
+            - {name: SMART_ROUTER_UPSTREAM_HEALTH_URL, value: {{ include "hermes.upstreamHealthUrl" . | quote }}}
             - {name: SMART_ROUTER_FAST_MODEL, value: {{ .Values.router.fastModel | quote }}}
             - {name: SMART_ROUTER_STANDARD_MODEL, value: {{ .Values.router.standardModel | quote }}}
             - {name: SMART_ROUTER_STRONG_MODEL, value: {{ .Values.router.strongModel | quote }}}
