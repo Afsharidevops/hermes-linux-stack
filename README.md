@@ -14,6 +14,7 @@ A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent
 - [Operations Center user guide](docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.9.md)
 - [Multi-agent orchestration](docs/ORCHESTRATION.md) - plan, approve/reject, review
 - [Release process](docs/RELEASE-PROCESS.md)
+- [Smart Router complete user guide](docs/SMART-ROUTER-USER-GUIDE.md) - every Operations Center page, client API, recipes, configuration, and troubleshooting
 - [Smart Router client API](docs/SMART-ROUTER-CLIENT-API.md)
 - [Smart Router Docker Hub notes](docs/publishing/SMART-ROUTER-DOCKERHUB.md)
 - [Execution Broker Docker Hub notes](docs/publishing/EXECUTION-BROKER-DOCKERHUB.md)
