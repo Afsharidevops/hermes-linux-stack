@@ -60,11 +60,11 @@ spec:
             - name: SMART_ROUTER_PG_PASSWORD
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.existingSecret }}, key: postgres-password}}
             - name: SMART_ROUTER_CONTROL_DATABASE_URL
-              value: "postgresql+psycopg://{{ .Values.postgres.user }}:$(SMART_ROUTER_PG_PASSWORD)@{{ include \"hermes.name\" . }}-postgres:5432/{{ .Values.postgres.database }}"
+              value: {{ printf "postgresql+psycopg://%s:$(SMART_ROUTER_PG_PASSWORD)@%s-postgres:5432/%s" .Values.postgres.user (include "hermes.name" .) .Values.postgres.database | quote }}
             - name: SMART_ROUTER_REDIS_PASSWORD
               valueFrom: {secretKeyRef: {name: {{ .Values.secrets.existingSecret }}, key: redis-password}}
             - name: SMART_ROUTER_REDIS_URL
-              value: "redis://:$(SMART_ROUTER_REDIS_PASSWORD)@{{ include \"hermes.name\" . }}-redis:6379/0"
+              value: {{ printf "redis://:$(SMART_ROUTER_REDIS_PASSWORD)@%s-redis:6379/0" (include "hermes.name" .) | quote }}
             - {name: SMART_ROUTER_REDIS_REQUIRED, value: "true"}
           readinessProbe:
             httpGet: {path: /ready, port: http}

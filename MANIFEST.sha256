@@ -34,7 +34,7 @@ a27c1321a8215aa9adaadce4aef53c733f221e18b3438c52ac33735624e37b74  ./deploy/helm/
 09a730ea280f14f664d64cc72cf014c8c6e03c3646481ec0ef668f249fdec4f7  ./deploy/helm/hermes-linux-stack/templates/policy.yaml
 28c8f937de4bcc8b43e311549d07e5a3909ba14b10159335a7089bd589556c36  ./deploy/helm/hermes-linux-stack/templates/postgres.yaml
 fe5ebbc8aed343cfb068cb026856456fdd542b6d2fdc40346907c70bed1dfaa4  ./deploy/helm/hermes-linux-stack/templates/redis.yaml
-6db31180b414381756a64885a2dbfb4e4df74b2fffe75c19b94c1a54bbc9efb6  ./deploy/helm/hermes-linux-stack/templates/router.yaml
+5fd99768bc30d65cd385f39ca2b76feed56a1cc4be676bb454f38fb7c8a54f9b  ./deploy/helm/hermes-linux-stack/templates/router.yaml
 f123278b4c0cb59bcf3bd2294bac94b497a98ee9fde6dbf703137e3cc89be5e7  ./deploy/helm/hermes-linux-stack/templates/serviceaccount.yaml
 d24a8738e82c794ed445c9675a44293a15c097a90814cc6adc304667a3506263  ./deploy/helm/hermes-linux-stack/values.yaml
 2712ac46d1f7cd1bff2cfa35c41a0f44db7e19350b430c8ae512192ab4423323  ./docker-compose.yml
