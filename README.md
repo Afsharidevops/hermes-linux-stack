@@ -12,6 +12,7 @@ A self-hosted Linux stack for running **Hermes Agent**, its **Telegram bot/agent
 
 - [Canonical changelog](CHANGELOG.md)
 - [Operations Center user guide](docs/HERMES-OPERATIONS-CENTER-USER-GUIDE-v0.5.9.md)
+- [Multi-agent orchestration](docs/ORCHESTRATION.md) - plan, approve/reject, review
 - [Release process](docs/RELEASE-PROCESS.md)
 - [Smart Router client API](docs/SMART-ROUTER-CLIENT-API.md)
 - [Smart Router Docker Hub notes](docs/publishing/SMART-ROUTER-DOCKERHUB.md)
@@ -29,7 +30,7 @@ Hermes Telegram Agent
      ▼
 Hermes Agent ───────────────┐
                             │
-Open WebUI ─────────────────┼──► Hermes Smart Router v0.5.9
+Open WebUI ─────────────────┼──► Hermes Smart Router v0.6.1
                             │              │
 n8n / other clients ────────┘              │
                                            ├─ fast     → backend tier default
@@ -55,7 +56,7 @@ route-profile aliases, and the Hermes/Open WebUI/n8n client connections.
 Hermes / Telegram / Open WebUI / n8n
                   │
                   ▼
-          Smart Router v0.5.9
+          Smart Router v0.6.1
                   │
                   ▼
         9router / OmniRoute
@@ -893,7 +894,7 @@ OCI release digest:
 
 ```text
 Branch: main
-    Smart Router: v0.5.9
+    Smart Router: v0.6.1
 Backend: selected by COMPOSE_PROFILES (9router or omniroute)
 9router upstream:  http://nine-router:20128/v1
 OmniRoute upstream: http://omniroute:20129/v1

@@ -5,6 +5,37 @@ Older component-specific history remains in the component release-note files and
 
 The current runtime release is **v0.5.9**.
 
+## Hermes Linux Stack — Smart Router 0.6.1 with the multi-agent Orchestrator (2026-09-14)
+
+- `smart-router` gains the multi-agent **Orchestrator**: a planner turns one
+  operator task into a validated machine-readable plan, the supervisor executes
+  the steps through the registered agents, a sensitive step pauses the run in
+  `awaiting_approval` until an operator approves or rejects it, and a reviewer
+  pass records a verdict with an optional rollback suggestion. The planner
+  reuses the recent completed runs as history, so repeating a task stays
+  consistent with what was done before. Runs and steps persist in
+  `v60_agent_runs` and `v60_agent_run_steps`; the compatibility filename
+  `control-v0.5.2.sqlite3` is unchanged and the in-place schema marker moves to
+  `0.6.0`.
+- Approval gating is deterministic: the planner flag, a dangerous-operation
+  pattern, or a step tool that is registered as high risk or missing from the
+  plugin registry. Tool names stay declarative for the plan and the audit log;
+  execution remains with the Execution Broker.
+- `SMART_ROUTER_ORCHESTRATOR_APPROVAL_MODE` (`auto`),
+  `SMART_ROUTER_ORCHESTRATOR_PLANNER_TIER` (`standard`), and
+  `SMART_ROUTER_ORCHESTRATOR_REVIEWER_TIER` (`strong`) control the flow in
+  `.env` and in `deploy/helm/hermes-linux-stack`. See
+  [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md).
+- The Operations Center adopts the Content Console design language: the
+  LocalLab gradient palette, glass surfaces, gradient accents, and the LocalLab
+  mark on the login and sidebar brand.
+- `smart-router` 0.6.1 keeps buffered chat clients on the JSON contract: a
+  request that omits `stream` reaches the upstream with an explicit
+  `stream: false`, and a `text/event-stream` answer to a buffered request is
+  collapsed into one `chat.completion` JSON body. Orchestration runs no longer
+  abort against a gateway that streams by default.
+- Smart Router release: `afsharidevops/hermes-smart-router:0.6.1`.
+
 ## Hermes Linux Stack — Smart Router synced with the client protocol work (2026-09-12)
 
 - `smart-router` gains the Responses and Anthropic Messages protocols so Codex
